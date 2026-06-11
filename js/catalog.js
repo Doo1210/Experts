@@ -40,6 +40,7 @@ window.CATEGORY_MAP = {
 
 window.TAG_COLORS = ['tag-blue', 'tag-green', 'tag-orange', 'tag-purple', 'tag-teal'];
 
+/** 专家对话任务状态（/experts/:id/tasks） */
 window.TASK_STATUS_LABEL = {
   pending: '待开始',
   running: '进行中',
@@ -56,4 +57,32 @@ window.TASK_STATUS_TYPE = {
   completed: 'success',
   failed: 'danger',
   archived: 'info'
+};
+
+/** 项目子任务执行状态（/projects/:id） */
+window.PROJECT_TASK_STATUS_LABEL = {
+  queued: '排队中',
+  thinking: '思考中',
+  running: '执行中',
+  tool: '工具调用',
+  waiting: '待审批',
+  done: '已完成',
+  error: '异常阻塞'
+};
+
+window.PROJECT_TASK_STATUS_TYPE = {
+  queued: 'info',
+  thinking: 'primary',
+  running: 'primary',
+  tool: 'warning',
+  waiting: 'warning',
+  done: 'success',
+  error: 'danger'
+};
+
+window.ARTIFACT_TYPE_LABEL = {
+  document: '文档',
+  report: '报告',
+  data: '数据',
+  file: '文件'
 };
