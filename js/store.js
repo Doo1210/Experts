@@ -257,7 +257,8 @@
       permissions: {},
       workspaceFiles: {},
       taskArtifacts: [],
-      demoSyncVersion: null
+      demoSyncVersion: null,
+      projectTaskSchemaVersion: null
     };
   }
 
@@ -423,8 +424,8 @@
       var ptDevice = uid();
       state.projectTasks = [
         { id: ptSpc, projectId: p1.id, title: 'SPC 数据分析', status: 'queued', expertId: seedExperts[4].id, sortOrder: 0 },
-        { id: ptRoot, projectId: p1.id, title: '良率根因分析', status: 'tool', expertId: seedExperts[0].id, sortOrder: 1 },
-        { id: ptDevice, projectId: p1.id, title: '设备关联分析', status: 'thinking', expertId: seedExperts[2].id, sortOrder: 2 },
+        { id: ptRoot, projectId: p1.id, title: '良率根因分析', status: 'done', expertId: seedExperts[0].id, sortOrder: 1 },
+        { id: ptDevice, projectId: p1.id, title: '设备关联分析', status: 'running', expertId: seedExperts[2].id, sortOrder: 2 },
         { id: uid(), projectId: p2.id, title: '需求预测建模', status: 'running', expertId: seedExperts[3].id, sortOrder: 0 },
         { id: uid(), projectId: p2.id, title: '数据治理规范', status: 'running', expertId: seedExperts[5].id, sortOrder: 1 },
         { id: uid(), projectId: p2.id, title: '多工厂仿真验证', status: 'queued', expertId: null, sortOrder: 2 }
@@ -464,7 +465,7 @@
       }) || members[0];
       return [
         { id: uid(), projectId: p.id, title: 'SPC 数据分析', status: 'queued', expertId: quality.expertId, sortOrder: 0 },
-        { id: uid(), projectId: p.id, title: '良率根因分析', status: 'running', expertId: lead.expertId, sortOrder: 1 },
+        { id: uid(), projectId: p.id, title: '良率根因分析', status: 'done', expertId: lead.expertId, sortOrder: 1 },
         { id: uid(), projectId: p.id, title: '设备关联分析', status: 'running', expertId: device.expertId, sortOrder: 2 }
       ];
     }
@@ -557,6 +558,66 @@
       }
     });
     if (updated) persist();
+  }
+
+  function normalizeProjectTaskStatus(status) {
+    if (status === 'done' || status === 'queued' || status === 'running') return status;
+    if (status === 'thinking' || status === 'tool' || status === 'waiting' || status === 'error') return 'running';
+    return 'queued';
+  }
+
+  function projectTaskStatusRank(status) {
+    var s = normalizeProjectTaskStatus(status);
+    if (s === 'done') return 0;
+    if (s === 'running') return 1;
+    return 2;
+  }
+
+  var DEMO_PROJECT_TASK_STATUSES = {
+    'SPC 数据分析': 'queued',
+    '良率根因分析': 'done',
+    '设备关联分析': 'running',
+    '需求预测建模': 'running',
+    '数据治理规范': 'running',
+    '多工厂仿真验证': 'queued',
+    '任务拆解': 'queued',
+    '数据收集': 'queued',
+    '分析报告': 'running',
+    '评审闭环': 'done'
+  };
+
+  var LEGACY_PROJECT_TASK_STATUSES = {
+    thinking: true, tool: true, waiting: true, error: true
+  };
+
+  function migrateProjectTaskStatus() {
+    var SCHEMA = 2;
+    if ((state.projectTaskSchemaVersion || 0) >= SCHEMA) {
+      var touched = false;
+      (state.projectTasks || []).forEach(function (t) {
+        var next = normalizeProjectTaskStatus(t.status);
+        if (next !== t.status) {
+          t.status = next;
+          touched = true;
+        }
+      });
+      if (touched) persist();
+      return;
+    }
+
+    var updated = false;
+    (state.projectTasks || []).forEach(function (t) {
+      var legacyStatus = t.status;
+      var canonical = DEMO_PROJECT_TASK_STATUSES[t.title];
+      var next = canonical || normalizeProjectTaskStatus(legacyStatus);
+      if (LEGACY_PROJECT_TASK_STATUSES[legacyStatus] && canonical) next = canonical;
+      if (next !== t.status) {
+        t.status = next;
+        updated = true;
+      }
+    });
+    state.projectTaskSchemaVersion = SCHEMA;
+    persist();
   }
 
   function migrateProjectTasks() {
@@ -747,6 +808,7 @@
       migrateProjectsVisibility();
       migrateProjectTasks();
       migrateProjectTaskTitles();
+      migrateProjectTaskStatus();
       migrateProjectFiles();
       migrateProjectMessageTypes();
       syncDemoData();
@@ -1069,15 +1131,23 @@
     getProjectTasks: function (projectId) {
       return (state.projectTasks || [])
         .filter(function (t) { return t.projectId === projectId; })
-        .sort(function (a, b) { return (a.sortOrder || 0) - (b.sortOrder || 0); })
         .map(function (t) {
           var expert = t.expertId ? AppStore.getExpert(t.expertId) : null;
+          var status = normalizeProjectTaskStatus(t.status);
           return Object.assign({}, t, {
+            status: status,
             expert: expert,
             assigneeLabel: expert ? expert.name : '待分配'
           });
+        })
+        .sort(function (a, b) {
+          var ra = projectTaskStatusRank(a.status);
+          var rb = projectTaskStatusRank(b.status);
+          if (ra !== rb) return ra - rb;
+          return (a.sortOrder || 0) - (b.sortOrder || 0);
         });
     },
+    normalizeProjectTaskStatus: normalizeProjectTaskStatus,
     getProjectFiles: function (projectId) {
       return (state.projectFiles || [])
         .filter(function (f) { return f.projectId === projectId; })

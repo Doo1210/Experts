@@ -59,25 +59,24 @@ window.TASK_STATUS_TYPE = {
   archived: 'info'
 };
 
-/** 项目子任务执行状态（/projects/:id） */
+/** 项目子任务执行状态（/projects/:id）— 仅三种，与专家对话任务状态体系不同 */
 window.PROJECT_TASK_STATUS_LABEL = {
   queued: '排队中',
-  thinking: '思考中',
-  running: '执行中',
-  tool: '工具调用',
-  waiting: '待审批',
-  done: '已完成',
-  error: '异常阻塞'
+  running: '运行中',
+  done: '已完成'
 };
 
 window.PROJECT_TASK_STATUS_TYPE = {
   queued: 'info',
-  thinking: 'primary',
   running: 'primary',
-  tool: 'warning',
-  waiting: 'warning',
-  done: 'success',
-  error: 'danger'
+  done: 'success'
+};
+
+/** 将历史细粒度状态归并为三种项目任务状态 */
+window.normalizeProjectTaskStatus = function (status) {
+  if (status === 'done' || status === 'queued' || status === 'running') return status;
+  if (status === 'thinking' || status === 'tool' || status === 'waiting' || status === 'error') return 'running';
+  return 'queued';
 };
 
 window.ARTIFACT_TYPE_LABEL = {

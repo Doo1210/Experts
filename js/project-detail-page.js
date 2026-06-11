@@ -40,12 +40,33 @@
       var previewVisible = Vue.ref(false);
       var selectedProjectTaskId = Vue.ref(null);
 
+      function normalizeTaskStatus(status) {
+        if (store.normalizeProjectTaskStatus) return store.normalizeProjectTaskStatus(status);
+        if (status === 'done' || status === 'queued' || status === 'running') return status;
+        if (status === 'thinking' || status === 'tool' || status === 'waiting' || status === 'error') return 'running';
+        return 'queued';
+      }
+
+      var PROJECT_TASK_STATUS_TEXT = {
+        queued: '排队中',
+        running: '运行中',
+        done: '已完成'
+      };
+
+      var PROJECT_TASK_STATUS_TAG = {
+        queued: 'info',
+        running: 'primary',
+        done: 'success'
+      };
+
       function taskStatusLabel(status) {
-        return catalog.PROJECT_TASK_STATUS_LABEL[status] || status;
+        var key = normalizeTaskStatus(status);
+        return PROJECT_TASK_STATUS_TEXT[key] || '排队中';
       }
 
       function taskStatusType(status) {
-        return catalog.PROJECT_TASK_STATUS_TYPE[status] || 'info';
+        var key = normalizeTaskStatus(status);
+        return PROJECT_TASK_STATUS_TAG[key] || 'info';
       }
 
       function taskDisplayTitle(task) {
@@ -63,7 +84,11 @@
       }
 
       function isTaskDone(task) {
-        return task.status === 'done';
+        return normalizeTaskStatus(task.status) === 'done';
+      }
+
+      function taskStatusClass(task) {
+        return 'status-' + normalizeTaskStatus(task.status);
       }
 
       function load() {
@@ -84,7 +109,7 @@
 
       var todoStats = Vue.computed(function () {
         var total = projectTasks.value.length;
-        var done = projectTasks.value.filter(function (t) { return t.status === 'done'; }).length;
+        var done = projectTasks.value.filter(function (t) { return normalizeTaskStatus(t.status) === 'done'; }).length;
         return {
           total: total,
           done: done,
@@ -322,8 +347,8 @@
         triggerFileUpload: chatFiles.triggerFileUpload, handleFileSelect: chatFiles.handleFileSelect,
         removePendingFile: chatFiles.removePendingFile, formatFileSize: chatFiles.formatFileSize,
         previewItem: previewItem, previewVisible: previewVisible,
-        taskStatusLabel: taskStatusLabel, taskStatusType: taskStatusType, taskDisplayTitle: taskDisplayTitle,
-        isTaskDone: isTaskDone,
+        taskStatusLabel: taskStatusLabel, taskStatusType: taskStatusType, taskStatusClass: taskStatusClass,
+        taskDisplayTitle: taskDisplayTitle, isTaskDone: isTaskDone,
         selectChatTarget: selectChatTarget,
         selectProjectTask: selectProjectTask,
         selectedProjectTaskId: selectedProjectTaskId,
@@ -395,7 +420,7 @@
                     v-for="t in projectTasks"\
                     :key="\'todo-\' + t.id"\
                     class="task-todo-item"\
-                    :class="{ \'is-done\': isTaskDone(t), \'is-active\': selectedProjectTaskId === t.id, [\'status-\' + t.status]: true }"\
+                    :class="{ \'is-done\': isTaskDone(t), \'is-active\': selectedProjectTaskId === t.id, [taskStatusClass(t)]: true }"\
                     @click="selectProjectTask(t)">\
                     <span class="task-todo-check" :class="{ checked: isTaskDone(t) }">\
                       <svg v-if="isTaskDone(t)" viewBox="0 0 12 12" width="10" height="10" fill="none" stroke="currentColor" stroke-width="2.2">\
