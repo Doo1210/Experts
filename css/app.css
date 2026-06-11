@@ -1848,13 +1848,9 @@ body {
   border-color: #a8c4ff; background: #f0f5ff;
   box-shadow: 0 2px 10px rgba(64, 128, 255, 0.12);
 }
-.task-todo-item.status-thinking,
 .task-todo-item.status-running { border-left-color: #4080ff; }
-.task-todo-item.status-tool { border-left-color: #e6a23c; }
-.task-todo-item.status-waiting { border-left-color: #909399; }
 .task-todo-item.status-done,
 .task-todo-item.is-done { border-left-color: #67c23a; opacity: 0.92; }
-.task-todo-item.status-error { border-left-color: #f56c6c; }
 .task-todo-item.status-queued { border-left-color: #c0c4cc; }
 
 .task-todo-check {
@@ -1884,13 +1880,9 @@ body {
   flex-shrink: 0; white-space: nowrap; font-weight: 500;
 }
 .task-todo-item.status-queued .task-todo-badge { background: #f4f4f5; color: #909399; }
-.task-todo-item.status-thinking .task-todo-badge,
 .task-todo-item.status-running .task-todo-badge { background: #ecf3ff; color: #4080ff; }
-.task-todo-item.status-tool .task-todo-badge { background: #fdf6ec; color: #e6a23c; }
-.task-todo-item.status-waiting .task-todo-badge { background: #f4f4f5; color: #606266; }
 .task-todo-item.status-done .task-todo-badge,
 .task-todo-item.is-done .task-todo-badge { background: #f0f9eb; color: #67c23a; }
-.task-todo-item.status-error .task-todo-badge { background: #fef0f0; color: #f56c6c; }
 
 .task-todo-expert-row {
   display: flex; align-items: center; gap: 6px;
