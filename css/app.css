@@ -488,11 +488,11 @@ body {
   transition: background 0.18s;
 }
 .task-item.active .task-item-accent { background: linear-gradient(180deg, #4080ff, #69b1ff); }
-.task-item-row { display: flex; align-items: center; gap: 10px; }
+.task-item-row { display: flex; align-items: stretch; gap: 8px; }
 .task-status-indicator {
   flex-shrink: 0; width: 16px; align-self: center;
   display: flex; align-items: center; justify-content: center;
-  cursor: default;
+  cursor: default; margin-top: 1px;
 }
 .task-status-spinner-wrap,
 .task-status-dot-wrap {
@@ -511,39 +511,42 @@ body {
   background: #b8bcc4; box-shadow: 0 0 0 3px rgba(184, 188, 196, 0.18);
 }
 @keyframes task-status-spin { to { transform: rotate(360deg); } }
-.task-item-content { flex: 1; min-width: 0; padding-right: 2px; }
+.task-item-content { flex: 1; min-width: 0; padding-right: 4px; display: flex; flex-direction: column; justify-content: center; gap: 5px; }
 .task-item-title {
-  font-size: 13px; font-weight: 600; line-height: 1.45; word-break: break-word;
+  font-size: 13px; font-weight: 600; line-height: 1.35;
   color: var(--text-primary);
-  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .task-item.active .task-item-title { color: #2b6de5; }
 .task-item-meta {
   display: inline-flex; align-items: center; gap: 4px;
-  font-size: 11px; color: var(--text-muted); margin-top: 6px;
+  font-size: 11px; color: var(--text-muted);
 }
 .task-item-meta-icon { flex-shrink: 0; opacity: 0.75; }
 .task-item-toolbar {
-  flex-shrink: 0; display: flex; flex-direction: row; align-items: center; justify-content: flex-end; gap: 6px;
+  flex-shrink: 0; display: flex; flex-direction: column; align-items: flex-end;
+  justify-content: space-between; gap: 6px; min-width: 44px; margin: -1px 0;
 }
+.task-item-toolbar-top,
+.task-item-toolbar-bottom { display: flex; justify-content: flex-end; align-items: center; }
 .task-artifact-link {
-  display: inline-flex; align-items: center; gap: 4px;
-  padding: 3px 7px 3px 4px; border: 1px solid #e8ecf0; border-radius: 999px;
+  display: inline-flex; align-items: center; gap: 3px;
+  padding: 2px 6px 2px 4px; border: 1px solid #e8ecf0; border-radius: 999px;
   background: #fafbfc; color: var(--text-secondary); font-size: 10px; font-weight: 500;
-  cursor: pointer; white-space: nowrap;
+  cursor: pointer; white-space: nowrap; line-height: 1;
   transition: background 0.15s, color 0.15s, border-color 0.15s, box-shadow 0.15s;
 }
 .task-artifact-link-icon {
   display: flex; align-items: center; justify-content: center;
-  width: 18px; height: 18px; border-radius: 50%;
+  width: 16px; height: 16px; border-radius: 50%;
   background: #eef2f7; color: var(--text-muted);
   transition: background 0.15s, color 0.15s;
 }
 .task-artifact-link-text { line-height: 1; font-size: 10px; }
 .task-artifact-badge {
-  min-width: 14px; height: 14px; padding: 0 3px; border-radius: 7px;
+  min-width: 13px; height: 13px; padding: 0 3px; border-radius: 7px;
   background: #e8ecf0; color: var(--text-secondary);
-  font-size: 9px; font-weight: 700; line-height: 14px; text-align: center;
+  font-size: 9px; font-weight: 700; line-height: 13px; text-align: center;
 }
 .task-artifact-link:hover {
   background: #fff; color: var(--primary); border-color: rgba(64, 128, 255, 0.28);
@@ -565,14 +568,11 @@ body {
 }
 .task-more-btn {
   display: flex; align-items: center; justify-content: center;
-  width: 28px; height: 28px; border: 1px solid transparent; border-radius: 8px;
-  background: #f5f7fa; color: var(--text-muted); cursor: pointer;
-  transition: background 0.15s, color 0.15s, border-color 0.15s, box-shadow 0.15s;
+  width: 20px; height: 20px; padding: 0; border: none; border-radius: 0;
+  background: transparent; color: var(--text-muted); cursor: pointer;
+  transition: color 0.15s;
 }
-.task-more-btn:hover {
-  background: #fff; color: var(--text-secondary);
-  border-color: var(--border); box-shadow: 0 2px 8px rgba(15, 23, 42, 0.06);
-}
+.task-more-btn:hover { color: var(--text-secondary); }
 .task-action-btn {
   display: flex; align-items: center; justify-content: center;
   width: 26px; height: 26px; border: none; border-radius: 4px;
