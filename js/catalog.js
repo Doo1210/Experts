@@ -85,3 +85,75 @@ window.ARTIFACT_TYPE_LABEL = {
   data: '数据',
   file: '文件'
 };
+
+/** 技能参数预设 */
+window.SKILL_PARAM_SCHEMAS = {
+  'skill-yield': [
+    { key: 'confidenceThreshold', label: '置信度阈值', type: 'number', default: 0.85, min: 0.5, max: 0.99, step: 0.01 },
+    { key: 'dataSource', label: '数据源', type: 'select', options: ['MES 实时数据', '历史数据仓库', '手动上传'], default: 'MES 实时数据' },
+    { key: 'outputFormat', label: '输出格式', type: 'select', options: ['分析报告', '数据表格', '图表仪表盘'], default: '分析报告' }
+  ],
+  'skill-spc': [
+    { key: 'chartType', label: '控制图类型', type: 'select', options: ['X-bar R', 'X-bar S', 'I-MR', 'P 图'], default: 'X-bar R' },
+    { key: 'rules', label: '判异规则', type: 'checkbox', options: ['超出控制限', '连续7点同侧', '连续7点上升', '连续7点下降'], default: ['超出控制限'] }
+  ],
+  'skill-pm': [
+    { key: 'monitorInterval', label: '监测周期(小时)', type: 'number', default: 24, min: 1, max: 168 },
+    { key: 'alertThreshold', label: '告警阈值', type: 'number', default: 0.8, min: 0.5, max: 0.99, step: 0.01 },
+    { key: 'sensorTypes', label: '传感器类型', type: 'checkbox', options: ['振动', '温度', '压力', '电流'], default: ['振动', '温度'] }
+  ],
+  'skill-vision': [
+    { key: 'modelType', label: '模型类型', type: 'select', options: ['通用检测', '精细分类', '语义分割'], default: '通用检测' },
+    { key: 'confidenceThreshold', label: '置信度阈值', type: 'number', default: 0.9, min: 0.5, max: 0.99, step: 0.01 }
+  ],
+  'skill-supply': [
+    { key: 'forecastHorizon', label: '预测周期(天)', type: 'number', default: 30, min: 7, max: 365 },
+    { key: 'safetyStockLevel', label: '安全库存系数', type: 'number', default: 1.5, min: 1.0, max: 3.0, step: 0.1 },
+    { key: 'considerSeasonality', label: '考虑季节性', type: 'select', options: ['是', '否'], default: '是' }
+  ],
+  'skill-ehs': [
+    { key: 'standard', label: '合规标准', type: 'select', options: ['ISO 14001', 'ISO 45001', 'GB/T 33000', '自定义'], default: 'ISO 14001' },
+    { key: 'riskLevel', label: '风险等级阈值', type: 'select', options: ['低', '中', '高', '重大'], default: '中' }
+  ],
+  'skill-integration': [
+    { key: 'protocol', label: '对接协议', type: 'select', options: ['REST API', 'MQTT', 'OPC UA', 'WebSocket'], default: 'REST API' },
+    { key: 'dataFormat', label: '数据格式', type: 'select', options: ['JSON', 'XML', 'CSV', 'Protobuf'], default: 'JSON' }
+  ],
+  'skill-energy': [
+    { key: 'baselinePeriod', label: '基线周期(月)', type: 'number', default: 12, min: 1, max: 36 },
+    { key: 'targetReduction', label: '节能目标(%)', type: 'number', default: 10, min: 1, max: 50 }
+  ]
+};
+
+/** 工具参数预设 */
+window.TOOL_PARAM_SCHEMAS = {
+  'tool-mes': [
+    { key: 'endpoint', label: 'API Endpoint', type: 'text', required: true, placeholder: 'https://mes.example.com/api' },
+    { key: 'apiKey', label: 'API Key', type: 'password', required: true },
+    { key: 'timeout', label: '超时时间(秒)', type: 'number', default: 30, min: 5, max: 120 },
+    { key: 'retries', label: '重试次数', type: 'number', default: 3, min: 0, max: 10 }
+  ],
+  'tool-spc-api': [
+    { key: 'endpoint', label: 'API Endpoint', type: 'text', required: true, placeholder: 'https://spc.example.com/api' },
+    { key: 'apiKey', label: 'API Key', type: 'password', required: true },
+    { key: 'timeout', label: '超时时间(秒)', type: 'number', default: 60, min: 10, max: 300 }
+  ],
+  'tool-file': [
+    { key: 'serverUrl', label: 'MCP Server 地址', type: 'text', required: true, placeholder: 'http://localhost:8080/mcp' },
+    { key: 'authType', label: '认证方式', type: 'select', options: ['无认证', 'Bearer Token', 'API Key'], default: '无认证' },
+    { key: 'authToken', label: '认证凭证', type: 'password' }
+  ],
+  'tool-web': [
+    { key: 'serverUrl', label: 'MCP Server 地址', type: 'text', required: true, placeholder: 'http://localhost:8081/mcp' },
+    { key: 'maxResults', label: '最大结果数', type: 'number', default: 10, min: 1, max: 50 }
+  ],
+  'tool-db': [
+    { key: 'connectionString', label: '连接字符串', type: 'text', required: true, placeholder: 'postgresql://user:pass@host:5432/db' },
+    { key: 'readOnly', label: '只读模式', type: 'select', options: ['是', '否'], default: '是' },
+    { key: 'maxRows', label: '最大返回行数', type: 'number', default: 1000, min: 100, max: 10000 }
+  ],
+  'tool-notify': [
+    { key: 'webhookUrl', label: 'Webhook URL', type: 'text', required: true, placeholder: 'https://hooks.example.com/notify' },
+    { key: 'channel', label: '推送渠道', type: 'select', options: ['企业微信', '钉钉', '飞书', '邮件'], default: '企业微信' }
+  ]
+};

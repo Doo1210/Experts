@@ -79,7 +79,8 @@
       }
 
       function handleExpertMenu(command, expert) {
-        if (command === 'edit') expertEdit.openEdit(expert);
+        if (command === 'preview') openPreview(expert);
+        else if (command === 'edit') expertEdit.openEdit(expert);
         else if (command === 'delete') removeExpert(expert);
       }
 
@@ -132,12 +133,13 @@
               </button>\
               <template #dropdown>\
                 <el-dropdown-menu>\
+                  <el-dropdown-item command="preview">预览</el-dropdown-item>\
                   <el-dropdown-item command="edit">编辑</el-dropdown-item>\
                   <el-dropdown-item command="delete" divided>删除</el-dropdown-item>\
                 </el-dropdown-menu>\
               </template>\
             </el-dropdown>\
-            <div class="expert-card-body" @click="openPreview(expert)">\
+            <div class="expert-card-body" @click="goTasks(expert)">\
               <div class="card-header">\
                 <img class="card-avatar" :src="expert.avatar" :alt="expert.name">\
                 <div class="card-header-text">\
@@ -243,8 +245,8 @@
       var projects = Vue.ref([]);
       var memories = Vue.ref([]);
       var memoryInput = Vue.ref('');
-      var skillIds = Vue.ref([]);
-      var toolIds = Vue.ref([]);
+      var skillBindings = Vue.ref([]);
+      var toolBindings = Vue.ref([]);
       var imChannels = Vue.ref([]);
       var permissions = Vue.ref([]);
       var materials = Vue.ref([]);
@@ -254,6 +256,45 @@
         getExpert: function () { return expert.value; },
         onSaved: function () { load(); }
       });
+
+      // ---- 任务 Tab 新增 ----
+      var taskSearchQuery = Vue.ref('');
+      var taskStatusFilter = Vue.ref('all');
+      var newTaskDialogVisible = Vue.ref(false);
+      var newTaskTitle = Vue.ref('');
+      var newTaskType = Vue.ref('dialogue');
+
+      // ---- 产物 Tab 新增 ----
+      var artifactSearchQuery = Vue.ref('');
+      var artifactTypeFilter = Vue.ref('all');
+      var artifactTaskFilter = Vue.ref('all');
+      var artifactPreviewVisible = Vue.ref(false);
+      var artifactPreviewItem = Vue.ref(null);
+
+      // ---- 权限管控 Tab 新增 ----
+      var permDialogVisible = Vue.ref(false);
+      var permForm = Vue.ref({ label: '', permission: 'use', subjectType: 'user', subjectId: '' });
+      var editingPermId = Vue.ref(null);
+
+      // ---- 资料 Tab 新增 ----
+      var materialFileInput = Vue.ref(null);
+      var materialTypeFilter = Vue.ref('all');
+      var materialSearchQuery = Vue.ref('');
+      var materialPreviewVisible = Vue.ref(false);
+      var materialPreviewItem = Vue.ref(null);
+      var MAX_UPLOAD_FILE_SIZE = 10 * 1024 * 1024;
+
+      // ---- 记忆 Tab 新增 ----
+      var memoryCategoryFilter = Vue.ref('all');
+      var memorySourceFilter = Vue.ref('all');
+      var memorySearchQuery = Vue.ref('');
+      var memoryCategoryInput = Vue.ref('other');
+
+      // ---- 人设 Tab 新增 ----
+      var personaPreviewTab = Vue.ref('coreDutyMd');
+      var personaHistoryVisible = Vue.ref(false);
+      var personaHistory = Vue.ref([]);
+      var personaImportInput = Vue.ref(null);
 
       function goAssignTask() {
         if (!expert.value) return;
@@ -267,11 +308,13 @@
         tasks.value = store.getTasksByExpert(props.expertId);
         projects.value = store.getProjectsByExpert(props.expertId);
         memories.value = store.getMemories(props.expertId);
-        skillIds.value = store.getSkillIds(props.expertId).slice();
-        toolIds.value = store.getToolIds(props.expertId).slice();
+        skillBindings.value = store.getSkillBindings(props.expertId);
+        toolBindings.value = store.getToolBindings(props.expertId);
         imChannels.value = store.getImChannels(props.expertId).length
-          ? store.getImChannels(props.expertId)
-          : catalog.IM_CHANNEL_TYPES.map(function (c) { return { type: c.id, label: c.label, enabled: false, config: '' }; });
+          ? store.getImChannels(props.expertId).map(function (c) {
+              return Object.assign({ subscriptions: [] }, c);
+            })
+          : catalog.IM_CHANNEL_TYPES.map(function (c) { return { type: c.id, label: c.label, enabled: false, config: '', subscriptions: [] }; });
         permissions.value = store.getPermissions(props.expertId).slice();
         materials.value = store.getWorkspaceFiles(props.expertId);
         expertArtifacts.value = store.getExpertArtifacts(props.expertId);
@@ -281,8 +324,8 @@
         store.savePersona(props.expertId, persona.value);
         ElementPlus.ElMessage.success('人设已保存');
       }
-      function saveSkills() { store.setSkillIds(props.expertId, skillIds.value); ElementPlus.ElMessage.success('技能已更新'); }
-      function saveTools() { store.setToolIds(props.expertId, toolIds.value); ElementPlus.ElMessage.success('工具已更新'); }
+      function saveSkillBindings() { store.setSkillBindings(props.expertId, skillBindings.value); ElementPlus.ElMessage.success('技能已更新'); }
+      function saveToolBindings() { store.setToolBindings(props.expertId, toolBindings.value); ElementPlus.ElMessage.success('工具已更新'); }
       function addMemory() {
         if (!memoryInput.value.trim()) return;
         store.addMemory(props.expertId, memoryInput.value.trim());
@@ -299,20 +342,539 @@
         materials.value = store.getWorkspaceFiles(props.expertId);
       }
 
+      // ---- 任务 Tab 方法 ----
+      var filteredTasks = Vue.computed(function () {
+        var list = tasks.value.filter(function (t) {
+          return taskSubTab.value === 'dialogue' ? t.type === 'dialogue' : t.type === 'project';
+        });
+        if (taskSearchQuery.value.trim()) {
+          var q = taskSearchQuery.value.trim().toLowerCase();
+          list = list.filter(function (t) { return (t.title || '').toLowerCase().indexOf(q) >= 0; });
+        }
+        if (taskStatusFilter.value !== 'all') {
+          list = list.filter(function (t) { return t.status === taskStatusFilter.value; });
+        }
+        return list;
+      });
+
+      var taskStats = Vue.computed(function () {
+        var list = tasks.value.filter(function (t) {
+          return taskSubTab.value === 'dialogue' ? t.type === 'dialogue' : t.type === 'project';
+        });
+        var counts = { total: list.length, pending: 0, running: 0, completed: 0, archived: 0 };
+        list.forEach(function (t) {
+          if (t.archived) counts.archived++;
+          else if (t.status === 'pending') counts.pending++;
+          else if (t.status === 'running') counts.running++;
+          else if (t.status === 'completed') counts.completed++;
+        });
+        return counts;
+      });
+
+      function openNewTaskDialog() {
+        newTaskTitle.value = '';
+        newTaskType.value = taskSubTab.value;
+        newTaskDialogVisible.value = true;
+      }
+
+      function submitNewTask() {
+        if (!newTaskTitle.value.trim()) return;
+        store.createTask({ expertId: props.expertId, title: newTaskTitle.value.trim(), type: newTaskType.value });
+        newTaskDialogVisible.value = false;
+        tasks.value = store.getTasksByExpert(props.expertId);
+        ElementPlus.ElMessage.success('任务已创建');
+      }
+
+      function editTaskTitle(task) {
+        ElementPlus.ElMessageBox.prompt('请输入任务名称', '编辑任务', {
+          confirmButtonText: '确定', cancelButtonText: '取消',
+          inputValue: task.title, inputPattern: /\S+/, inputErrorMessage: '名称不能为空'
+        }).then(function (result) {
+          store.updateTask(task.id, { title: result.value.trim(), titleSet: true });
+          tasks.value = store.getTasksByExpert(props.expertId);
+          ElementPlus.ElMessage.success('任务名称已更新');
+        }).catch(function () {});
+      }
+
+      function archiveTaskItem(task) {
+        store.archiveTask(task.id, true);
+        tasks.value = store.getTasksByExpert(props.expertId);
+        ElementPlus.ElMessage.success('任务已归档');
+      }
+
+      function deleteTaskItem(task) {
+        ElementPlus.ElMessageBox.confirm(
+          '确定删除该任务？相关对话与产物将一并删除。', '删除任务',
+          { confirmButtonText: '删除', cancelButtonText: '取消', type: 'warning' }
+        ).then(function () {
+          store.deleteTask(task.id);
+          tasks.value = store.getTasksByExpert(props.expertId);
+          ElementPlus.ElMessage.success('任务已删除');
+        }).catch(function () {});
+      }
+
+      // ---- 项目 Tab 方法 ----
+      function getProjectMemberInfo(projectId) {
+        var members = store.getProjectMembers(projectId);
+        var m = members.find(function (x) { return x.expertId === props.expertId; });
+        return m || null;
+      }
+
+      function getProjectTaskStats(projectId) {
+        var ptasks = store.getProjectTasks(projectId).filter(function (t) { return t.expertId === props.expertId; });
+        return {
+          done: ptasks.filter(function (t) { return t.status === 'done'; }).length,
+          total: ptasks.length
+        };
+      }
+
+      // ---- 产物 Tab 方法 ----
+      var filteredArtifacts = Vue.computed(function () {
+        var list = expertArtifacts.value;
+        if (artifactSearchQuery.value.trim()) {
+          var q = artifactSearchQuery.value.trim().toLowerCase();
+          list = list.filter(function (a) { return (a.title || '').toLowerCase().indexOf(q) >= 0; });
+        }
+        if (artifactTypeFilter.value !== 'all') {
+          list = list.filter(function (a) { return a.type === artifactTypeFilter.value; });
+        }
+        if (artifactTaskFilter.value !== 'all') {
+          list = list.filter(function (a) { return a.taskId === artifactTaskFilter.value; });
+        }
+        return list;
+      });
+
+      var artifactStats = Vue.computed(function () {
+        var counts = { total: expertArtifacts.value.length, report: 0, data: 0, document: 0 };
+        expertArtifacts.value.forEach(function (a) {
+          if (a.type === 'report') counts.report++;
+          else if (a.type === 'data') counts.data++;
+          else counts.document++;
+        });
+        return counts;
+      });
+
+      function openArtifactPreview(item) {
+        artifactPreviewItem.value = item;
+        artifactPreviewVisible.value = true;
+      }
+
+      function downloadArtifact(item) {
+        var blob = new Blob([item.content || item.title], { type: 'text/plain;charset=utf-8' });
+        var url = URL.createObjectURL(blob);
+        var a = document.createElement('a');
+        a.href = url;
+        a.download = (item.title || '产物') + '.txt';
+        a.click();
+        URL.revokeObjectURL(url);
+      }
+
+      function goToArtifactTask(taskId) {
+        if (!taskId) return;
+        ctx.emit('nav', '/experts/' + props.expertId + '/tasks/' + taskId);
+      }
+
+      // ---- 权限管控 Tab 方法 ----
+      function openAddPermDialog() {
+        editingPermId.value = null;
+        permForm.value = { label: '', permission: 'use', subjectType: 'user', subjectId: '' };
+        permDialogVisible.value = true;
+      }
+
+      function openEditPermDialog(perm) {
+        editingPermId.value = perm.id;
+        permForm.value = {
+          label: perm.label,
+          permission: perm.permission,
+          subjectType: perm.subjectType,
+          subjectId: perm.subjectId
+        };
+        permDialogVisible.value = true;
+      }
+
+      function submitPerm() {
+        if (!permForm.value.label.trim()) {
+          ElementPlus.ElMessage.warning('请填写授权对象名称');
+          return;
+        }
+        var list = permissions.value.slice();
+        if (editingPermId.value) {
+          var idx = list.findIndex(function (p) { return p.id === editingPermId.value; });
+          if (idx >= 0) {
+            list[idx] = Object.assign({}, list[idx], {
+              label: permForm.value.label.trim(),
+              permission: permForm.value.permission,
+              subjectType: permForm.value.subjectType,
+              subjectId: permForm.value.subjectId || permForm.value.label.trim()
+            });
+          }
+        } else {
+          list.push({
+            id: 'perm_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 6),
+            subjectType: permForm.value.subjectType,
+            subjectId: permForm.value.subjectId || permForm.value.label.trim(),
+            permission: permForm.value.permission,
+            label: permForm.value.label.trim()
+          });
+        }
+        permissions.value = list;
+        store.savePermissions(props.expertId, list);
+        permDialogVisible.value = false;
+        ElementPlus.ElMessage.success(editingPermId.value ? '权限已更新' : '授权已添加');
+      }
+
+      function deletePerm(perm) {
+        ElementPlus.ElMessageBox.confirm(
+          '确定移除「' + perm.label + '」的授权？', '移除授权',
+          { confirmButtonText: '确定', cancelButtonText: '取消', type: 'warning' }
+        ).then(function () {
+          var list = permissions.value.filter(function (p) { return p.id !== perm.id; });
+          permissions.value = list;
+          store.savePermissions(props.expertId, list);
+          ElementPlus.ElMessage.success('授权已移除');
+        }).catch(function () {});
+      }
+
+      // ---- 资料 Tab 方法 ----
+      var filteredMaterials = Vue.computed(function () {
+        var list = materials.value;
+        if (materialSearchQuery.value.trim()) {
+          var q = materialSearchQuery.value.trim().toLowerCase();
+          list = list.filter(function (f) { return (f.name || '').toLowerCase().indexOf(q) >= 0; });
+        }
+        if (materialTypeFilter.value !== 'all') {
+          list = list.filter(function (f) { return f.type === materialTypeFilter.value; });
+        }
+        return list;
+      });
+
+      function openMaterialUpload() {
+        if (materialFileInput.value) materialFileInput.value.click();
+      }
+
+      function handleMaterialFileSelect(e) {
+        var fileList = e.target.files;
+        if (!fileList || !fileList.length) return;
+        var queue = [];
+        for (var i = 0; i < fileList.length; i++) {
+          var file = fileList[i];
+          if (file.size > MAX_UPLOAD_FILE_SIZE) {
+            ElementPlus.ElMessage.warning('「' + file.name + '」超过 10MB，已跳过');
+            continue;
+          }
+          queue.push(file);
+        }
+        e.target.value = '';
+        if (!queue.length) return;
+        var done = 0;
+        var AppShared = window.AppShared;
+        queue.forEach(function (file) {
+          AppShared.readUploadedFileContent(file, function (content) {
+            store.addWorkspaceFile(props.expertId, {
+              name: file.name,
+              type: AppShared.inferProjectFileType(file.name),
+              size: file.size,
+              content: content
+            });
+            done += 1;
+            if (done === queue.length) {
+              materials.value = store.getWorkspaceFiles(props.expertId);
+              ElementPlus.ElMessage.success('已上传 ' + queue.length + ' 个文件');
+            }
+          });
+        });
+      }
+
+      function openMaterialPreview(item) {
+        materialPreviewItem.value = item;
+        materialPreviewVisible.value = true;
+      }
+
+      function downloadMaterial(item) {
+        var blob = new Blob([item.content || ''], { type: 'text/plain;charset=utf-8' });
+        var url = URL.createObjectURL(blob);
+        var a = document.createElement('a');
+        a.href = url;
+        a.download = item.name || '资料.txt';
+        a.click();
+        URL.revokeObjectURL(url);
+      }
+
+      function deleteMaterial(item) {
+        ElementPlus.ElMessageBox.confirm(
+          '确定删除资料「' + item.name + '」？', '删除资料',
+          { confirmButtonText: '删除', cancelButtonText: '取消', type: 'warning' }
+        ).then(function () {
+          store.deleteWorkspaceFile(props.expertId, item.id);
+          materials.value = store.getWorkspaceFiles(props.expertId);
+          ElementPlus.ElMessage.success('资料已删除');
+        }).catch(function () {});
+      }
+
+      function fileTypeIcon(type) {
+        if (type === 'spreadsheet') return '📊';
+        if (type === 'data') return '📁';
+        return '📄';
+      }
+
+      function formatFileSize(bytes) {
+        if (!bytes) return '';
+        if (bytes < 1024) return bytes + ' B';
+        if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+        return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+      }
+
+      // ---- 记忆 Tab 方法 ----
+      var filteredMemories = Vue.computed(function () {
+        var list = memories.value;
+        if (memorySearchQuery.value.trim()) {
+          var q = memorySearchQuery.value.trim().toLowerCase();
+          list = list.filter(function (m) { return (m.content || '').toLowerCase().indexOf(q) >= 0; });
+        }
+        if (memoryCategoryFilter.value !== 'all') {
+          list = list.filter(function (m) { return m.category === memoryCategoryFilter.value; });
+        }
+        if (memorySourceFilter.value !== 'all') {
+          list = list.filter(function (m) { return m.source === memorySourceFilter.value; });
+        }
+        return list;
+      });
+
+      var memoryStats = Vue.computed(function () {
+        var counts = { total: memories.value.length, manual: 0, auto: 0 };
+        memories.value.forEach(function (m) {
+          if (m.source === 'auto') counts.auto++;
+          else counts.manual++;
+        });
+        return counts;
+      });
+
+      var MEMORY_CATEGORY_LABELS = {
+        user_preference: '用户偏好',
+        project_context: '项目背景',
+        domain_knowledge: '领域知识',
+        other: '其他'
+      };
+
+      var MEMORY_CATEGORY_ICONS = {
+        user_preference: '📌',
+        project_context: '📋',
+        domain_knowledge: '🧠',
+        other: '💬'
+      };
+
+      function addMemoryWithCategory() {
+        if (!memoryInput.value.trim()) return;
+        store.addMemory(props.expertId, memoryInput.value.trim(), memoryCategoryInput.value);
+        memoryInput.value = '';
+        memories.value = store.getMemories(props.expertId);
+      }
+
+      // ---- 人设 Tab 方法 ----
+      function loadPersonaHistory() {
+        personaHistory.value = store.getPersonaHistory(props.expertId);
+        personaHistoryVisible.value = true;
+      }
+
+      function restorePersonaVersion(idx) {
+        var snap = store.restorePersonaVersion(props.expertId, idx);
+        if (!snap) return;
+        persona.value = Object.assign({}, snap);
+        personaHistoryVisible.value = false;
+        ElementPlus.ElMessage.success('已恢复到版本 ' + (idx + 1));
+      }
+
+      function exportPersonaMd() {
+        var tab = personaPreviewTab.value;
+        var content = persona.value[tab] || '';
+        var filename = '';
+        if (tab === 'coreDutyMd') filename = '核心职责.md';
+        else if (tab === 'workflowMd') filename = '工作流程.md';
+        else filename = '行为准则.md';
+        var blob = new Blob([content], { type: 'text/markdown;charset=utf-8' });
+        var url = URL.createObjectURL(blob);
+        var a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        a.click();
+        URL.revokeObjectURL(url);
+      }
+
+      function triggerPersonaImport() {
+        if (personaImportInput.value) personaImportInput.value.click();
+      }
+
+      function handlePersonaImport(e) {
+        var file = e.target.files && e.target.files[0];
+        if (!file) return;
+        var reader = new FileReader();
+        reader.onload = function (ev) {
+          persona.value[personaPreviewTab.value] = ev.target.result || '';
+          ElementPlus.ElMessage.success('已导入 ' + file.name);
+        };
+        reader.readAsText(file);
+        e.target.value = '';
+      }
+
+      function personaPreviewContent() {
+        return persona.value[personaPreviewTab.value] || '';
+      }
+
+      function personaPreviewTabLabel() {
+        if (personaPreviewTab.value === 'coreDutyMd') return '核心职责';
+        if (personaPreviewTab.value === 'workflowMd') return '工作流程';
+        return '行为准则';
+      }
+
+      // ---- 技能 Tab 方法 ----
+      function addSkillBinding() {
+        var boundIds = skillBindings.value.map(function (b) { return b.skillId; });
+        var available = catalog.SKILLS_CATALOG.filter(function (s) { return boundIds.indexOf(s.id) === -1; });
+        if (!available.length) { ElementPlus.ElMessage.info('所有技能已绑定'); return; }
+        store.addSkillBinding(props.expertId, available[0].skillId);
+        skillBindings.value = store.getSkillBindings(props.expertId);
+      }
+
+      function removeSkillBinding(skillId) {
+        store.removeSkillBinding(props.expertId, skillId);
+        skillBindings.value = store.getSkillBindings(props.expertId);
+      }
+
+      function toggleSkill(skillId, enabled) {
+        store.toggleSkillBinding(props.expertId, skillId, enabled);
+        skillBindings.value = store.getSkillBindings(props.expertId);
+      }
+
+      function updateSkillParam(skillId, key, value) {
+        var b = skillBindings.value.find(function (x) { return x.skillId === skillId; });
+        if (!b) return;
+        var params = Object.assign({}, b.params || {});
+        params[key] = value;
+        store.updateSkillParams(props.expertId, skillId, params);
+        skillBindings.value = store.getSkillBindings(props.expertId);
+      }
+
+      function getSkillInfo(skillId) {
+        return catalog.SKILLS_CATALOG.find(function (s) { return s.id === skillId; }) || {};
+      }
+
+      function getSkillParamSchema(skillId) {
+        return (window.SKILL_PARAM_SCHEMAS || {})[skillId] || [];
+      }
+
+      // ---- 工具 Tab 方法 ----
+      function addToolBinding() {
+        var boundIds = toolBindings.value.map(function (b) { return b.toolId; });
+        var available = catalog.TOOLS_CATALOG.filter(function (t) { return boundIds.indexOf(t.id) === -1; });
+        if (!available.length) { ElementPlus.ElMessage.info('所有工具已绑定'); return; }
+        store.addToolBinding(props.expertId, available[0].toolId);
+        toolBindings.value = store.getToolBindings(props.expertId);
+      }
+
+      function removeToolBinding(toolId) {
+        store.removeToolBinding(props.expertId, toolId);
+        toolBindings.value = store.getToolBindings(props.expertId);
+      }
+
+      function toggleTool(toolId, enabled) {
+        store.toggleToolBinding(props.expertId, toolId, enabled);
+        toolBindings.value = store.getToolBindings(props.expertId);
+      }
+
+      function updateToolConfig(toolId, key, value) {
+        var b = toolBindings.value.find(function (x) { return x.toolId === toolId; });
+        if (!b) return;
+        var config = Object.assign({}, b.config || {});
+        config[key] = value;
+        store.updateToolConfig(props.expertId, toolId, config);
+        toolBindings.value = store.getToolBindings(props.expertId);
+      }
+
+      function testToolConnection(toolId) {
+        store.testToolConnection(props.expertId, toolId);
+        toolBindings.value = store.getToolBindings(props.expertId);
+        ElementPlus.ElMessage.success('连接测试通过');
+      }
+
+      function getToolInfo(toolId) {
+        return catalog.TOOLS_CATALOG.find(function (t) { return t.id === toolId; }) || {};
+      }
+
+      function getToolParamSchema(toolId) {
+        return (window.TOOL_PARAM_SCHEMAS || {})[toolId] || [];
+      }
+
+      function toolStatusLabel(status) {
+        if (status === 'connected') return '已连接';
+        if (status === 'configured') return '已配置';
+        return '未配置';
+      }
+
+      function toolStatusType(status) {
+        if (status === 'connected') return 'success';
+        if (status === 'configured') return 'primary';
+        return 'info';
+      }
+
+      // ---- IM 渠道方法 ----
+      var IM_SUBSCRIPTION_OPTIONS = [
+        { key: 'task_started', label: '任务开始通知' },
+        { key: 'task_completed', label: '任务完成通知' },
+        { key: 'daily_summary', label: '每日汇总报告' },
+        { key: 'error_alert', label: '异常告警' }
+      ];
+
+      function toggleImSubscription(channel, eventKey) {
+        var subs = channel.subscriptions || [];
+        var idx = subs.indexOf(eventKey);
+        if (idx >= 0) subs.splice(idx, 1);
+        else subs.push(eventKey);
+        channel.subscriptions = subs.slice();
+      }
+
+      function testImConnection(channel) {
+        ElementPlus.ElMessage.success(channel.label + ' 连接测试通过');
+      }
+
+      function insertMarkdown(prefix, suffix) {
+        var textarea = document.querySelector('.persona-textarea textarea');
+        if (!textarea) return;
+        var start = textarea.selectionStart;
+        var end = textarea.selectionEnd;
+        var text = persona.value[personaPreviewTab.value] || '';
+        var selected = text.substring(start, end);
+        var replacement = prefix + selected + suffix;
+        persona.value[personaPreviewTab.value] = text.substring(0, start) + replacement + text.substring(end);
+        Vue.nextTick(function () {
+          textarea.focus();
+          textarea.setSelectionRange(start + prefix.length, start + prefix.length + selected.length);
+        });
+      }
+
+      function renderMarkdown(md) {
+        if (!md) return '';
+        var html = md
+          .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+          .replace(/^### (.+)$/gm, '<h4 style="margin:12px 0 6px;font-size:14px;font-weight:600">$1</h4>')
+          .replace(/^## (.+)$/gm, '<h3 style="margin:14px 0 8px;font-size:15px;font-weight:700">$1</h3>')
+          .replace(/^# (.+)$/gm, '<h2 style="margin:16px 0 8px;font-size:16px;font-weight:700">$1</h2>')
+          .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+          .replace(/\*(.+?)\*/g, '<em>$1</em>')
+          .replace(/\[(.+?)\]\((.+?)\)/g, '<a href="$2" target="_blank" style="color:#4080ff">$1</a>')
+          .replace(/^- (.+)$/gm, '<li style="margin-left:16px;list-style:disc">$1</li>')
+          .replace(/^(\d+)\. (.+)$/gm, '<li style="margin-left:16px;list-style:decimal">$2</li>')
+          .replace(/\n\n/g, '<br><br>')
+          .replace(/\n/g, '<br>');
+        return html;
+      }
+
       Vue.watch(function () { return props.expertId; }, load);
       Vue.onMounted(load);
-
-      var boundSkills = Vue.computed(function () {
-        return catalog.SKILLS_CATALOG.filter(function (s) { return skillIds.value.indexOf(s.id) >= 0; });
-      });
-      var boundTools = Vue.computed(function () {
-        return catalog.TOOLS_CATALOG.filter(function (t) { return toolIds.value.indexOf(t.id) >= 0; });
-      });
 
       return {
         expert: expert, activeTab: activeTab, persona: persona, taskSubTab: taskSubTab,
         tasks: tasks, projects: projects, memories: memories, memoryInput: memoryInput,
-        skillIds: skillIds, toolIds: toolIds, boundSkills: boundSkills, boundTools: boundTools,
+        skillBindings: skillBindings, toolBindings: toolBindings,
         imChannels: imChannels, permissions: permissions, materials: materials, expertArtifacts: expertArtifacts,
         fileNameInput: fileNameInput,
         expertEdit: expertEdit, openEditDialog: expertEdit.openEditDialog,
@@ -320,9 +882,59 @@
         tagColors: catalog.TAG_COLORS,
         statusLabel: catalog.TASK_STATUS_LABEL, statusType: catalog.TASK_STATUS_TYPE,
         artifactTypeLabel: catalog.ARTIFACT_TYPE_LABEL,
-        savePersona: savePersona, saveSkills: saveSkills, saveTools: saveTools,
+        savePersona: savePersona, saveSkillBindings: saveSkillBindings, saveToolBindings: saveToolBindings,
         addMemory: addMemory, removeMemory: removeMemory, saveIm: saveIm, savePerm: savePerm, addMaterial: addMaterial,
         goAssignTask: goAssignTask,
+        // 任务 Tab
+        taskSearchQuery: taskSearchQuery, taskStatusFilter: taskStatusFilter,
+        newTaskDialogVisible: newTaskDialogVisible, newTaskTitle: newTaskTitle, newTaskType: newTaskType,
+        filteredTasks: filteredTasks, taskStats: taskStats,
+        openNewTaskDialog: openNewTaskDialog, submitNewTask: submitNewTask,
+        editTaskTitle: editTaskTitle, archiveTaskItem: archiveTaskItem, deleteTaskItem: deleteTaskItem,
+        // 项目 Tab
+        getProjectMemberInfo: getProjectMemberInfo, getProjectTaskStats: getProjectTaskStats,
+        // 产物 Tab
+        artifactSearchQuery: artifactSearchQuery, artifactTypeFilter: artifactTypeFilter, artifactTaskFilter: artifactTaskFilter,
+        artifactPreviewVisible: artifactPreviewVisible, artifactPreviewItem: artifactPreviewItem,
+        filteredArtifacts: filteredArtifacts, artifactStats: artifactStats,
+        openArtifactPreview: openArtifactPreview, downloadArtifact: downloadArtifact, goToArtifactTask: goToArtifactTask,
+        // 权限管控 Tab
+        permDialogVisible: permDialogVisible, permForm: permForm, editingPermId: editingPermId,
+        openAddPermDialog: openAddPermDialog, openEditPermDialog: openEditPermDialog,
+        submitPerm: submitPerm, deletePerm: deletePerm,
+        // 资料 Tab
+        materialFileInput: materialFileInput, materialTypeFilter: materialTypeFilter, materialSearchQuery: materialSearchQuery,
+        materialPreviewVisible: materialPreviewVisible, materialPreviewItem: materialPreviewItem,
+        filteredMaterials: filteredMaterials,
+        openMaterialUpload: openMaterialUpload, handleMaterialFileSelect: handleMaterialFileSelect,
+        openMaterialPreview: openMaterialPreview, downloadMaterial: downloadMaterial, deleteMaterial: deleteMaterial,
+        fileTypeIcon: fileTypeIcon, formatFileSize: formatFileSize,
+        // 记忆 Tab
+        memoryCategoryFilter: memoryCategoryFilter, memorySourceFilter: memorySourceFilter, memorySearchQuery: memorySearchQuery,
+        memoryCategoryInput: memoryCategoryInput,
+        filteredMemories: filteredMemories, memoryStats: memoryStats,
+        MEMORY_CATEGORY_LABELS: MEMORY_CATEGORY_LABELS, MEMORY_CATEGORY_ICONS: MEMORY_CATEGORY_ICONS,
+        addMemoryWithCategory: addMemoryWithCategory,
+        // 人设 Tab
+        personaPreviewTab: personaPreviewTab, personaHistoryVisible: personaHistoryVisible,
+        personaHistory: personaHistory, personaImportInput: personaImportInput,
+        loadPersonaHistory: loadPersonaHistory, restorePersonaVersion: restorePersonaVersion,
+        exportPersonaMd: exportPersonaMd, triggerPersonaImport: triggerPersonaImport,
+        handlePersonaImport: handlePersonaImport,
+        personaPreviewContent: personaPreviewContent, personaPreviewTabLabel: personaPreviewTabLabel,
+        renderMarkdown: renderMarkdown, insertMarkdown: insertMarkdown,
+        // 技能 Tab
+        addSkillBinding: addSkillBinding, removeSkillBinding: removeSkillBinding,
+        toggleSkill: toggleSkill, updateSkillParam: updateSkillParam,
+        getSkillInfo: getSkillInfo, getSkillParamSchema: getSkillParamSchema,
+        // 工具 Tab
+        addToolBinding: addToolBinding, removeToolBinding: removeToolBinding,
+        toggleTool: toggleTool, updateToolConfig: updateToolConfig, testToolConnection: testToolConnection,
+        getToolInfo: getToolInfo, getToolParamSchema: getToolParamSchema,
+        toolStatusLabel: toolStatusLabel, toolStatusType: toolStatusType,
+        // IM 渠道
+        IM_SUBSCRIPTION_OPTIONS: IM_SUBSCRIPTION_OPTIONS,
+        toggleImSubscription: toggleImSubscription, testImConnection: testImConnection,
         load: load
       };
     },
@@ -364,44 +976,91 @@
                     <h3 class="detail-section-title">人设配置</h3>\
                     <p class="detail-section-desc">定义专家的核心职责、工作流程与行为准则</p>\
                   </div>\
-                  <div class="persona-editor">\
-                    <div class="persona-editor-card">\
-                      <div class="persona-editor-head"><span class="persona-editor-dot"></span>核心职责</div>\
-                      <el-input v-model="persona.coreDutyMd" type="textarea" :rows="5" placeholder="描述专家的核心职责…" />\
+                  <div class="persona-split-layout">\
+                    <div class="persona-edit-panel">\
+                      <div class="persona-edit-tabs">\
+                        <button type="button" class="persona-edit-tab" :class="{ active: personaPreviewTab === \'coreDutyMd\' }" @click="personaPreviewTab = \'coreDutyMd\'">核心职责</button>\
+                        <button type="button" class="persona-edit-tab" :class="{ active: personaPreviewTab === \'workflowMd\' }" @click="personaPreviewTab = \'workflowMd\'">工作流程</button>\
+                        <button type="button" class="persona-edit-tab" :class="{ active: personaPreviewTab === \'behaviorMd\' }" @click="personaPreviewTab = \'behaviorMd\'">行为准则</button>\
+                      </div>\
+                      <div class="persona-edit-toolbar">\
+                        <button type="button" class="persona-toolbar-btn" title="加粗" @click="insertMarkdown(\'**\', \'**\')"><b>B</b></button>\
+                        <button type="button" class="persona-toolbar-btn" title="斜体" @click="insertMarkdown(\'*\', \'*\')"><i>I</i></button>\
+                        <button type="button" class="persona-toolbar-btn" title="标题" @click="insertMarkdown(\'## \', \'\')">H2</button>\
+                        <button type="button" class="persona-toolbar-btn" title="列表" @click="insertMarkdown(\'- \', \'\')">•</button>\
+                        <button type="button" class="persona-toolbar-btn" title="链接" @click="insertMarkdown(\'[\', \'](url)\')">🔗</button>\
+                      </div>\
+                      <el-input v-model="persona[personaPreviewTab]" type="textarea" :rows="14" :placeholder="\'描述\' + personaPreviewTabLabel() + \'…\'" class="persona-textarea" />\
                     </div>\
-                    <div class="persona-editor-card">\
-                      <div class="persona-editor-head"><span class="persona-editor-dot"></span>工作流程</div>\
-                      <el-input v-model="persona.workflowMd" type="textarea" :rows="5" placeholder="描述标准工作流程…" />\
-                    </div>\
-                    <div class="persona-editor-card">\
-                      <div class="persona-editor-head"><span class="persona-editor-dot"></span>行为准则</div>\
-                      <el-input v-model="persona.behaviorMd" type="textarea" :rows="5" placeholder="描述行为边界与准则…" />\
+                    <div class="persona-preview-panel">\
+                      <div class="persona-preview-head">\
+                        <span class="persona-preview-head-title">预览 · {{ personaPreviewTabLabel() }}</span>\
+                      </div>\
+                      <div class="persona-preview-content" v-html="renderMarkdown(personaPreviewContent())"></div>\
                     </div>\
                   </div>\
-                  <div class="detail-tab-footer">\
+                  <div class="detail-tab-footer" style="justify-content:space-between;flex-wrap:wrap;gap:8px">\
+                    <div style="display:flex;gap:8px">\
+                      <input ref="personaImportInput" type="file" accept=".md" class="material-file-input-hidden" @change="handlePersonaImport">\
+                      <el-button size="small" @click="triggerPersonaImport">\
+                        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" style="margin-right:4px"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>\
+                        导入 .md\
+                      </el-button>\
+                      <el-button size="small" @click="exportPersonaMd">\
+                        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" style="margin-right:4px"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>\
+                        导出 .md\
+                      </el-button>\
+                      <el-button size="small" @click="loadPersonaHistory">版本历史</el-button>\
+                    </div>\
                     <el-button type="primary" @click="savePersona">保存人设</el-button>\
                   </div>\
                 </div>\
               </el-tab-pane>\
               <el-tab-pane label="任务" name="tasks">\
                 <div class="detail-tab-pane">\
-                  <el-radio-group v-model="taskSubTab" class="detail-filter-bar">\
-                    <el-radio-button label="dialogue">任务</el-radio-button>\
-                    <el-radio-button label="project">项目任务</el-radio-button>\
-                  </el-radio-group>\
+                  <div class="detail-action-bar">\
+                    <el-radio-group v-model="taskSubTab" size="small">\
+                      <el-radio-button label="dialogue">对话任务</el-radio-button>\
+                      <el-radio-button label="project">项目任务</el-radio-button>\
+                    </el-radio-group>\
+                    <div style="display:flex;gap:8px;align-items:center">\
+                      <el-input v-model="taskSearchQuery" placeholder="搜索任务..." size="small" clearable style="width:200px" />\
+                      <el-select v-model="taskStatusFilter" size="small" style="width:110px">\
+                        <el-option label="全部状态" value="all" />\
+                        <el-option label="待开始" value="pending" />\
+                        <el-option label="进行中" value="running" />\
+                        <el-option label="已完成" value="completed" />\
+                      </el-select>\
+                      <el-button type="primary" size="small" @click="openNewTaskDialog">+ 新建任务</el-button>\
+                    </div>\
+                  </div>\
                   <div class="detail-table-wrap">\
-                  <el-table :data="tasks.filter(t => taskSubTab === \'dialogue\' ? t.type === \'dialogue\' : t.type === \'project\')" stripe>\
-                    <el-table-column prop="title" label="标题" />\
-                    <el-table-column label="状态" width="100">\
+                  <el-table :data="filteredTasks" stripe empty-text="暂无匹配任务">\
+                    <el-table-column prop="title" label="标题" min-width="160" />\
+                    <el-table-column label="状态" width="90">\
                       <template #default="{ row }"><el-tag :type="statusType[row.status]" size="small">{{ statusLabel[row.status] }}</el-tag></template>\
                     </el-table-column>\
-                    <el-table-column prop="updatedAt" label="更新时间" width="160" />\
-                    <el-table-column label="操作" width="100">\
+                    <el-table-column prop="updatedAt" label="更新时间" width="150" />\
+                    <el-table-column label="操作" width="200">\
                       <template #default="{ row }">\
-                        <el-button link type="primary" @click="$emit(\'nav\', \'/experts/\' + expert.id + \'/tasks/\' + row.id)">打开</el-button>\
+                        <el-button link type="primary" size="small" @click="$emit(\'nav\', \'/experts/\' + expert.id + \'/tasks/\' + row.id)">打开</el-button>\
+                        <el-button link type="primary" size="small" @click="editTaskTitle(row)">编辑</el-button>\
+                        <el-button v-if="!row.archived" link type="warning" size="small" @click="archiveTaskItem(row)">归档</el-button>\
+                        <el-button link type="danger" size="small" @click="deleteTaskItem(row)">删除</el-button>\
                       </template>\
                     </el-table-column>\
                   </el-table>\
+                  </div>\
+                  <div class="detail-tab-footer detail-tab-footer--stats">\
+                    <span>共 {{ taskStats.total }} 个任务</span>\
+                    <span class="detail-stat-sep">·</span>\
+                    <span>待开始 {{ taskStats.pending }}</span>\
+                    <span class="detail-stat-sep">·</span>\
+                    <span>进行中 {{ taskStats.running }}</span>\
+                    <span class="detail-stat-sep">·</span>\
+                    <span>已完成 {{ taskStats.completed }}</span>\
+                    <span v-if="taskStats.archived" class="detail-stat-sep">·</span>\
+                    <span v-if="taskStats.archived">已归档 {{ taskStats.archived }}</span>\
                   </div>\
                 </div>\
               </el-tab-pane>\
@@ -414,6 +1073,18 @@
                       <div class="project-card-body">\
                         <div class="card-name">{{ p.name }}</div>\
                         <p class="card-desc">{{ p.description }}</p>\
+                        <div class="project-member-role-row">\
+                          <span class="project-member-role-tag">{{ getProjectMemberInfo(p.id) && getProjectMemberInfo(p.id).role === \'lead\' ? \'项目负责人\' : \'成员\' }}</span>\
+                          <span v-if="getProjectMemberInfo(p.id)" class="project-member-progress-text">进度 {{ getProjectMemberInfo(p.id).progress }}%</span>\
+                        </div>\
+                        <div v-if="getProjectMemberInfo(p.id)" class="project-card-progress">\
+                          <div class="project-progress-track">\
+                            <div class="project-progress-fill" :style="{ width: getProjectMemberInfo(p.id).progress + \'%\' }"></div>\
+                          </div>\
+                        </div>\
+                        <div v-if="getProjectTaskStats(p.id).total" class="project-member-task-stat">\
+                          个人任务 {{ getProjectTaskStats(p.id).done }}/{{ getProjectTaskStats(p.id).total }} 已完成\
+                        </div>\
                       </div>\
                     </div>\
                   </div>\
@@ -421,49 +1092,185 @@
               </el-tab-pane>\
               <el-tab-pane label="技能" name="skills">\
                 <div class="detail-tab-pane">\
-                  <div class="detail-config-panel">\
-                    <div class="detail-section-head">\
-                      <h3 class="detail-section-title">技能绑定</h3>\
-                      <p class="detail-section-desc">为专家配置可使用的专业技能能力</p>\
+                  <div class="detail-section-head">\
+                    <h3 class="detail-section-title">技能绑定</h3>\
+                    <p class="detail-section-desc">为专家配置可使用的专业技能能力</p>\
+                  </div>\
+                  <div class="detail-action-bar">\
+                    <span class="detail-action-bar-label">已绑定 {{ skillBindings.length }} 项技能</span>\
+                    <el-button type="primary" size="small" @click="addSkillBinding">+ 添加技能</el-button>\
+                  </div>\
+                  <div v-if="skillBindings.length === 0" style="text-align:center;color:#909399;padding:24px">暂无绑定技能，点击上方按钮添加</div>\
+                  <div v-for="b in skillBindings" :key="b.skillId" class="skill-binding-card">\
+                    <div class="skill-binding-header">\
+                      <div class="skill-binding-info">\
+                        <span class="skill-binding-icon">🧩</span>\
+                        <div>\
+                          <div class="skill-binding-name">{{ getSkillInfo(b.skillId).name }}</div>\
+                          <div class="skill-binding-desc">{{ getSkillInfo(b.skillId).description }}</div>\
+                        </div>\
+                      </div>\
+                      <div class="skill-binding-actions">\
+                        <el-switch v-model="b.enabled" size="small" @change="toggleSkill(b.skillId, $event)" />\
+                        <el-button link type="danger" size="small" @click="removeSkillBinding(b.skillId)" title="移除">\
+                          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>\
+                        </el-button>\
+                      </div>\
                     </div>\
-                    <el-select v-model="skillIds" multiple placeholder="选择技能" style="width:100%;margin-bottom:12px">\
-                      <el-option v-for="s in skills" :key="s.id" :label="s.name" :value="s.id" />\
-                    </el-select>\
-                    <el-button type="primary" @click="saveSkills">保存</el-button>\
-                    <div v-if="boundSkills.length" class="detail-tag-list">\
-                      <el-tag v-for="s in boundSkills" :key="s.id">{{ s.name }}</el-tag>\
+                    <div v-if="getSkillParamSchema(b.skillId).length" class="skill-params-area">\
+                      <div v-for="param in getSkillParamSchema(b.skillId)" :key="param.key" class="skill-param-row">\
+                        <label class="skill-param-label">{{ param.label }}</label>\
+                        <el-input-number\
+                          v-if="param.type === \'number\'"\
+                          :model-value="(b.params || {})[param.key]"\
+                          @update:model-value="updateSkillParam(b.skillId, param.key, $event)"\
+                          :min="param.min" :max="param.max" :step="param.step || 1"\
+                          size="small" controls-position="right" style="width:140px" />\
+                        <el-select\
+                          v-else-if="param.type === \'select\'"\
+                          :model-value="(b.params || {})[param.key]"\
+                          @update:model-value="updateSkillParam(b.skillId, param.key, $event)"\
+                          size="small" style="width:160px">\
+                          <el-option v-for="opt in param.options" :key="opt" :label="opt" :value="opt" />\
+                        </el-select>\
+                        <el-checkbox-group\
+                          v-else-if="param.type === \'checkbox\'"\
+                          :model-value="(b.params || {})[param.key] || []"\
+                          @update:model-value="updateSkillParam(b.skillId, param.key, $event)"\
+                          size="small">\
+                          <el-checkbox v-for="opt in param.options" :key="opt" :label="opt" :value="opt" />\
+                        </el-checkbox-group>\
+                      </div>\
                     </div>\
+                  </div>\
+                  <div v-if="skillBindings.length" class="detail-tab-footer">\
+                    <el-button type="primary" @click="saveSkillBindings">保存配置</el-button>\
                   </div>\
                 </div>\
               </el-tab-pane>\
               <el-tab-pane label="工具" name="tools">\
                 <div class="detail-tab-pane">\
-                  <div class="detail-config-panel">\
-                    <div class="detail-section-head">\
-                      <h3 class="detail-section-title">工具绑定</h3>\
-                      <p class="detail-section-desc">配置专家可调用的工具与 MCP 服务</p>\
+                  <div class="detail-section-head">\
+                    <h3 class="detail-section-title">工具绑定</h3>\
+                    <p class="detail-section-desc">配置专家可调用的工具与 MCP 服务</p>\
+                  </div>\
+                  <div class="detail-action-bar">\
+                    <span class="detail-action-bar-label">已绑定 {{ toolBindings.length }} 项工具</span>\
+                    <el-button type="primary" size="small" @click="addToolBinding">+ 添加工具</el-button>\
+                  </div>\
+                  <div v-if="toolBindings.length === 0" style="text-align:center;color:#909399;padding:24px">暂无绑定工具，点击上方按钮添加</div>\
+                  <div v-for="b in toolBindings" :key="b.toolId" class="skill-binding-card">\
+                    <div class="skill-binding-header">\
+                      <div class="skill-binding-info">\
+                        <span class="skill-binding-icon">⚡</span>\
+                        <div>\
+                          <div class="skill-binding-name">{{ getToolInfo(b.toolId).name }}</div>\
+                          <div class="skill-binding-desc">{{ getToolInfo(b.toolId).description }}</div>\
+                        </div>\
+                      </div>\
+                      <div class="skill-binding-actions">\
+                        <el-tag :type="toolStatusType(b.status)" size="small" effect="plain">{{ toolStatusLabel(b.status) }}</el-tag>\
+                        <el-switch v-model="b.enabled" size="small" @change="toggleTool(b.toolId, $event)" />\
+                        <el-button link type="danger" size="small" @click="removeToolBinding(b.toolId)" title="移除">\
+                          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>\
+                        </el-button>\
+                      </div>\
                     </div>\
-                    <el-select v-model="toolIds" multiple placeholder="选择工具" style="width:100%;margin-bottom:12px">\
-                      <el-option v-for="t in tools" :key="t.id" :label="t.name" :value="t.id" />\
-                    </el-select>\
-                    <el-button type="primary" @click="saveTools">保存</el-button>\
+                    <div v-if="getToolParamSchema(b.toolId).length" class="skill-params-area">\
+                      <div v-for="param in getToolParamSchema(b.toolId)" :key="param.key" class="skill-param-row">\
+                        <label class="skill-param-label">{{ param.label }}</label>\
+                        <el-input-number\
+                          v-if="param.type === \'number\'"\
+                          :model-value="(b.config || {})[param.key]"\
+                          @update:model-value="updateToolConfig(b.toolId, param.key, $event)"\
+                          :min="param.min" :max="param.max" :step="param.step || 1"\
+                          size="small" controls-position="right" style="width:140px" />\
+                        <el-select\
+                          v-else-if="param.type === \'select\'"\
+                          :model-value="(b.config || {})[param.key]"\
+                          @update:model-value="updateToolConfig(b.toolId, param.key, $event)"\
+                          size="small" style="width:180px">\
+                          <el-option v-for="opt in param.options" :key="opt" :label="opt" :value="opt" />\
+                        </el-select>\
+                        <el-input\
+                          v-else-if="param.type === \'password\'"\
+                          :model-value="(b.config || {})[param.key]"\
+                          @update:model-value="updateToolConfig(b.toolId, param.key, $event)"\
+                          type="password" show-password size="small" style="width:260px"\
+                          :placeholder="param.placeholder || \'\'" />\
+                        <el-input\
+                          v-else\
+                          :model-value="(b.config || {})[param.key]"\
+                          @update:model-value="updateToolConfig(b.toolId, param.key, $event)"\
+                          size="small" style="width:260px"\
+                          :placeholder="param.placeholder || \'\'" />\
+                      </div>\
+                    </div>\
+                    <div class="skill-params-area" style="border-top:1px solid #f0f2f5;padding-top:10px">\
+                      <el-button size="small" @click="testToolConnection(b.toolId)">测试连接</el-button>\
+                    </div>\
+                  </div>\
+                  <div v-if="toolBindings.length" class="detail-tab-footer">\
+                    <el-button type="primary" @click="saveToolBindings">保存配置</el-button>\
                   </div>\
                 </div>\
               </el-tab-pane>\
               <el-tab-pane label="记忆" name="memory">\
                 <div class="detail-tab-pane">\
                   <div class="detail-action-bar">\
-                    <el-input v-model="memoryInput" placeholder="新增记忆条目" class="detail-action-input" />\
-                    <el-button type="primary" @click="addMemory">添加</el-button>\
+                    <el-input v-model="memoryInput" placeholder="新增记忆条目" class="detail-action-input" size="small" />\
+                    <el-select v-model="memoryCategoryInput" size="small" style="width:110px">\
+                      <el-option label="用户偏好" value="user_preference" />\
+                      <el-option label="项目背景" value="project_context" />\
+                      <el-option label="领域知识" value="domain_knowledge" />\
+                      <el-option label="其他" value="other" />\
+                    </el-select>\
+                    <el-button type="primary" size="small" @click="addMemoryWithCategory">添加</el-button>\
+                  </div>\
+                  <div class="detail-action-bar" style="padding:8px 14px">\
+                    <el-input v-model="memorySearchQuery" placeholder="搜索记忆..." size="small" clearable style="width:180px" />\
+                    <el-select v-model="memoryCategoryFilter" size="small" style="width:110px">\
+                      <el-option label="全部分类" value="all" />\
+                      <el-option label="用户偏好" value="user_preference" />\
+                      <el-option label="项目背景" value="project_context" />\
+                      <el-option label="领域知识" value="domain_knowledge" />\
+                      <el-option label="其他" value="other" />\
+                    </el-select>\
+                    <el-select v-model="memorySourceFilter" size="small" style="width:110px">\
+                      <el-option label="全部来源" value="all" />\
+                      <el-option label="手动添加" value="manual" />\
+                      <el-option label="自动沉淀" value="auto" />\
+                    </el-select>\
                   </div>\
                   <div class="detail-table-wrap">\
-                  <el-table :data="memories" stripe>\
-                    <el-table-column prop="content" label="内容" />\
-                    <el-table-column prop="createdAt" label="时间" width="160" />\
+                  <el-table :data="filteredMemories" stripe empty-text="暂无匹配记忆">\
+                    <el-table-column label="内容" min-width="200">\
+                      <template #default="{ row }">\
+                        <div style="display:flex;align-items:flex-start;gap:8px">\
+                          <span style="font-size:15px;flex-shrink:0;margin-top:2px">{{ MEMORY_CATEGORY_ICONS[row.category] || \'💬\' }}</span>\
+                          <div>\
+                            <div style="font-size:13px;line-height:1.5">{{ row.content }}</div>\
+                            <div style="display:flex;gap:6px;margin-top:4px">\
+                              <el-tag size="small" type="info">{{ MEMORY_CATEGORY_LABELS[row.category] || \'其他\' }}</el-tag>\
+                              <el-tag v-if="row.source === \'auto\'" size="small" type="success" effect="plain">自动沉淀</el-tag>\
+                              <el-tag v-else size="small" effect="plain">手动添加</el-tag>\
+                            </div>\
+                          </div>\
+                        </div>\
+                      </template>\
+                    </el-table-column>\
+                    <el-table-column prop="createdAt" label="时间" width="150" />\
                     <el-table-column label="操作" width="80">\
-                      <template #default="{ row }"><el-button link type="danger" @click="removeMemory(row.id)">删除</el-button></template>\
+                      <template #default="{ row }"><el-button link type="danger" size="small" @click="removeMemory(row.id)">删除</el-button></template>\
                     </el-table-column>\
                   </el-table>\
+                  </div>\
+                  <div class="detail-tab-footer detail-tab-footer--stats">\
+                    <span>共 {{ memoryStats.total }} 条记忆</span>\
+                    <span class="detail-stat-sep">·</span>\
+                    <span>手动添加 {{ memoryStats.manual }}</span>\
+                    <span class="detail-stat-sep">·</span>\
+                    <span>自动沉淀 {{ memoryStats.auto }}</span>\
                   </div>\
                 </div>\
               </el-tab-pane>\
@@ -475,10 +1282,29 @@
                   </div>\
                   <div v-for="ch in imChannels" :key="ch.type" class="im-channel-card">\
                     <div class="im-channel-head">\
-                      <strong>{{ ch.label }}</strong>\
-                      <el-switch v-model="ch.enabled" />\
+                      <div class="im-channel-head-left">\
+                        <span class="im-channel-icon">{{ ch.type === \'wecom\' ? \'💬\' : ch.type === \'dingtalk\' ? \'📱\' : \'🐦\' }}</span>\
+                        <strong>{{ ch.label }}</strong>\
+                      </div>\
+                      <div class="im-channel-head-right">\
+                        <el-switch v-model="ch.enabled" size="small" />\
+                        <el-button size="small" @click="testImConnection(ch)" :disabled="!ch.enabled">测试连接</el-button>\
+                      </div>\
                     </div>\
-                    <el-input v-model="ch.config" placeholder="Webhook / Bot 配置" />\
+                    <div v-if="ch.enabled" class="im-channel-config">\
+                      <el-input v-model="ch.config" placeholder="Webhook URL" size="small" style="margin-bottom:10px" />\
+                      <div class="im-subscription-section">\
+                        <span class="im-subscription-label">消息订阅</span>\
+                        <div class="im-subscription-list">\
+                          <el-checkbox\
+                            v-for="opt in IM_SUBSCRIPTION_OPTIONS"\
+                            :key="opt.key"\
+                            :model-value="(ch.subscriptions || []).indexOf(opt.key) >= 0"\
+                            @change="toggleImSubscription(ch, opt.key)"\
+                            size="small">{{ opt.label }}</el-checkbox>\
+                        </div>\
+                      </div>\
+                    </div>\
                   </div>\
                   <div class="detail-tab-footer">\
                     <el-button type="primary" @click="saveIm">保存 IM 配置</el-button>\
@@ -487,44 +1313,118 @@
               </el-tab-pane>\
               <el-tab-pane label="权限管控" name="permissions">\
                 <div class="detail-tab-pane">\
-                  <div class="detail-table-wrap">\
-                  <el-table :data="permissions" stripe>\
-                    <el-table-column prop="label" label="授权对象" />\
-                    <el-table-column prop="permission" label="权限" width="120" />\
-                  </el-table>\
+                  <div class="detail-action-bar">\
+                    <span class="detail-action-bar-label">授权规则</span>\
+                    <el-button type="primary" size="small" @click="openAddPermDialog">+ 添加授权</el-button>\
                   </div>\
-                  <p class="detail-form-hint">原型阶段展示默认权限规则，接入后端后可动态配置。</p>\
-                  <div class="detail-tab-footer">\
-                    <el-button type="primary" @click="savePerm">保存</el-button>\
+                  <div class="detail-table-wrap">\
+                  <el-table :data="permissions" stripe empty-text="暂无授权规则">\
+                    <el-table-column prop="label" label="授权对象" min-width="140" />\
+                    <el-table-column label="类型" width="80">\
+                      <template #default="{ row }">{{ row.subjectType === \'role\' ? \'角色\' : \'用户\' }}</template>\
+                    </el-table-column>\
+                    <el-table-column label="权限" width="100">\
+                      <template #default="{ row }">\
+                        <el-tag v-if="row.permission === \'admin\'" type="danger" size="small">管理员</el-tag>\
+                        <el-tag v-else-if="row.permission === \'use\'" type="primary" size="small">可使用</el-tag>\
+                        <el-tag v-else type="info" size="small">{{ row.permission }}</el-tag>\
+                      </template>\
+                    </el-table-column>\
+                    <el-table-column label="操作" width="120">\
+                      <template #default="{ row }">\
+                        <el-button link type="primary" size="small" @click="openEditPermDialog(row)">编辑</el-button>\
+                        <el-button link type="danger" size="small" @click="deletePerm(row)">删除</el-button>\
+                      </template>\
+                    </el-table-column>\
+                  </el-table>\
                   </div>\
                 </div>\
               </el-tab-pane>\
               <el-tab-pane label="资料" name="materials">\
                 <div class="detail-tab-pane">\
                   <div class="detail-action-bar">\
-                    <el-input v-model="fileNameInput" placeholder="资料名称" class="detail-action-input" />\
-                    <el-button type="primary" @click="addMaterial">添加资料</el-button>\
+                    <input ref="materialFileInput" type="file" multiple class="material-file-input-hidden" @change="handleMaterialFileSelect">\
+                    <el-button type="primary" size="small" @click="openMaterialUpload">\
+                      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" style="margin-right:4px"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>\
+                      上传文件\
+                    </el-button>\
+                    <el-input v-model="materialSearchQuery" placeholder="搜索资料..." size="small" clearable style="width:180px" />\
+                    <el-select v-model="materialTypeFilter" size="small" style="width:100px">\
+                      <el-option label="全部类型" value="all" />\
+                      <el-option label="文档" value="document" />\
+                      <el-option label="表格" value="spreadsheet" />\
+                      <el-option label="数据" value="data" />\
+                    </el-select>\
                   </div>\
                   <div class="detail-table-wrap">\
-                  <el-table :data="materials" stripe>\
-                    <el-table-column prop="name" label="名称" />\
-                    <el-table-column prop="createdAt" label="添加时间" width="160" />\
+                  <el-table :data="filteredMaterials" stripe empty-text="暂无资料">\
+                    <el-table-column label="名称" min-width="180">\
+                      <template #default="{ row }">\
+                        <div style="display:flex;align-items:center;gap:8px">\
+                          <span style="font-size:16px">{{ fileTypeIcon(row.type) }}</span>\
+                          <span>{{ row.name }}</span>\
+                        </div>\
+                      </template>\
+                    </el-table-column>\
+                    <el-table-column label="类型" width="80">\
+                      <template #default="{ row }">{{ row.type === \'spreadsheet\' ? \'表格\' : row.type === \'data\' ? \'数据\' : \'文档\' }}</template>\
+                    </el-table-column>\
+                    <el-table-column label="大小" width="90">\
+                      <template #default="{ row }">{{ formatFileSize(row.size) }}</template>\
+                    </el-table-column>\
+                    <el-table-column prop="createdAt" label="添加时间" width="150" />\
+                    <el-table-column label="操作" width="180">\
+                      <template #default="{ row }">\
+                        <el-button link type="primary" size="small" @click="openMaterialPreview(row)">预览</el-button>\
+                        <el-button link type="primary" size="small" @click="downloadMaterial(row)">下载</el-button>\
+                        <el-button link type="danger" size="small" @click="deleteMaterial(row)">删除</el-button>\
+                      </template>\
+                    </el-table-column>\
                   </el-table>\
                   </div>\
-                  <el-empty v-if="materials.length === 0" description="暂无资料" :image-size="56" />\
+                  <el-empty v-if="materials.length === 0" description="暂无资料，点击上方按钮上传文件" :image-size="56" />\
                 </div>\
               </el-tab-pane>\
               <el-tab-pane label="产物" name="artifacts">\
                 <div class="detail-tab-pane">\
+                  <div class="detail-action-bar">\
+                    <el-input v-model="artifactSearchQuery" placeholder="搜索产物..." size="small" clearable style="width:180px" />\
+                    <el-select v-model="artifactTypeFilter" size="small" style="width:100px">\
+                      <el-option label="全部类型" value="all" />\
+                      <el-option label="报告" value="report" />\
+                      <el-option label="数据" value="data" />\
+                      <el-option label="文档" value="document" />\
+                    </el-select>\
+                    <el-select v-model="artifactTaskFilter" size="small" style="width:160px" placeholder="来源任务">\
+                      <el-option label="全部任务" value="all" />\
+                      <el-option v-for="t in tasks" :key="t.id" :label="t.title" :value="t.id" />\
+                    </el-select>\
+                  </div>\
                   <div class="detail-table-wrap">\
-                  <el-table :data="expertArtifacts" stripe>\
-                    <el-table-column prop="title" label="产物标题" min-width="140" />\
+                  <el-table :data="filteredArtifacts" stripe empty-text="暂无匹配产物">\
+                    <el-table-column prop="title" label="产物标题" min-width="160" />\
                     <el-table-column label="类型" width="80">\
                       <template #default="{ row }">{{ artifactTypeLabel[row.type] || row.type }}</template>\
                     </el-table-column>\
                     <el-table-column prop="taskTitle" label="来源任务" width="140" />\
-                    <el-table-column prop="createdAt" label="生成时间" width="160" />\
+                    <el-table-column prop="createdAt" label="生成时间" width="150" />\
+                    <el-table-column label="操作" width="200">\
+                      <template #default="{ row }">\
+                        <el-button link type="primary" size="small" @click="openArtifactPreview(row)">预览</el-button>\
+                        <el-button link type="primary" size="small" @click="downloadArtifact(row)">下载</el-button>\
+                        <el-button link type="primary" size="small" @click="goToArtifactTask(row.taskId)">跳转任务</el-button>\
+                      </template>\
+                    </el-table-column>\
                   </el-table>\
+                  </div>\
+                  <div class="detail-tab-footer detail-tab-footer--stats">\
+                    <span>共 {{ artifactStats.total }} 项产物</span>\
+                    <span class="detail-stat-sep">·</span>\
+                    <span>报告 {{ artifactStats.report }}</span>\
+                    <span class="detail-stat-sep">·</span>\
+                    <span>数据 {{ artifactStats.data }}</span>\
+                    <span class="detail-stat-sep">·</span>\
+                    <span>文档 {{ artifactStats.document }}</span>\
                   </div>\
                   <el-empty v-if="expertArtifacts.length === 0" description="暂无产物，完成任务对话后将自动生成" :image-size="56" />\
                 </div>\
@@ -534,6 +1434,95 @@
         </div>\
         </div>\
         <expert-edit-page-dialog :edit="expertEdit" header-title="编辑基本信息" :tag-colors="tagColors" />\
+        <!-- 新建任务对话框 -->\
+        <el-dialog v-model="newTaskDialogVisible" title="新建任务" width="420px" :close-on-click-modal="false" append-to-body>\
+          <el-form label-position="top">\
+            <el-form-item label="任务标题" required>\
+              <el-input v-model="newTaskTitle" placeholder="输入任务标题..." />\
+            </el-form-item>\
+            <el-form-item label="任务类型">\
+              <el-radio-group v-model="newTaskType">\
+                <el-radio label="dialogue">对话任务</el-radio>\
+                <el-radio label="project">项目任务</el-radio>\
+              </el-radio-group>\
+            </el-form-item>\
+          </el-form>\
+          <template #footer>\
+            <el-button @click="newTaskDialogVisible = false">取消</el-button>\
+            <el-button type="primary" @click="submitNewTask">创建</el-button>\
+          </template>\
+        </el-dialog>\
+        <!-- 产物预览对话框 -->\
+        <el-dialog v-model="artifactPreviewVisible" title="产物预览" width="560px" append-to-body @closed="artifactPreviewItem = null">\
+          <div v-if="artifactPreviewItem" style="max-height:400px;overflow:auto">\
+            <div style="margin-bottom:12px">\
+              <el-tag size="small" type="info">{{ artifactTypeLabel[artifactPreviewItem.type] || artifactPreviewItem.type }}</el-tag>\
+              <span style="margin-left:8px;color:#909399;font-size:12px">{{ artifactPreviewItem.createdAt }}</span>\
+            </div>\
+            <h3 style="margin:0 0 12px 0;font-size:16px">{{ artifactPreviewItem.title }}</h3>\
+            <div style="white-space:pre-wrap;font-size:13px;line-height:1.7;color:#303133;background:#f5f7fa;padding:16px;border-radius:6px">{{ artifactPreviewItem.content || \'暂无内容\' }}</div>\
+          </div>\
+          <template #footer>\
+            <el-button @click="artifactPreviewVisible = false">关闭</el-button>\
+            <el-button type="primary" @click="downloadArtifact(artifactPreviewItem); artifactPreviewVisible = false">下载</el-button>\
+          </template>\
+        </el-dialog>\
+        <!-- 权限添加/编辑对话框 -->\
+        <el-dialog v-model="permDialogVisible" :title="editingPermId ? \'编辑授权\' : \'添加授权\'" width="440px" :close-on-click-modal="false" append-to-body>\
+          <el-form label-position="top">\
+            <el-form-item label="授权类型">\
+              <el-radio-group v-model="permForm.subjectType">\
+                <el-radio label="role">角色</el-radio>\
+                <el-radio label="user">用户</el-radio>\
+              </el-radio-group>\
+            </el-form-item>\
+            <el-form-item label="授权对象名称" required>\
+              <el-input v-model="permForm.label" :placeholder="permForm.subjectType === \'role\' ? \'如：管理员、普通用户\' : \'如：张三\'" />\
+            </el-form-item>\
+            <el-form-item label="权限级别">\
+              <el-select v-model="permForm.permission" style="width:100%">\
+                <el-option label="管理员（完全控制）" value="admin" />\
+                <el-option label="可使用（下发任务与查看）" value="use" />\
+                <el-option label="只读（仅查看）" value="read" />\
+              </el-select>\
+            </el-form-item>\
+          </el-form>\
+          <template #footer>\
+            <el-button @click="permDialogVisible = false">取消</el-button>\
+            <el-button type="primary" @click="submitPerm">{{ editingPermId ? \'保存\' : \'添加\' }}</el-button>\
+          </template>\
+        </el-dialog>\
+        <!-- 资料预览对话框 -->\
+        <el-dialog v-model="materialPreviewVisible" title="资料预览" width="560px" append-to-body @closed="materialPreviewItem = null">\
+          <div v-if="materialPreviewItem" style="max-height:400px;overflow:auto">\
+            <div style="margin-bottom:12px;display:flex;align-items:center;gap:8px">\
+              <span style="font-size:20px">{{ fileTypeIcon(materialPreviewItem.type) }}</span>\
+              <span style="font-weight:600">{{ materialPreviewItem.name }}</span>\
+              <span style="color:#909399;font-size:12px">{{ formatFileSize(materialPreviewItem.size) }}</span>\
+            </div>\
+            <div style="white-space:pre-wrap;font-size:13px;line-height:1.7;color:#303133;background:#f5f7fa;padding:16px;border-radius:6px">{{ materialPreviewItem.content || \'（二进制文件，无法预览内容）\' }}</div>\
+          </div>\
+          <template #footer>\
+            <el-button @click="materialPreviewVisible = false">关闭</el-button>\
+            <el-button type="primary" @click="downloadMaterial(materialPreviewItem); materialPreviewVisible = false">下载</el-button>\
+          </template>\
+        </el-dialog>\
+        <!-- 人设版本历史对话框 -->\
+        <el-dialog v-model="personaHistoryVisible" title="版本历史" width="500px" append-to-body>\
+          <div v-if="personaHistory.length === 0" style="text-align:center;color:#909399;padding:20px">暂无历史版本</div>\
+          <div v-else class="persona-history-list">\
+            <div v-for="(ver, idx) in personaHistory" :key="ver.savedAt" class="persona-history-item">\
+              <div class="persona-history-item-left">\
+                <span class="persona-history-version">版本 {{ personaHistory.length - idx }}</span>\
+                <span class="persona-history-time">{{ ver.savedAt }}</span>\
+              </div>\
+              <el-button size="small" @click="restorePersonaVersion(idx)">恢复</el-button>\
+            </div>\
+          </div>\
+          <template #footer>\
+            <el-button @click="personaHistoryVisible = false">关闭</el-button>\
+          </template>\
+        </el-dialog>\
       </div>\
       <div v-else class="main-scroll"><el-empty description="专家不存在"><back-link label="返回专家" @click="$emit(\'nav\', \'/experts\')" /></el-empty></div>'
   };

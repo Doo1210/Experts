@@ -88,6 +88,11 @@
       var artifactPanelTaskId = Vue.ref(null);
       var archivedTasks = Vue.ref([]);
       var showArchived = Vue.ref(false);
+      var showProgressPanel = Vue.ref(false);
+
+      // ---- 任务列表增强 ----
+      var taskSearchQuery = Vue.ref('');
+      var taskStatusFilter = Vue.ref('all');
 
       function loadPanelArtifacts(taskId) {
         panelArtifacts.value = taskId ? store.getTaskArtifacts(taskId) : [];
@@ -150,6 +155,84 @@
 
       function taskStatusTip(t) {
         return isTaskRunning(t) ? '运行中' : '已就绪';
+      }
+
+      // ---- 任务列表增强 ----
+      var filteredTasks = Vue.computed(function () {
+        var list = tasks.value;
+        if (taskSearchQuery.value.trim()) {
+          var q = taskSearchQuery.value.trim().toLowerCase();
+          list = list.filter(function (t) { return (t.title || '').toLowerCase().indexOf(q) >= 0; });
+        }
+        if (taskStatusFilter.value !== 'all') {
+          list = list.filter(function (t) { return t.status === taskStatusFilter.value; });
+        }
+        return list;
+      });
+
+      var taskStats = Vue.computed(function () {
+        var all = tasks.value.concat(archivedTasks.value);
+        var counts = { total: all.length, active: tasks.value.length, pending: 0, running: 0, completed: 0, archived: archivedTasks.value.length };
+        all.forEach(function (t) {
+          if (t.archived) return;
+          if (t.status === 'pending') counts.pending++;
+          else if (t.status === 'running') counts.running++;
+          else if (t.status === 'completed') counts.completed++;
+        });
+        return counts;
+      });
+
+      // ---- 任务进展面板 ----
+      function getTaskProgressSteps(taskId) {
+        var msgs = store.getMessages(taskId);
+        var steps = [];
+        var seen = {};
+        msgs.forEach(function (m) {
+          if (m.type === 'thought' && !seen.thought) { seen.thought = true; steps.push({ type: 'thought', label: '思考分析', content: m.content, time: m.createdAt }); }
+          if (m.type === 'skill' && !seen.skill) { seen.skill = true; steps.push({ type: 'skill', label: '技能调用', content: m.content, skillName: m.skillName, time: m.createdAt }); }
+          if (m.type === 'action' && !seen.action) { seen.action = true; steps.push({ type: 'action', label: '工具执行', content: m.content, toolName: m.toolName, time: m.createdAt }); }
+        });
+        if (msgs.some(function (m) { return m.role === 'expert' && m.type === 'chat'; }) && !seen.reply) {
+          steps.push({ type: 'reply', label: '回复完成', content: '已生成回复', time: msgs[msgs.length - 1].createdAt });
+        }
+        return steps;
+      }
+
+      function getCurrentTaskProgress() {
+        if (!currentTaskId.value) return { steps: [], percent: 0, status: '' };
+        var steps = getTaskProgressSteps(currentTaskId.value);
+        var task = tasks.value.concat(archivedTasks.value).find(function (t) { return t.id === currentTaskId.value; });
+        var percent = 0;
+        if (steps.length >= 4) percent = 100;
+        else if (steps.length === 3) percent = 75;
+        else if (steps.length === 2) percent = 50;
+        else if (steps.length === 1) percent = 25;
+        var status = task ? (task.status === 'running' ? '执行中' : task.status === 'completed' ? '已完成' : '待开始') : '';
+        return { steps: steps, percent: percent, status: status };
+      }
+
+      // ---- 产物面板增强 ----
+      var artifactPreviewVisible = Vue.ref(false);
+      var artifactPreviewItem = Vue.ref(null);
+
+      function openArtifactPreview(item) {
+        artifactPreviewItem.value = item;
+        artifactPreviewVisible.value = true;
+      }
+
+      function downloadArtifact(item) {
+        var blob = new Blob([item.content || item.title], { type: 'text/plain;charset=utf-8' });
+        var url = URL.createObjectURL(blob);
+        var a = document.createElement('a');
+        a.href = url;
+        a.download = (item.title || '产物') + '.txt';
+        a.click();
+        URL.revokeObjectURL(url);
+      }
+
+      function goToArtifactTask(taskId) {
+        if (!taskId) return;
+        selectTask(taskId);
       }
 
       function handleTaskMenu(command, task) {
@@ -292,6 +375,7 @@
 
       return {
         expert: expert, tasks: tasks, archivedTasks: archivedTasks, showArchived: showArchived,
+        showProgressPanel: showProgressPanel,
         currentTaskId: currentTaskId, messages: messages,
         inputText: inputText, sending: sending, chatBox: chatBox,
         panelArtifacts: panelArtifacts, artifactPanelTaskId: artifactPanelTaskId,
@@ -304,7 +388,15 @@
         artifactPanelTaskTitle: artifactPanelTaskTitle,
         selectTask: selectTask, newTask: newTask, send: send,
         editTask: editTask, deleteTaskItem: deleteTaskItem, archiveTaskItem: archiveTaskItem, unarchiveTaskItem: unarchiveTaskItem,
-        toggleTaskArtifacts: toggleTaskArtifacts, closeArtifactPanel: closeArtifactPanel, handleTaskMenu: handleTaskMenu
+        toggleTaskArtifacts: toggleTaskArtifacts, closeArtifactPanel: closeArtifactPanel, handleTaskMenu: handleTaskMenu,
+        // 任务列表增强
+        taskSearchQuery: taskSearchQuery, taskStatusFilter: taskStatusFilter,
+        filteredTasks: filteredTasks, taskStats: taskStats,
+        // 任务进展面板
+        getCurrentTaskProgress: getCurrentTaskProgress,
+        // 产物面板增强
+        artifactPreviewVisible: artifactPreviewVisible, artifactPreviewItem: artifactPreviewItem,
+        openArtifactPreview: openArtifactPreview, downloadArtifact: downloadArtifact, goToArtifactTask: goToArtifactTask
       };
     },
     template: '\
@@ -319,6 +411,17 @@
             </div>\
           </div>\
           <div class="project-header-actions">\
+            <button\
+              type="button"\
+              class="project-header-action-btn"\
+              :class="{ active: showProgressPanel }"\
+              title="任务进展"\
+              @click="showProgressPanel = !showProgressPanel">\
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">\
+                <path d="M18 20V10"/><path d="M12 20V4"/><path d="M6 20v-6"/>\
+              </svg>\
+              <span>任务进展</span>\
+            </button>\
             <button\
               type="button"\
               class="project-header-action-btn"\
@@ -422,6 +525,50 @@
             </div>\
           </div>\
         </div>\
+        <aside v-show="showProgressPanel && currentTaskId" class="task-progress-panel">\
+          <div class="task-progress-panel-inner">\
+            <div class="task-progress-panel-head">\
+              <h4 class="task-right-panel-title">\
+                <span class="task-panel-title-icon">\
+                  <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">\
+                    <path d="M18 20V10"/><path d="M12 20V4"/><path d="M6 20v-6"/>\
+                  </svg>\
+                </span>\
+                任务进展\
+              </h4>\
+              <button type="button" class="task-progress-close" @click="showProgressPanel = false" title="关闭">×</button>\
+            </div>\
+            <div class="task-progress-body">\
+              <div class="task-progress-status">\
+                <span class="task-progress-status-label">状态</span>\
+                <el-tag :type="getCurrentTaskProgress().status === \'执行中\' ? \'warning\' : getCurrentTaskProgress().status === \'已完成\' ? \'success\' : \'info\'" size="small">{{ getCurrentTaskProgress().status || \'待开始\' }}</el-tag>\
+              </div>\
+              <div class="task-progress-bar-wrap">\
+                <div class="task-progress-bar">\
+                  <div class="task-progress-bar-fill" :style="{ width: getCurrentTaskProgress().percent + \'%\' }"></div>\
+                </div>\
+                <span class="task-progress-percent">{{ getCurrentTaskProgress().percent }}%</span>\
+              </div>\
+              <div class="task-progress-steps">\
+                <div v-for="(step, idx) in getCurrentTaskProgress().steps" :key="idx" class="task-progress-step" :class="\'step-\' + step.type">\
+                  <div class="task-progress-step-dot">\
+                    <svg v-if="step.type === \'thought\'" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>\
+                    <svg v-else-if="step.type === \'skill\'" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>\
+                    <svg v-else-if="step.type === \'action\'" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>\
+                    <svg v-else viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>\
+                  </div>\
+                  <div class="task-progress-step-content">\
+                    <div class="task-progress-step-label">{{ step.label }}</div>\
+                    <div class="task-progress-step-desc">{{ step.skillName || step.toolName || step.content }}</div>\
+                  </div>\
+                </div>\
+                <div v-if="getCurrentTaskProgress().steps.length === 0" class="task-progress-empty">\
+                  <p>暂无进展，发送指令后开始执行</p>\
+                </div>\
+              </div>\
+            </div>\
+          </div>\
+        </aside>\
         <aside class="task-right-panel">\
           <div class="task-right-panel-inner">\
             <div class="task-right-panel-head">\
@@ -435,9 +582,28 @@
                 任务列表\
               </h4>\
             </div>\
+            <div class="task-list-toolbar">\
+              <el-input v-model="taskSearchQuery" placeholder="搜索任务..." size="small" clearable class="task-list-search">\
+                <template #prefix>\
+                  <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>\
+                </template>\
+              </el-input>\
+              <el-select v-model="taskStatusFilter" size="small" class="task-list-filter">\
+                <el-option label="全部状态" value="all" />\
+                <el-option label="待开始" value="pending" />\
+                <el-option label="执行中" value="running" />\
+                <el-option label="已完成" value="completed" />\
+              </el-select>\
+            </div>\
+            <div class="task-list-stats">\
+              <span class="task-stat-item" title="全部">📋 {{ taskStats.total }}</span>\
+              <span class="task-stat-item" title="进行中">▶ {{ taskStats.running }}</span>\
+              <span class="task-stat-item" title="已完成">✅ {{ taskStats.completed }}</span>\
+              <span class="task-stat-item" title="已归档">📦 {{ taskStats.archived }}</span>\
+            </div>\
             <div class="task-list">\
               <task-list-item\
-                v-for="t in tasks"\
+                v-for="t in filteredTasks"\
                 :key="t.id"\
                 :task="t"\
                 :active="currentTaskId === t.id"\
@@ -449,7 +615,7 @@
                 @select="selectTask(t.id)"\
                 @toggle-artifacts="toggleTaskArtifacts(t, $event)"\
                 @menu="handleTaskMenu($event, t)" />\
-              <div v-if="tasks.length === 0 && archivedTasks.length === 0" class="task-list-empty">\
+              <div v-if="filteredTasks.length === 0 && archivedTasks.length === 0" class="task-list-empty">\
                 <div class="task-list-empty-icon">📋</div>\
                 <p>暂无任务</p>\
                 <span>点击上方「新建任务」开始</span>\
@@ -535,6 +701,20 @@
                   </svg>\
                   {{ formatTaskCreatedAt(a.createdAt) }}\
                 </div>\
+                <div class="artifact-actions">\
+                  <button type="button" class="artifact-action-btn" title="预览" @click="openArtifactPreview(a)">\
+                    <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>\
+                    预览\
+                  </button>\
+                  <button type="button" class="artifact-action-btn" title="下载" @click="downloadArtifact(a)">\
+                    <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>\
+                    下载\
+                  </button>\
+                  <button type="button" class="artifact-action-btn" title="跳转到任务" @click="goToArtifactTask(artifactPanelTaskId)">\
+                    <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>\
+                    跳转\
+                  </button>\
+                </div>\
               </div>\
               <div v-if="panelArtifacts.length === 0" class="task-artifacts-empty">\
                 <div class="task-artifacts-empty-icon">📄</div>\
@@ -546,6 +726,20 @@
         </aside>\
         </div>\
       </div>\
+      <el-dialog v-model="artifactPreviewVisible" title="产物预览" width="600px" :close-on-click-modal="true">\
+        <div v-if="artifactPreviewItem" class="artifact-preview-body">\
+          <div class="artifact-preview-meta">\
+            <el-tag size="small" type="info" effect="plain">{{ artifactTypeLabel[artifactPreviewItem.type] || artifactPreviewItem.type }}</el-tag>\
+            <span class="artifact-preview-time">{{ formatTaskCreatedAt(artifactPreviewItem.createdAt) }}</span>\
+          </div>\
+          <h3 class="artifact-preview-title">{{ artifactPreviewItem.title }}</h3>\
+          <div class="artifact-preview-content">{{ artifactPreviewItem.content }}</div>\
+        </div>\
+        <template #footer>\
+          <el-button @click="artifactPreviewVisible = false">关闭</el-button>\
+          <el-button type="primary" @click="downloadArtifact(artifactPreviewItem); artifactPreviewVisible = false">下载</el-button>\
+        </template>\
+      </el-dialog>\
       <div v-else class="main-scroll"><el-empty description="专家不存在"><back-link label="返回专家" @click="$emit(\'nav\', \'/experts\')" /></el-empty></div>'
   };
 

@@ -33,6 +33,22 @@
     return daysAgoIso(def.daysAgo, def.hour, def.minute);
   }
 
+  function getDefaultSkillParams(skillId) {
+    var schema = (window.SKILL_PARAM_SCHEMAS || {})[skillId];
+    if (!schema) return {};
+    var params = {};
+    schema.forEach(function (s) { params[s.key] = s.default; });
+    return params;
+  }
+
+  function getDefaultToolConfig(toolId) {
+    var schema = (window.TOOL_PARAM_SCHEMAS || {})[toolId];
+    if (!schema) return {};
+    var config = {};
+    schema.forEach(function (s) { config[s.key] = s.default !== undefined ? s.default : ''; });
+    return config;
+  }
+
   function addMinutesIso(baseIso, minutes) {
     var d = new Date(String(baseIso).replace(' ', 'T'));
     if (isNaN(d.getTime())) return baseIso;
@@ -382,6 +398,7 @@
         id: uid(),
         expertId: e.id,
         content: '用户偏好：优先关注可落地的短期改进措施。',
+        category: 'user_preference',
         scope: 'user',
         source: 'manual',
         createdAt: nowIso()
@@ -880,30 +897,169 @@
       return state.personas[expertId] || { coreDutyMd: '', workflowMd: '', behaviorMd: '' };
     },
     savePersona: function (expertId, persona) {
-      state.personas[expertId] = persona;
+      var old = state.personas[expertId];
+      if (old && old.coreDutyMd === persona.coreDutyMd && old.workflowMd === persona.workflowMd && old.behaviorMd === persona.behaviorMd) {
+        return;
+      }
+      var history = (old && old.history) ? old.history.slice(0, 4) : [];
+      history.unshift({
+        version: history.length + 1,
+        savedAt: nowIso(),
+        snapshot: {
+          coreDutyMd: old ? old.coreDutyMd || '' : '',
+          workflowMd: old ? old.workflowMd || '' : '',
+          behaviorMd: old ? old.behaviorMd || '' : ''
+        }
+      });
+      state.personas[expertId] = {
+        coreDutyMd: persona.coreDutyMd,
+        workflowMd: persona.workflowMd,
+        behaviorMd: persona.behaviorMd,
+        history: history
+      };
       persist();
+    },
+    getPersonaHistory: function (expertId) {
+      var p = state.personas[expertId];
+      return (p && p.history) ? p.history : [];
+    },
+    restorePersonaVersion: function (expertId, versionIndex) {
+      var p = state.personas[expertId];
+      if (!p || !p.history || !p.history[versionIndex]) return null;
+      var snap = p.history[versionIndex].snapshot;
+      return { coreDutyMd: snap.coreDutyMd, workflowMd: snap.workflowMd, behaviorMd: snap.behaviorMd };
     },
 
     getSkillIds: function (expertId) {
-      return state.skillBindings[expertId] || [];
+      var bindings = state.skillBindings[expertId] || [];
+      return bindings.map(function (b) { return typeof b === 'string' ? b : b.skillId; });
     },
-    setSkillIds: function (expertId, ids) {
-      state.skillBindings[expertId] = ids;
+    getSkillBindings: function (expertId) {
+      var raw = state.skillBindings[expertId] || [];
+      return raw.map(function (b) {
+        if (typeof b === 'string') {
+          return { skillId: b, enabled: true, params: getDefaultSkillParams(b) };
+        }
+        return b;
+      });
+    },
+    setSkillBindings: function (expertId, bindings) {
+      state.skillBindings[expertId] = bindings;
       persist();
     },
-    getToolIds: function (expertId) {
-      return state.toolBindings[expertId] || [];
+    addSkillBinding: function (expertId, skillId) {
+      if (!state.skillBindings[expertId]) state.skillBindings[expertId] = [];
+      if (state.skillBindings[expertId].some(function (b) {
+        return (typeof b === 'string' ? b : b.skillId) === skillId;
+      })) return;
+      state.skillBindings[expertId].push({
+        skillId: skillId, enabled: true, params: getDefaultSkillParams(skillId)
+      });
+      persist();
     },
-    setToolIds: function (expertId, ids) {
-      state.toolBindings[expertId] = ids;
+    removeSkillBinding: function (expertId, skillId) {
+      if (!state.skillBindings[expertId]) return;
+      state.skillBindings[expertId] = state.skillBindings[expertId].filter(function (b) {
+        return (typeof b === 'string' ? b : b.skillId) !== skillId;
+      });
+      persist();
+    },
+    toggleSkillBinding: function (expertId, skillId, enabled) {
+      if (!state.skillBindings[expertId]) return;
+      state.skillBindings[expertId] = state.skillBindings[expertId].map(function (b) {
+        var id = typeof b === 'string' ? b : b.skillId;
+        if (id !== skillId) return b;
+        if (typeof b === 'string') return { skillId: b, enabled: enabled, params: getDefaultSkillParams(b) };
+        return Object.assign({}, b, { enabled: enabled });
+      });
+      persist();
+    },
+    updateSkillParams: function (expertId, skillId, params) {
+      if (!state.skillBindings[expertId]) return;
+      state.skillBindings[expertId] = state.skillBindings[expertId].map(function (b) {
+        var id = typeof b === 'string' ? b : b.skillId;
+        if (id !== skillId) return b;
+        if (typeof b === 'string') return { skillId: b, enabled: true, params: params };
+        return Object.assign({}, b, { params: params });
+      });
+      persist();
+    },
+
+    getToolIds: function (expertId) {
+      var bindings = state.toolBindings[expertId] || [];
+      return bindings.map(function (b) { return typeof b === 'string' ? b : b.toolId; });
+    },
+    getToolBindings: function (expertId) {
+      var raw = state.toolBindings[expertId] || [];
+      return raw.map(function (b) {
+        if (typeof b === 'string') {
+          return { toolId: b, enabled: true, status: 'unconfigured', config: getDefaultToolConfig(b) };
+        }
+        return b;
+      });
+    },
+    setToolBindings: function (expertId, bindings) {
+      state.toolBindings[expertId] = bindings;
+      persist();
+    },
+    addToolBinding: function (expertId, toolId) {
+      if (!state.toolBindings[expertId]) state.toolBindings[expertId] = [];
+      if (state.toolBindings[expertId].some(function (b) {
+        return (typeof b === 'string' ? b : b.toolId) === toolId;
+      })) return;
+      state.toolBindings[expertId].push({
+        toolId: toolId, enabled: true, status: 'unconfigured', config: getDefaultToolConfig(toolId)
+      });
+      persist();
+    },
+    removeToolBinding: function (expertId, toolId) {
+      if (!state.toolBindings[expertId]) return;
+      state.toolBindings[expertId] = state.toolBindings[expertId].filter(function (b) {
+        return (typeof b === 'string' ? b : b.toolId) !== toolId;
+      });
+      persist();
+    },
+    toggleToolBinding: function (expertId, toolId, enabled) {
+      if (!state.toolBindings[expertId]) return;
+      state.toolBindings[expertId] = state.toolBindings[expertId].map(function (b) {
+        var id = typeof b === 'string' ? b : b.toolId;
+        if (id !== toolId) return b;
+        if (typeof b === 'string') return { toolId: b, enabled: enabled, status: 'unconfigured', config: getDefaultToolConfig(b) };
+        return Object.assign({}, b, { enabled: enabled });
+      });
+      persist();
+    },
+    updateToolConfig: function (expertId, toolId, config) {
+      if (!state.toolBindings[expertId]) return;
+      state.toolBindings[expertId] = state.toolBindings[expertId].map(function (b) {
+        var id = typeof b === 'string' ? b : b.toolId;
+        if (id !== toolId) return b;
+        var hasConfig = config && Object.keys(config).some(function (k) { return config[k]; });
+        if (typeof b === 'string') return { toolId: b, enabled: true, status: hasConfig ? 'configured' : 'unconfigured', config: config || {} };
+        return Object.assign({}, b, { config: config || {}, status: hasConfig ? 'configured' : 'unconfigured' });
+      });
+      persist();
+    },
+    testToolConnection: function (expertId, toolId) {
+      if (!state.toolBindings[expertId]) return;
+      state.toolBindings[expertId] = state.toolBindings[expertId].map(function (b) {
+        var id = typeof b === 'string' ? b : b.toolId;
+        if (id !== toolId) return b;
+        if (typeof b === 'string') return { toolId: b, enabled: true, status: 'connected', config: getDefaultToolConfig(b) };
+        return Object.assign({}, b, { status: 'connected' });
+      });
       persist();
     },
 
     getMemories: function (expertId) {
       return state.memories.filter(function (m) { return m.expertId === expertId; });
     },
-    addMemory: function (expertId, content) {
-      var m = { id: uid(), expertId: expertId, content: content, scope: 'user', source: 'manual', createdAt: nowIso() };
+    addMemory: function (expertId, content, category) {
+      var m = {
+        id: uid(), expertId: expertId, content: content,
+        category: category || 'other',
+        scope: 'user', source: 'manual', createdAt: nowIso()
+      };
       state.memories.unshift(m);
       persist();
       return m;
@@ -1214,12 +1370,25 @@
         return (b.createdAt || '').localeCompare(a.createdAt || '');
       });
     },
-    addWorkspaceFile: function (expertId, name) {
+    addWorkspaceFile: function (expertId, payload) {
       if (!state.workspaceFiles[expertId]) state.workspaceFiles[expertId] = [];
-      var f = { id: uid(), name: name, kind: 'material', createdAt: nowIso() };
+      var f = {
+        id: uid(),
+        name: typeof payload === 'string' ? payload : payload.name,
+        type: payload.type || 'document',
+        size: payload.size || 0,
+        content: payload.content || '',
+        kind: 'material',
+        createdAt: nowIso()
+      };
       state.workspaceFiles[expertId].push(f);
       persist();
       return f;
+    },
+    deleteWorkspaceFile: function (expertId, fileId) {
+      if (!state.workspaceFiles[expertId]) return;
+      state.workspaceFiles[expertId] = state.workspaceFiles[expertId].filter(function (f) { return f.id !== fileId; });
+      persist();
     },
 
     getExpertArtifacts: function (expertId) {
