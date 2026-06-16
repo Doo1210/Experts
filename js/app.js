@@ -17,7 +17,7 @@
       var createWizard = createExpertCreateForm(store, {
         onCreated: function (expert) {
           load();
-          ctx.emit('nav', '/experts/' + expert.id + '?tab=overview');
+          ctx.emit('nav', '/experts/' + expert.id + '?tab=persona');
         }
       });
 
@@ -26,7 +26,7 @@
       }
 
       function goTasks(expert) { ctx.emit('nav', '/experts/' + expert.id + '/tasks'); }
-      function goManage(expert) { ctx.emit('nav', '/experts/' + expert.id + '?tab=overview'); }
+      function goManage(expert) { ctx.emit('nav', '/experts/' + expert.id + '?tab=persona'); }
 
       var showPreviewDialog = Vue.ref(false);
       var previewExpert = Vue.ref(null);
@@ -56,7 +56,7 @@
         if (!previewExpert.value) return;
         var id = previewExpert.value.id;
         closePreview();
-        ctx.emit('nav', '/experts/' + id + '?tab=overview');
+        ctx.emit('nav', '/experts/' + id + '?tab=persona');
       }
 
       function goTasksFromPreview() {
@@ -85,7 +85,13 @@
       }
 
       load();
-      Vue.onMounted(function () { load(); });
+      Vue.onMounted(function () {
+        load();
+        window.addEventListener('app-store-updated', load);
+      });
+      Vue.onBeforeUnmount(function () {
+        window.removeEventListener('app-store-updated', load);
+      });
 
       Vue.watch(function () { return props.openCreate; }, function (v) {
         if (v === '1' || v === true) {
@@ -139,7 +145,7 @@
                 </el-dropdown-menu>\
               </template>\
             </el-dropdown>\
-            <div class="expert-card-body" @click="goTasks(expert)">\
+            <div class="expert-card-body" @click="goManage(expert)">\
               <div class="card-header">\
                 <img class="card-avatar" :src="expert.avatar" :alt="expert.name">\
                 <div class="card-header-text">\
@@ -238,8 +244,10 @@
     emits: ['nav'],
     setup: function (props, ctx) {
       var expert = Vue.ref(null);
-      var activeTab = Vue.ref(props.initialTab || 'overview');
+      var activeTab = Vue.ref(props.initialTab || 'persona');
+      if (activeTab.value === 'overview' || activeTab.value === 'basic') activeTab.value = 'persona';
       var persona = Vue.ref({ coreDutyMd: '', workflowMd: '', behaviorMd: '' });
+      var workspaceTab = Vue.ref('materials');
       var taskSubTab = Vue.ref('dialogue');
       var tasks = Vue.ref([]);
       var projects = Vue.ref([]);
@@ -394,6 +402,17 @@
           tasks.value = store.getTasksByExpert(props.expertId);
           ElementPlus.ElMessage.success('任务名称已更新');
         }).catch(function () {});
+      }
+
+      function taskSourceLabel(task) {
+        if (!task || !task.type) return '未知';
+        if (task.type === 'project') return '项目任务';
+        if (task.type === 'dialogue') return '对话任务';
+        return task.type;
+      }
+
+      function taskCreatedAtLabel(task) {
+        return (task && (task.createdAt || task.updatedAt)) || '-';
       }
 
       function archiveTaskItem(task) {
@@ -872,7 +891,7 @@
       Vue.onMounted(load);
 
       return {
-        expert: expert, activeTab: activeTab, persona: persona, taskSubTab: taskSubTab,
+        expert: expert, activeTab: activeTab, persona: persona, workspaceTab: workspaceTab, taskSubTab: taskSubTab,
         tasks: tasks, projects: projects, memories: memories, memoryInput: memoryInput,
         skillBindings: skillBindings, toolBindings: toolBindings,
         imChannels: imChannels, permissions: permissions, materials: materials, expertArtifacts: expertArtifacts,
@@ -881,6 +900,7 @@
         skills: catalog.SKILLS_CATALOG, tools: catalog.TOOLS_CATALOG,
         tagColors: catalog.TAG_COLORS,
         statusLabel: catalog.TASK_STATUS_LABEL, statusType: catalog.TASK_STATUS_TYPE,
+        taskSourceLabel: taskSourceLabel, taskCreatedAtLabel: taskCreatedAtLabel,
         artifactTypeLabel: catalog.ARTIFACT_TYPE_LABEL,
         savePersona: savePersona, saveSkillBindings: saveSkillBindings, saveToolBindings: saveToolBindings,
         addMemory: addMemory, removeMemory: removeMemory, saveIm: saveIm, savePerm: savePerm, addMaterial: addMaterial,
@@ -970,7 +990,7 @@
         </div>\
         <div class="detail-main expert-detail-tabs">\
           <el-tabs v-model="activeTab" class="expert-detail-tabs-inner">\
-              <el-tab-pane label="人设" name="overview">\
+              <el-tab-pane label="人设" name="persona">\
                 <div class="detail-tab-pane">\
                   <div class="detail-section-head">\
                     <h3 class="detail-section-title">人设配置</h3>\
@@ -1016,6 +1036,55 @@
                   </div>\
                 </div>\
               </el-tab-pane>\
+              <el-tab-pane label="工作空间" name="workspace">\
+                <div class="detail-tab-pane">\
+                  <el-tabs v-model="workspaceTab">\
+                    <el-tab-pane label="资料" name="materials">\
+                      <div class="detail-action-bar">\
+                        <input ref="materialFileInput" type="file" multiple class="material-file-input-hidden" @change="handleMaterialFileSelect">\
+                        <el-button type="primary" size="small" @click="openMaterialUpload">上传文件</el-button>\
+                        <el-input v-model="materialSearchQuery" placeholder="搜索资料..." size="small" clearable style="width:180px" />\
+                        <el-select v-model="materialTypeFilter" size="small" style="width:100px">\
+                          <el-option label="全部类型" value="all" />\
+                          <el-option label="文档" value="document" />\
+                          <el-option label="表格" value="spreadsheet" />\
+                          <el-option label="数据" value="data" />\
+                        </el-select>\
+                      </div>\
+                      <div class="detail-table-wrap">\
+                        <el-table :data="filteredMaterials" stripe empty-text="暂无资料">\
+                          <el-table-column prop="name" label="名称" min-width="180" />\
+                          <el-table-column label="类型" width="80">\
+                            <template #default="{ row }">{{ row.type === \'spreadsheet\' ? \'表格\' : row.type === \'data\' ? \'数据\' : \'文档\' }}</template>\
+                          </el-table-column>\
+                          <el-table-column prop="createdAt" label="添加时间" width="150" />\
+                        </el-table>\
+                      </div>\
+                    </el-tab-pane>\
+                    <el-tab-pane label="产物" name="artifacts">\
+                      <div class="detail-action-bar">\
+                        <el-input v-model="artifactSearchQuery" placeholder="搜索产物..." size="small" clearable style="width:180px" />\
+                        <el-select v-model="artifactTypeFilter" size="small" style="width:100px">\
+                          <el-option label="全部类型" value="all" />\
+                          <el-option label="报告" value="report" />\
+                          <el-option label="数据" value="data" />\
+                          <el-option label="文档" value="document" />\
+                        </el-select>\
+                      </div>\
+                      <div class="detail-table-wrap">\
+                        <el-table :data="filteredArtifacts" stripe empty-text="暂无匹配产物">\
+                          <el-table-column prop="title" label="产物标题" min-width="160" />\
+                          <el-table-column label="类型" width="80">\
+                            <template #default="{ row }">{{ artifactTypeLabel[row.type] || row.type }}</template>\
+                          </el-table-column>\
+                          <el-table-column prop="taskTitle" label="来源任务" width="140" />\
+                          <el-table-column prop="createdAt" label="生成时间" width="150" />\
+                        </el-table>\
+                      </div>\
+                    </el-tab-pane>\
+                  </el-tabs>\
+                </div>\
+              </el-tab-pane>\
               <el-tab-pane label="任务" name="tasks">\
                 <div class="detail-tab-pane">\
                   <div class="detail-action-bar">\
@@ -1036,11 +1105,17 @@
                   </div>\
                   <div class="detail-table-wrap">\
                   <el-table :data="filteredTasks" stripe empty-text="暂无匹配任务">\
-                    <el-table-column prop="title" label="标题" min-width="160" />\
+                    <el-table-column prop="id" label="任务ID" min-width="180" />\
+                    <el-table-column prop="title" label="任务名称" min-width="160" />\
+                    <el-table-column label="任务来源" width="110">\
+                      <template #default="{ row }">{{ taskSourceLabel(row) }}</template>\
+                    </el-table-column>\
                     <el-table-column label="状态" width="90">\
                       <template #default="{ row }"><el-tag :type="statusType[row.status]" size="small">{{ statusLabel[row.status] }}</el-tag></template>\
                     </el-table-column>\
-                    <el-table-column prop="updatedAt" label="更新时间" width="150" />\
+                    <el-table-column label="创建时间" width="150">\
+                      <template #default="{ row }">{{ taskCreatedAtLabel(row) }}</template>\
+                    </el-table-column>\
                     <el-table-column label="操作" width="200">\
                       <template #default="{ row }">\
                         <el-button link type="primary" size="small" @click="$emit(\'nav\', \'/experts/\' + expert.id + \'/tasks/\' + row.id)">打开</el-button>\
@@ -1064,29 +1139,38 @@
                   </div>\
                 </div>\
               </el-tab-pane>\
-              <el-tab-pane label="项目" name="projects">\
+              <el-tab-pane label="记忆" name="memory">\
                 <div class="detail-tab-pane">\
-                  <el-empty v-if="projects.length === 0" description="暂无项目" />\
-                  <div v-else class="project-grid" style="grid-template-columns:repeat(2,1fr)">\
-                    <div v-for="p in projects" :key="p.id" class="project-card project-card-compact" @click="$emit(\'nav\', \'/projects/\' + p.id)">\
-                      <div class="project-card-accent"></div>\
-                      <div class="project-card-body">\
-                        <div class="card-name">{{ p.name }}</div>\
-                        <p class="card-desc">{{ p.description }}</p>\
-                        <div class="project-member-role-row">\
-                          <span class="project-member-role-tag">{{ getProjectMemberInfo(p.id) && getProjectMemberInfo(p.id).role === \'lead\' ? \'项目负责人\' : \'成员\' }}</span>\
-                          <span v-if="getProjectMemberInfo(p.id)" class="project-member-progress-text">进度 {{ getProjectMemberInfo(p.id).progress }}%</span>\
-                        </div>\
-                        <div v-if="getProjectMemberInfo(p.id)" class="project-card-progress">\
-                          <div class="project-progress-track">\
-                            <div class="project-progress-fill" :style="{ width: getProjectMemberInfo(p.id).progress + \'%\' }"></div>\
-                          </div>\
-                        </div>\
-                        <div v-if="getProjectTaskStats(p.id).total" class="project-member-task-stat">\
-                          个人任务 {{ getProjectTaskStats(p.id).done }}/{{ getProjectTaskStats(p.id).total }} 已完成\
-                        </div>\
-                      </div>\
-                    </div>\
+                  <div class="detail-action-bar">\
+                    <el-input v-model="memoryInput" placeholder="新增记忆条目" class="detail-action-input" size="small" />\
+                    <el-select v-model="memoryCategoryInput" size="small" style="width:110px">\
+                      <el-option label="用户偏好" value="user_preference" />\
+                      <el-option label="项目背景" value="project_context" />\
+                      <el-option label="领域知识" value="domain_knowledge" />\
+                      <el-option label="其他" value="other" />\
+                    </el-select>\
+                    <el-button type="primary" size="small" @click="addMemoryWithCategory">添加</el-button>\
+                  </div>\
+                  <div class="detail-action-bar" style="padding:8px 14px">\
+                    <el-input v-model="memorySearchQuery" placeholder="搜索记忆..." size="small" clearable style="width:180px" />\
+                    <el-select v-model="memoryCategoryFilter" size="small" style="width:110px">\
+                      <el-option label="全部分类" value="all" />\
+                      <el-option label="用户偏好" value="user_preference" />\
+                      <el-option label="项目背景" value="project_context" />\
+                      <el-option label="领域知识" value="domain_knowledge" />\
+                      <el-option label="其他" value="other" />\
+                    </el-select>\
+                    <el-select v-model="memorySourceFilter" size="small" style="width:110px">\
+                      <el-option label="全部来源" value="all" />\
+                      <el-option label="手动添加" value="manual" />\
+                      <el-option label="自动沉淀" value="auto" />\
+                    </el-select>\
+                  </div>\
+                  <div class="detail-table-wrap">\
+                  <el-table :data="filteredMemories" stripe empty-text="暂无匹配记忆">\
+                    <el-table-column prop="content" label="内容" min-width="240" />\
+                    <el-table-column prop="createdAt" label="时间" width="150" />\
+                  </el-table>\
                   </div>\
                 </div>\
               </el-tab-pane>\
@@ -1215,65 +1299,6 @@
                   </div>\
                 </div>\
               </el-tab-pane>\
-              <el-tab-pane label="记忆" name="memory">\
-                <div class="detail-tab-pane">\
-                  <div class="detail-action-bar">\
-                    <el-input v-model="memoryInput" placeholder="新增记忆条目" class="detail-action-input" size="small" />\
-                    <el-select v-model="memoryCategoryInput" size="small" style="width:110px">\
-                      <el-option label="用户偏好" value="user_preference" />\
-                      <el-option label="项目背景" value="project_context" />\
-                      <el-option label="领域知识" value="domain_knowledge" />\
-                      <el-option label="其他" value="other" />\
-                    </el-select>\
-                    <el-button type="primary" size="small" @click="addMemoryWithCategory">添加</el-button>\
-                  </div>\
-                  <div class="detail-action-bar" style="padding:8px 14px">\
-                    <el-input v-model="memorySearchQuery" placeholder="搜索记忆..." size="small" clearable style="width:180px" />\
-                    <el-select v-model="memoryCategoryFilter" size="small" style="width:110px">\
-                      <el-option label="全部分类" value="all" />\
-                      <el-option label="用户偏好" value="user_preference" />\
-                      <el-option label="项目背景" value="project_context" />\
-                      <el-option label="领域知识" value="domain_knowledge" />\
-                      <el-option label="其他" value="other" />\
-                    </el-select>\
-                    <el-select v-model="memorySourceFilter" size="small" style="width:110px">\
-                      <el-option label="全部来源" value="all" />\
-                      <el-option label="手动添加" value="manual" />\
-                      <el-option label="自动沉淀" value="auto" />\
-                    </el-select>\
-                  </div>\
-                  <div class="detail-table-wrap">\
-                  <el-table :data="filteredMemories" stripe empty-text="暂无匹配记忆">\
-                    <el-table-column label="内容" min-width="200">\
-                      <template #default="{ row }">\
-                        <div style="display:flex;align-items:flex-start;gap:8px">\
-                          <span style="font-size:15px;flex-shrink:0;margin-top:2px">{{ MEMORY_CATEGORY_ICONS[row.category] || \'💬\' }}</span>\
-                          <div>\
-                            <div style="font-size:13px;line-height:1.5">{{ row.content }}</div>\
-                            <div style="display:flex;gap:6px;margin-top:4px">\
-                              <el-tag size="small" type="info">{{ MEMORY_CATEGORY_LABELS[row.category] || \'其他\' }}</el-tag>\
-                              <el-tag v-if="row.source === \'auto\'" size="small" type="success" effect="plain">自动沉淀</el-tag>\
-                              <el-tag v-else size="small" effect="plain">手动添加</el-tag>\
-                            </div>\
-                          </div>\
-                        </div>\
-                      </template>\
-                    </el-table-column>\
-                    <el-table-column prop="createdAt" label="时间" width="150" />\
-                    <el-table-column label="操作" width="80">\
-                      <template #default="{ row }"><el-button link type="danger" size="small" @click="removeMemory(row.id)">删除</el-button></template>\
-                    </el-table-column>\
-                  </el-table>\
-                  </div>\
-                  <div class="detail-tab-footer detail-tab-footer--stats">\
-                    <span>共 {{ memoryStats.total }} 条记忆</span>\
-                    <span class="detail-stat-sep">·</span>\
-                    <span>手动添加 {{ memoryStats.manual }}</span>\
-                    <span class="detail-stat-sep">·</span>\
-                    <span>自动沉淀 {{ memoryStats.auto }}</span>\
-                  </div>\
-                </div>\
-              </el-tab-pane>\
               <el-tab-pane label="IM 渠道" name="im">\
                 <div class="detail-tab-pane">\
                   <div class="detail-section-head">\
@@ -1338,95 +1363,6 @@
                     </el-table-column>\
                   </el-table>\
                   </div>\
-                </div>\
-              </el-tab-pane>\
-              <el-tab-pane label="资料" name="materials">\
-                <div class="detail-tab-pane">\
-                  <div class="detail-action-bar">\
-                    <input ref="materialFileInput" type="file" multiple class="material-file-input-hidden" @change="handleMaterialFileSelect">\
-                    <el-button type="primary" size="small" @click="openMaterialUpload">\
-                      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" style="margin-right:4px"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>\
-                      上传文件\
-                    </el-button>\
-                    <el-input v-model="materialSearchQuery" placeholder="搜索资料..." size="small" clearable style="width:180px" />\
-                    <el-select v-model="materialTypeFilter" size="small" style="width:100px">\
-                      <el-option label="全部类型" value="all" />\
-                      <el-option label="文档" value="document" />\
-                      <el-option label="表格" value="spreadsheet" />\
-                      <el-option label="数据" value="data" />\
-                    </el-select>\
-                  </div>\
-                  <div class="detail-table-wrap">\
-                  <el-table :data="filteredMaterials" stripe empty-text="暂无资料">\
-                    <el-table-column label="名称" min-width="180">\
-                      <template #default="{ row }">\
-                        <div style="display:flex;align-items:center;gap:8px">\
-                          <span style="font-size:16px">{{ fileTypeIcon(row.type) }}</span>\
-                          <span>{{ row.name }}</span>\
-                        </div>\
-                      </template>\
-                    </el-table-column>\
-                    <el-table-column label="类型" width="80">\
-                      <template #default="{ row }">{{ row.type === \'spreadsheet\' ? \'表格\' : row.type === \'data\' ? \'数据\' : \'文档\' }}</template>\
-                    </el-table-column>\
-                    <el-table-column label="大小" width="90">\
-                      <template #default="{ row }">{{ formatFileSize(row.size) }}</template>\
-                    </el-table-column>\
-                    <el-table-column prop="createdAt" label="添加时间" width="150" />\
-                    <el-table-column label="操作" width="180">\
-                      <template #default="{ row }">\
-                        <el-button link type="primary" size="small" @click="openMaterialPreview(row)">预览</el-button>\
-                        <el-button link type="primary" size="small" @click="downloadMaterial(row)">下载</el-button>\
-                        <el-button link type="danger" size="small" @click="deleteMaterial(row)">删除</el-button>\
-                      </template>\
-                    </el-table-column>\
-                  </el-table>\
-                  </div>\
-                  <el-empty v-if="materials.length === 0" description="暂无资料，点击上方按钮上传文件" :image-size="56" />\
-                </div>\
-              </el-tab-pane>\
-              <el-tab-pane label="产物" name="artifacts">\
-                <div class="detail-tab-pane">\
-                  <div class="detail-action-bar">\
-                    <el-input v-model="artifactSearchQuery" placeholder="搜索产物..." size="small" clearable style="width:180px" />\
-                    <el-select v-model="artifactTypeFilter" size="small" style="width:100px">\
-                      <el-option label="全部类型" value="all" />\
-                      <el-option label="报告" value="report" />\
-                      <el-option label="数据" value="data" />\
-                      <el-option label="文档" value="document" />\
-                    </el-select>\
-                    <el-select v-model="artifactTaskFilter" size="small" style="width:160px" placeholder="来源任务">\
-                      <el-option label="全部任务" value="all" />\
-                      <el-option v-for="t in tasks" :key="t.id" :label="t.title" :value="t.id" />\
-                    </el-select>\
-                  </div>\
-                  <div class="detail-table-wrap">\
-                  <el-table :data="filteredArtifacts" stripe empty-text="暂无匹配产物">\
-                    <el-table-column prop="title" label="产物标题" min-width="160" />\
-                    <el-table-column label="类型" width="80">\
-                      <template #default="{ row }">{{ artifactTypeLabel[row.type] || row.type }}</template>\
-                    </el-table-column>\
-                    <el-table-column prop="taskTitle" label="来源任务" width="140" />\
-                    <el-table-column prop="createdAt" label="生成时间" width="150" />\
-                    <el-table-column label="操作" width="200">\
-                      <template #default="{ row }">\
-                        <el-button link type="primary" size="small" @click="openArtifactPreview(row)">预览</el-button>\
-                        <el-button link type="primary" size="small" @click="downloadArtifact(row)">下载</el-button>\
-                        <el-button link type="primary" size="small" @click="goToArtifactTask(row.taskId)">跳转任务</el-button>\
-                      </template>\
-                    </el-table-column>\
-                  </el-table>\
-                  </div>\
-                  <div class="detail-tab-footer detail-tab-footer--stats">\
-                    <span>共 {{ artifactStats.total }} 项产物</span>\
-                    <span class="detail-stat-sep">·</span>\
-                    <span>报告 {{ artifactStats.report }}</span>\
-                    <span class="detail-stat-sep">·</span>\
-                    <span>数据 {{ artifactStats.data }}</span>\
-                    <span class="detail-stat-sep">·</span>\
-                    <span>文档 {{ artifactStats.document }}</span>\
-                  </div>\
-                  <el-empty v-if="expertArtifacts.length === 0" description="暂无产物，完成任务对话后将自动生成" :image-size="56" />\
                 </div>\
               </el-tab-pane>\
             </el-tabs>\

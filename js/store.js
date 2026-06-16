@@ -6,6 +6,7 @@
   const DEFAULT_EXPERT_AVATAR = 'data:image/svg+xml,' + encodeURIComponent(
     '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 80 80"><rect width="80" height="80" fill="#e8eef8"/><circle cx="40" cy="29" r="13" fill="#b8c5dc"/><ellipse cx="40" cy="63" rx="21" ry="15" fill="#b8c5dc"/></svg>'
   );
+  var DEV_MOCK = window.DEV_MOCK === true;
 
   function uid() {
     return 'id_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 8);
@@ -336,6 +337,35 @@
   }
 
   let state = load();
+
+  async function syncExpertsFromSidecar() {
+    if (DEV_MOCK) return;
+    if (!window.SidecarApi || !window.SidecarApi.listExperts) return;
+    var remote = await window.SidecarApi.listExperts();
+    if (!remote || !remote.length) return;
+    state.experts = remote.map(function (e) {
+      return {
+        id: String(e.profile),
+        name: e.displayName || e.profile,
+        avatar: e.avatarUrl || DEFAULT_EXPERT_AVATAR,
+        description: e.intro || '',
+        expertise: e.domains || [],
+        category: '工艺制造',
+        visibility: 'public',
+        status: 'active',
+        updatedAt: nowIso()
+      };
+    });
+    state.experts.forEach(function (e) {
+      if (!state.personas[e.id]) {
+        state.personas[e.id] = { coreDutyMd: '', workflowMd: '', behaviorMd: '' };
+      }
+      if (!state.skillBindings[e.id]) state.skillBindings[e.id] = [];
+      if (!state.toolBindings[e.id]) state.toolBindings[e.id] = [];
+    });
+    persist();
+    window.dispatchEvent(new CustomEvent('app-store-updated'));
+  }
 
   function persist() {
     return save(state);
@@ -817,6 +847,9 @@
   }
 
   window.AppStore = {
+    isDevMock: function () {
+      return DEV_MOCK;
+    },
     uid: uid,
     nowIso: nowIso,
     init: function () {
@@ -829,6 +862,7 @@
       migrateProjectFiles();
       migrateProjectMessageTypes();
       syncDemoData();
+      syncExpertsFromSidecar();
       return state;
     },
     reset: function () {
@@ -853,6 +887,14 @@
       if (idx >= 0) state.experts[idx] = expert;
       else state.experts.unshift(expert);
       persist();
+      if (window.SidecarApi && window.SidecarApi.patchExpert) {
+        window.SidecarApi.patchExpert(String(expert.id), {
+          displayName: expert.name,
+          intro: expert.description || '',
+          avatarUrl: expert.avatar || null,
+          domains: expert.expertise || []
+        });
+      }
       return expert;
     },
     createExpert: function (payload) {
@@ -872,6 +914,20 @@
       state.skillBindings[expert.id] = payload.skillIds || [];
       state.toolBindings[expert.id] = payload.toolIds || [];
       persist();
+      if (window.SidecarApi && window.SidecarApi.createExpert) {
+        window.SidecarApi.createExpert({
+          profile: String(expert.id),
+          displayName: expert.name,
+          intro: expert.description || '',
+          avatarUrl: expert.avatar || null,
+          domains: expert.expertise || [],
+          coreDutyMd: (payload.persona && payload.persona.coreDutyMd) || '',
+          workflowMd: (payload.persona && payload.persona.workflowMd) || '',
+          behaviorMd: (payload.persona && payload.persona.behaviorMd) || '',
+          skills: payload.skillIds || [],
+          tools: payload.toolIds || []
+        });
+      }
       return expert;
     },
     deleteExpert: function (id) {
@@ -881,6 +937,9 @@
       delete state.toolBindings[id];
       state.favorites = state.favorites.filter(function (f) { return f !== id; });
       persist();
+      if (window.SidecarApi && window.SidecarApi.deleteExpert) {
+        window.SidecarApi.deleteExpert(String(id));
+      }
     },
 
     isFavorite: function (expertId) {
@@ -918,6 +977,13 @@
         history: history
       };
       persist();
+      if (!DEV_MOCK && window.SidecarApi && window.SidecarApi.patchExpert) {
+        window.SidecarApi.patchExpert(String(expertId), {
+          coreDutyMd: persona.coreDutyMd || '',
+          workflowMd: persona.workflowMd || '',
+          behaviorMd: persona.behaviorMd || ''
+        });
+      }
     },
     getPersonaHistory: function (expertId) {
       var p = state.personas[expertId];
@@ -946,6 +1012,10 @@
     setSkillBindings: function (expertId, bindings) {
       state.skillBindings[expertId] = bindings;
       persist();
+      if (!DEV_MOCK && window.SidecarApi && window.SidecarApi.patchExpert) {
+        var skillIds = (bindings || []).map(function (b) { return typeof b === 'string' ? b : b.skillId; });
+        window.SidecarApi.patchExpert(String(expertId), { skills: skillIds });
+      }
     },
     addSkillBinding: function (expertId, skillId) {
       if (!state.skillBindings[expertId]) state.skillBindings[expertId] = [];
@@ -956,6 +1026,9 @@
         skillId: skillId, enabled: true, params: getDefaultSkillParams(skillId)
       });
       persist();
+      if (!DEV_MOCK && window.SidecarApi && window.SidecarApi.patchExpert) {
+        window.SidecarApi.patchExpert(String(expertId), { skills: this.getSkillIds(expertId) });
+      }
     },
     removeSkillBinding: function (expertId, skillId) {
       if (!state.skillBindings[expertId]) return;
@@ -963,6 +1036,9 @@
         return (typeof b === 'string' ? b : b.skillId) !== skillId;
       });
       persist();
+      if (!DEV_MOCK && window.SidecarApi && window.SidecarApi.patchExpert) {
+        window.SidecarApi.patchExpert(String(expertId), { skills: this.getSkillIds(expertId) });
+      }
     },
     toggleSkillBinding: function (expertId, skillId, enabled) {
       if (!state.skillBindings[expertId]) return;
@@ -973,6 +1049,9 @@
         return Object.assign({}, b, { enabled: enabled });
       });
       persist();
+      if (!DEV_MOCK && window.SidecarApi && window.SidecarApi.patchExpert) {
+        window.SidecarApi.patchExpert(String(expertId), { skills: this.getSkillIds(expertId) });
+      }
     },
     updateSkillParams: function (expertId, skillId, params) {
       if (!state.skillBindings[expertId]) return;
@@ -983,6 +1062,9 @@
         return Object.assign({}, b, { params: params });
       });
       persist();
+      if (!DEV_MOCK && window.SidecarApi && window.SidecarApi.patchExpert) {
+        window.SidecarApi.patchExpert(String(expertId), { skills: this.getSkillIds(expertId) });
+      }
     },
 
     getToolIds: function (expertId) {
@@ -1001,6 +1083,10 @@
     setToolBindings: function (expertId, bindings) {
       state.toolBindings[expertId] = bindings;
       persist();
+      if (!DEV_MOCK && window.SidecarApi && window.SidecarApi.patchExpert) {
+        var toolIds = (bindings || []).map(function (b) { return typeof b === 'string' ? b : b.toolId; });
+        window.SidecarApi.patchExpert(String(expertId), { tools: toolIds });
+      }
     },
     addToolBinding: function (expertId, toolId) {
       if (!state.toolBindings[expertId]) state.toolBindings[expertId] = [];
@@ -1011,6 +1097,9 @@
         toolId: toolId, enabled: true, status: 'unconfigured', config: getDefaultToolConfig(toolId)
       });
       persist();
+      if (!DEV_MOCK && window.SidecarApi && window.SidecarApi.patchExpert) {
+        window.SidecarApi.patchExpert(String(expertId), { tools: this.getToolIds(expertId) });
+      }
     },
     removeToolBinding: function (expertId, toolId) {
       if (!state.toolBindings[expertId]) return;
@@ -1018,6 +1107,9 @@
         return (typeof b === 'string' ? b : b.toolId) !== toolId;
       });
       persist();
+      if (!DEV_MOCK && window.SidecarApi && window.SidecarApi.patchExpert) {
+        window.SidecarApi.patchExpert(String(expertId), { tools: this.getToolIds(expertId) });
+      }
     },
     toggleToolBinding: function (expertId, toolId, enabled) {
       if (!state.toolBindings[expertId]) return;
@@ -1028,6 +1120,9 @@
         return Object.assign({}, b, { enabled: enabled });
       });
       persist();
+      if (!DEV_MOCK && window.SidecarApi && window.SidecarApi.patchExpert) {
+        window.SidecarApi.patchExpert(String(expertId), { tools: this.getToolIds(expertId) });
+      }
     },
     updateToolConfig: function (expertId, toolId, config) {
       if (!state.toolBindings[expertId]) return;
@@ -1039,6 +1134,9 @@
         return Object.assign({}, b, { config: config || {}, status: hasConfig ? 'configured' : 'unconfigured' });
       });
       persist();
+      if (!DEV_MOCK && window.SidecarApi && window.SidecarApi.patchExpert) {
+        window.SidecarApi.patchExpert(String(expertId), { tools: this.getToolIds(expertId) });
+      }
     },
     testToolConnection: function (expertId, toolId) {
       if (!state.toolBindings[expertId]) return;
@@ -1049,6 +1147,9 @@
         return Object.assign({}, b, { status: 'connected' });
       });
       persist();
+      if (!DEV_MOCK && window.SidecarApi && window.SidecarApi.patchExpert) {
+        window.SidecarApi.patchExpert(String(expertId), { tools: this.getToolIds(expertId) });
+      }
     },
 
     getMemories: function (expertId) {
@@ -1077,6 +1178,25 @@
         return true;
       }).sort(function (a, b) {
         return (b.updatedAt || '').localeCompare(a.updatedAt || '');
+      });
+    },
+    fetchTasksByExpertRemote: async function (expertId) {
+      if (DEV_MOCK || !window.SidecarApi || !window.SidecarApi.listTasks) return null;
+      var remote = await window.SidecarApi.listTasks(String(expertId));
+      if (!remote) return null;
+      return remote.map(function (t) {
+        return {
+          id: t.id,
+          title: t.title,
+          type: 'dialogue',
+          status: t.status || 'pending',
+          expertId: String(expertId),
+          ownerId: 'admin',
+          archived: false,
+          titleSet: true,
+          createdAt: t.createdAt || nowIso(),
+          updatedAt: t.createdAt || nowIso()
+        };
       });
     },
     getTask: function (taskId) {
@@ -1132,6 +1252,20 @@
     getMessages: function (taskId) {
       return state.messages[taskId] || [];
     },
+    fetchTaskMessagesRemote: async function (expertId, taskId) {
+      if (DEV_MOCK || !window.SidecarApi || !window.SidecarApi.listMessages) return null;
+      var remote = await window.SidecarApi.listMessages(String(expertId), String(taskId));
+      if (!remote) return null;
+      return remote.map(function (m) {
+        return {
+          id: m.id,
+          role: m.role,
+          type: 'chat',
+          content: m.content,
+          createdAt: m.createdAt
+        };
+      });
+    },
     addMessage: function (taskId, msg) {
       if (!state.messages[taskId]) state.messages[taskId] = [];
       var message = {
@@ -1157,6 +1291,14 @@
       }
       persist();
       return message;
+    },
+    sendTaskMessageRemote: async function (expertId, taskId, content) {
+      if (DEV_MOCK || !window.SidecarApi || !window.SidecarApi.sendMessage) return null;
+      return await window.SidecarApi.sendMessage(String(expertId), String(taskId), content || '');
+    },
+    fetchTaskProgressRemote: async function (expertId, taskId) {
+      if (DEV_MOCK || !window.SidecarApi || !window.SidecarApi.listProgress) return null;
+      return await window.SidecarApi.listProgress(String(expertId), String(taskId));
     },
 
     getProjects: function (visibility) {
@@ -1410,6 +1552,21 @@
       return state.taskArtifacts
         .filter(function (a) { return a.taskId === taskId; })
         .sort(function (a, b) { return (b.createdAt || '').localeCompare(a.createdAt || ''); });
+    },
+    fetchTaskArtifactsRemote: async function (expertId, taskId) {
+      if (DEV_MOCK || !window.SidecarApi || !window.SidecarApi.listArtifacts) return null;
+      var remote = await window.SidecarApi.listArtifacts(String(expertId), String(taskId));
+      if (!remote) return null;
+      return remote.map(function (a) {
+        return {
+          id: a.id,
+          taskId: String(taskId),
+          title: a.title,
+          content: a.content || '',
+          type: 'document',
+          createdAt: a.createdAt || nowIso()
+        };
+      });
     },
     addTaskArtifact: function (taskId, payload) {
       var a = {

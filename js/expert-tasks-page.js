@@ -89,6 +89,8 @@
       var archivedTasks = Vue.ref([]);
       var showArchived = Vue.ref(false);
       var showProgressPanel = Vue.ref(false);
+      var remoteError = Vue.ref('');
+      var remoteProgressSteps = Vue.ref([]);
 
       // ---- 任务列表增强 ----
       var taskSearchQuery = Vue.ref('');
@@ -96,6 +98,19 @@
 
       function loadPanelArtifacts(taskId) {
         panelArtifacts.value = taskId ? store.getTaskArtifacts(taskId) : [];
+        if (taskId && store.fetchTaskArtifactsRemote) {
+          store.fetchTaskArtifactsRemote(props.expertId, taskId).then(function (remote) {
+            if (!remote) {
+              if (!store.isDevMock || !store.isDevMock()) {
+                var e = window.SidecarApi && window.SidecarApi.getLastError && window.SidecarApi.getLastError();
+                remoteError.value = (e && e.message) || '产物加载失败';
+              }
+              return;
+            }
+            remoteError.value = '';
+            panelArtifacts.value = remote;
+          });
+        }
       }
 
       function toggleTaskArtifacts(task, ev) {
@@ -133,6 +148,20 @@
         var all = store.getTasksByExpert(props.expertId, 'dialogue', true);
         tasks.value = all.filter(function (t) { return !t.archived; });
         archivedTasks.value = all.filter(function (t) { return t.archived; });
+        if (store.fetchTasksByExpertRemote) {
+          store.fetchTasksByExpertRemote(props.expertId).then(function (remote) {
+            if (!remote) {
+              if (!store.isDevMock || !store.isDevMock()) {
+                var e = window.SidecarApi && window.SidecarApi.getLastError && window.SidecarApi.getLastError();
+                remoteError.value = (e && e.message) || '任务列表加载失败';
+              }
+              return;
+            }
+            remoteError.value = '';
+            tasks.value = remote;
+            archivedTasks.value = [];
+          });
+        }
       }
 
       function formatTaskCreatedAt(isoStr) {
@@ -200,15 +229,35 @@
 
       function getCurrentTaskProgress() {
         if (!currentTaskId.value) return { steps: [], percent: 0, status: '' };
-        var steps = getTaskProgressSteps(currentTaskId.value);
+        var steps = remoteProgressSteps.value.length ? remoteProgressSteps.value : getTaskProgressSteps(currentTaskId.value);
         var task = tasks.value.concat(archivedTasks.value).find(function (t) { return t.id === currentTaskId.value; });
         var percent = 0;
-        if (steps.length >= 4) percent = 100;
+        if (steps.length && steps[0].status) {
+          var done = steps.filter(function (s) { return s.status === 'done'; }).length;
+          var running = steps.some(function (s) { return s.status === 'running'; });
+          percent = Math.round((done / steps.length) * 100);
+          if (running && percent < 95) percent += 10;
+          if (percent > 100) percent = 100;
+        } else if (steps.length >= 4) percent = 100;
         else if (steps.length === 3) percent = 75;
         else if (steps.length === 2) percent = 50;
         else if (steps.length === 1) percent = 25;
         var status = task ? (task.status === 'running' ? '执行中' : task.status === 'completed' ? '已完成' : '待开始') : '';
         return { steps: steps, percent: percent, status: status };
+      }
+
+      function loadRemoteProgress() {
+        if (!currentTaskId.value || !store.fetchTaskProgressRemote) {
+          remoteProgressSteps.value = [];
+          return;
+        }
+        store.fetchTaskProgressRemote(props.expertId, currentTaskId.value).then(function (remote) {
+          if (!remote) {
+            remoteProgressSteps.value = [];
+            return;
+          }
+          remoteProgressSteps.value = remote;
+        });
       }
 
       // ---- 产物面板增强 ----
@@ -256,6 +305,20 @@
       function loadMessages() {
         if (!currentTaskId.value) { messages.value = []; return; }
         messages.value = store.getMessages(currentTaskId.value);
+        if (store.fetchTaskMessagesRemote) {
+          store.fetchTaskMessagesRemote(props.expertId, currentTaskId.value).then(function (remote) {
+            if (!remote) {
+              if (!store.isDevMock || !store.isDevMock()) {
+                var e = window.SidecarApi && window.SidecarApi.getLastError && window.SidecarApi.getLastError();
+                remoteError.value = (e && e.message) || '消息加载失败';
+              }
+              return;
+            }
+            remoteError.value = '';
+            messages.value = remote;
+            loadRemoteProgress();
+          });
+        }
         Vue.nextTick(function () {
           if (chatBox.value) chatBox.value.scrollTop = chatBox.value.scrollHeight;
         });
@@ -265,6 +328,7 @@
         currentTaskId.value = id;
         ctx.emit('nav', '/experts/' + props.expertId + '/tasks/' + id);
         loadMessages();
+        loadRemoteProgress();
       }
 
       function newTask() {
@@ -287,6 +351,25 @@
         inputText.value = '';
         loadMessages();
         refreshTasks();
+        if (store.sendTaskMessageRemote) {
+          store.sendTaskMessageRemote(props.expertId, currentTaskId.value, text || '').then(function (resp) {
+            if (!resp) {
+              if (!store.isDevMock || !store.isDevMock()) {
+                var e = window.SidecarApi && window.SidecarApi.getLastError && window.SidecarApi.getLastError();
+                remoteError.value = (e && e.message) || '消息发送失败';
+                sending.value = false;
+              }
+              return;
+            }
+            remoteError.value = '';
+            loadMessages();
+            loadRemoteProgress();
+            if (artifactPanelTaskId.value === currentTaskId.value) loadPanelArtifacts(currentTaskId.value);
+            refreshTasks();
+            sending.value = false;
+          });
+          if (!store.isDevMock || !store.isDevMock()) return;
+        }
         setTimeout(function () {
           store.mockExpertWorkflowSteps(expert.value, currentTaskId.value, text);
           loadMessages();
@@ -375,7 +458,7 @@
 
       return {
         expert: expert, tasks: tasks, archivedTasks: archivedTasks, showArchived: showArchived,
-        showProgressPanel: showProgressPanel,
+        showProgressPanel: showProgressPanel, remoteError: remoteError,
         currentTaskId: currentTaskId, messages: messages,
         inputText: inputText, sending: sending, chatBox: chatBox,
         panelArtifacts: panelArtifacts, artifactPanelTaskId: artifactPanelTaskId,
@@ -522,6 +605,7 @@
                 </div>\
               </div>\
               <div class="chat-composer-hint">Ctrl + Enter 发送</div>\
+              <div v-if="remoteError" class="task-remote-error">{{ remoteError }}</div>\
             </div>\
           </div>\
         </div>\
