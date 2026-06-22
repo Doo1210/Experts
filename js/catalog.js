@@ -19,11 +19,135 @@ window.TOOLS_CATALOG = [
   { id: 'tool-notify', name: '消息通知', type: 'api', description: '向 IM 渠道推送任务进展' }
 ];
 
+/** Hermes Profile toolset 中文标签（只读 UI，非 Mock 绑定源） */
+window.HERMES_TOOLSET_LABELS = {
+  terminal: '终端与进程',
+  file: '文件读写',
+  web: '网页搜索',
+  browser: '浏览器自动化',
+  search: '搜索',
+  vision: '视觉分析',
+  skills: '技能管理',
+  memory: '记忆',
+  delegation: '任务委派',
+  messaging: '消息网关',
+  code_execution: '代码执行',
+  cronjob: '定时任务',
+  todo: '待办规划',
+  clarify: '澄清提问',
+  debugging: '调试',
+  image_gen: '图像生成',
+  video: '视频',
+  tts: '语音合成',
+  moa: '混合专家',
+  rl: '强化学习',
+  safe: '安全模式',
+  session_search: '会话搜索',
+  homeassistant: 'Home Assistant',
+  kanban: '看板协作',
+  spotify: 'Spotify',
+  discord: 'Discord',
+  feishu_doc: '飞书文档',
+  feishu_drive: '飞书云盘'
+};
+
+window.toolsetLabel = function (id) {
+  if (!id) return '';
+  var labels = window.HERMES_TOOLSET_LABELS || {};
+  return labels[id] || id;
+};
+
 window.IM_CHANNEL_TYPES = [
-  { id: 'wecom', label: '企业微信' },
-  { id: 'dingtalk', label: '钉钉' },
-  { id: 'feishu', label: '飞书' }
+  {
+    id: 'dingtalk',
+    label: '钉钉',
+    name: '钉钉',
+    description: '通过钉钉 Stream Mode 接入群聊与私聊，无需公网回调地址。',
+    docsUrl: 'https://open.dingtalk.com/document/orgapp/the-robot-development-process',
+    credentialFields: [
+      { key: 'DINGTALK_CLIENT_ID', label: 'AppKey (Client ID)', description: '钉钉应用凭证中的 AppKey。', required: true },
+      { key: 'DINGTALK_CLIENT_SECRET', label: 'AppSecret (Client Secret)', description: '钉钉应用凭证中的 AppSecret。', password: true, required: true }
+    ]
+  },
+  {
+    id: 'feishu',
+    label: '飞书 / Lark',
+    name: '飞书 / Lark',
+    description: '通过飞书 / Lark 机器人接入消息，可使用 WebSocket 或 Webhook 模式。',
+    docsUrl: 'https://open.feishu.cn/document/uAjLw4CM/ukTMukTMukTM/reference/im-v1/intro',
+    credentialFields: [
+      { key: 'FEISHU_APP_ID', label: 'App ID', description: '飞书 / Lark 应用的 App ID。', required: true },
+      { key: 'FEISHU_APP_SECRET', label: 'App Secret', description: '飞书 / Lark 应用的 App Secret。', password: true, required: true },
+      { key: 'FEISHU_DOMAIN', label: 'Domain', description: '国内飞书填 feishu，国际 Lark 填 lark，默认 feishu。' },
+      { key: 'FEISHU_CONNECTION_MODE', label: '连接模式', description: 'websocket 或 webhook，默认 websocket。' },
+      { key: 'FEISHU_ALLOWED_USERS', label: '允许用户 ID', description: '逗号分隔；留空时可使用配对或开放策略。' },
+      { key: 'FEISHU_HOME_CHANNEL', label: 'Home Chat ID', description: '定时任务与通知投递的默认会话 ID。' },
+      { key: 'FEISHU_VERIFICATION_TOKEN', label: 'Webhook Verification Token', description: 'Webhook 模式签名校验字段，和 Encrypt Key 至少配置一个。', password: true },
+      { key: 'FEISHU_ENCRYPT_KEY', label: 'Webhook Encrypt Key', description: 'Webhook 模式事件加密密钥，和 Verification Token 至少配置一个。', password: true }
+    ]
+  },
+  {
+    id: 'wecom',
+    label: '企业微信 AI Bot',
+    name: '企业微信 AI Bot',
+    description: '通过企业微信智能机器人 WebSocket 接入，无需公网回调地址。',
+    docsUrl: 'https://developer.work.weixin.qq.com/document/path/91770',
+    credentialFields: [
+      { key: 'WECOM_BOT_ID', label: 'Bot ID', description: '企业微信 AI Bot 的 Bot ID。', required: true },
+      { key: 'WECOM_SECRET', label: 'Secret', description: '企业微信 AI Bot 的 Secret。', password: true, required: true },
+      { key: 'WECOM_ALLOWED_USERS', label: '允许用户 ID', description: '逗号分隔；用于限制可访问用户。' },
+      { key: 'WECOM_HOME_CHANNEL', label: 'Home Chat ID', description: '定时任务与通知投递的默认会话 ID。' },
+      { key: 'WECOM_DM_POLICY', label: '私聊策略', description: 'open、allowlist、disabled 或 pairing。' },
+      { key: 'WECOM_GROUP_POLICY', label: '群聊策略', description: 'open、allowlist 或 disabled。' },
+      { key: 'WECOM_WEBSOCKET_URL', label: 'WebSocket URL', description: '高级项；默认 wss://openws.work.weixin.qq.com。' }
+    ]
+  },
+  {
+    id: 'wecom_callback',
+    label: '企业微信自建应用',
+    name: '企业微信自建应用',
+    description: '通过企业微信自建应用回调接入，适合需要双向消息和企业应用身份的场景。',
+    docsUrl: 'https://developer.work.weixin.qq.com/document/path/90930',
+    credentialFields: [
+      { key: 'WECOM_CALLBACK_CORP_ID', label: 'Corp ID', description: '企业微信企业 ID。', required: true },
+      { key: 'WECOM_CALLBACK_CORP_SECRET', label: 'Corp Secret', description: '自建应用 Secret。', password: true, required: true },
+      { key: 'WECOM_CALLBACK_AGENT_ID', label: 'Agent ID', description: '自建应用 Agent ID。', required: true },
+      { key: 'WECOM_CALLBACK_TOKEN', label: 'Callback Token', description: '接收消息服务器配置中的 Token。', password: true },
+      { key: 'WECOM_CALLBACK_ENCODING_AES_KEY', label: 'EncodingAESKey', description: '接收消息服务器配置中的 EncodingAESKey。', password: true },
+      { key: 'WECOM_CALLBACK_PORT', label: '回调服务端口', description: '本地 HTTP 回调服务端口，默认 8645。' },
+      { key: 'WECOM_CALLBACK_ALLOWED_USERS', label: '允许用户 ID', description: '逗号分隔；用于限制可访问用户。' }
+    ]
+  }
 ];
+
+/** Platform icons for IM sidebar (emoji fallback). */
+window.IM_PLATFORM_ICONS = {
+  telegram: '✈️',
+  discord: '🎮',
+  slack: '💬',
+  matrix: '🔲',
+  mattermost: '💠',
+  signal: '📡',
+  whatsapp: '📱',
+  email: '📧',
+  sms: '💬',
+  dingtalk: '🔷',
+  feishu: '🐦',
+  wecom: '💼',
+  wecom_callback: '💼',
+  weixin: '💚',
+  qqbot: '🐧',
+  homeassistant: '🏠',
+  bluebubbles: '💬',
+  webhook: '🔗',
+  api_server: '🌐',
+  yuanbao: '🟡'
+};
+
+window.imPlatformIcon = function (platformId) {
+  var id = String(platformId || '').toLowerCase();
+  return (window.IM_PLATFORM_ICONS && window.IM_PLATFORM_ICONS[id]) || '📨';
+};
 
 window.CATEGORY_TABS = [
   { id: 'all', label: '全部专家' },

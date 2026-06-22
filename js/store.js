@@ -6,10 +6,15 @@
   const DEFAULT_EXPERT_AVATAR = 'data:image/svg+xml,' + encodeURIComponent(
     '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 80 80"><rect width="80" height="80" fill="#e8eef8"/><circle cx="40" cy="29" r="13" fill="#b8c5dc"/><ellipse cx="40" cy="63" rx="21" ry="15" fill="#b8c5dc"/></svg>'
   );
-  var DEV_MOCK = window.DEV_MOCK === true;
+  var DEV_MOCK = window.DEV_MOCK === true || String(window.DEV_MOCK).toLowerCase() === 'true';
+  var sidecarAvailable = false;
 
   function uid() {
     return 'id_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 8);
+  }
+
+  function sameId(a, b) {
+    return String(a) === String(b);
   }
 
   function nowIso() {
@@ -91,8 +96,8 @@
       if (inject) {
         out.push(
           { role: 'expert', type: 'thought', content: 'Thought: 明确问题边界，梳理所需数据来源与分析路径。' },
-          { role: 'expert', type: 'skill', skillName: cap.skill, content: '正在运用 [' + cap.skill + '] 技能处理该请求…' },
-          { role: 'expert', type: 'action', toolName: cap.tool, content: '正在调用 [' + cap.tool + '] 获取相关数据…' }
+          { role: 'expert', type: 'skill', skillName: cap.skill, content: '' },
+          { role: 'expert', type: 'action', toolName: cap.tool, content: '' }
         );
       }
     }
@@ -274,6 +279,7 @@
       permissions: {},
       workspaceFiles: {},
       taskArtifacts: [],
+      expertDetailMeta: {},
       demoSyncVersion: null,
       projectTaskSchemaVersion: null
     };
@@ -296,6 +302,11 @@
 
   function prepareStateForStorage(raw) {
     var snap = JSON.parse(JSON.stringify(raw));
+    if (!DEV_MOCK) {
+      snap.skillBindings = {};
+      snap.toolBindings = {};
+      snap.expertDetailMeta = {};
+    }
     (snap.projectFiles || []).forEach(function (f) {
       if (f.content && f.content.length > MAX_FILE_CONTENT_CHARS) {
         f.content = f.content.slice(0, MAX_FILE_CONTENT_CHARS) + '\n…（内容过长已截断以节省存储空间）';
@@ -338,31 +349,381 @@
 
   let state = load();
 
+  function mapRemoteExpert(e) {
+    return {
+      id: String(e.profile),
+      name: e.displayName || e.profile,
+      avatar: e.avatarUrl || DEFAULT_EXPERT_AVATAR,
+      description: e.intro || '',
+      expertise: e.domains || [],
+      category: '工艺制造',
+      visibility: 'public',
+      status: 'active',
+      updatedAt: nowIso()
+    };
+  }
+
+  function isDetailPayload(e) {
+    return e.skillsDetail !== undefined ||
+      e.skillsCatalog !== undefined ||
+      e.toolsDetail !== undefined ||
+      e.toolsCatalog !== undefined ||
+      e.memoryMeta !== undefined ||
+      e.gateway !== undefined ||
+      e.imChannels !== undefined ||
+      e.materials !== undefined ||
+      e.memories !== undefined ||
+      e.permissions !== undefined;
+  }
+
+  function mergeExpertDetailMeta(expertId, e, opts) {
+    opts = opts || {};
+    state.expertDetailMeta = state.expertDetailMeta || {};
+    var prev = state.expertDetailMeta[expertId] || {
+      skillsDetail: [], skillsCatalog: [], toolsDetail: {}, toolsCatalog: [], memoryMeta: {}, gateway: {}
+    };
+    if (!isDetailPayload(e)) return;
+    if (opts.skipCapabilities) {
+      state.expertDetailMeta[expertId] = {
+        skillsDetail: prev.skillsDetail || [],
+        skillsCatalog: prev.skillsCatalog || [],
+        toolsDetail: prev.toolsDetail || {},
+        toolsCatalog: prev.toolsCatalog || [],
+        memoryMeta: e.memoryMeta !== undefined ? (e.memoryMeta || {}) : (prev.memoryMeta || {}),
+        gateway: e.gateway !== undefined ? (e.gateway || {}) : (prev.gateway || {})
+      };
+      return;
+    }
+    state.expertDetailMeta[expertId] = {
+      skillsDetail: e.skillsDetail !== undefined ? (e.skillsDetail || []) : (prev.skillsDetail || []),
+      skillsCatalog: e.skillsCatalog !== undefined ? (e.skillsCatalog || []) : (prev.skillsCatalog || []),
+      toolsDetail: e.toolsDetail !== undefined ? (e.toolsDetail || {}) : (prev.toolsDetail || {}),
+      toolsCatalog: e.toolsCatalog !== undefined ? (e.toolsCatalog || []) : (prev.toolsCatalog || []),
+      memoryMeta: e.memoryMeta !== undefined ? (e.memoryMeta || {}) : (prev.memoryMeta || {}),
+      gateway: e.gateway !== undefined ? (e.gateway || {}) : (prev.gateway || {})
+    };
+  }
+
+  function applySkillsApiResponse(expertId, data) {
+    if (!data || !Array.isArray(data.assigned)) return;
+    mergeExpertDetailMeta(expertId, {
+      skillsDetail: data.assigned,
+      skillsCatalog: data.catalog || []
+    });
+    state.skillBindings[expertId] = data.assigned.map(function (s) {
+      return {
+        skillId: s.skillId,
+        params: {},
+        name: s.name,
+        description: s.description,
+        category: s.category || '',
+        useCount: s.useCount || 0
+      };
+    });
+    persist();
+    bumpCapabilityRev(expertId);
+    window.dispatchEvent(new CustomEvent('app-store-updated', { detail: { expertId: String(expertId) } }));
+  }
+
+  function applyToolsApiResponse(expertId, data) {
+    if (!data) return;
+    var assignedBlock = data.assigned || {};
+    mergeExpertDetailMeta(expertId, {
+      toolsDetail: assignedBlock,
+      toolsCatalog: (data.catalog && data.catalog.toolsets) || []
+    });
+    state.toolBindings[expertId] = (assignedBlock.toolsets || []).map(function (t) {
+      var tid = t.toolset || t;
+      return {
+        toolId: tid,
+        toolset: tid,
+        label: t.label || '',
+        description: t.description || '',
+        status: t.configured ? 'configured' : 'unconfigured',
+        config: getDefaultToolConfig(tid)
+      };
+    });
+    persist();
+    bumpCapabilityRev(expertId);
+    window.dispatchEvent(new CustomEvent('app-store-updated', { detail: { expertId: String(expertId) } }));
+  }
+
+  var capabilityRev = {};
+
+  function getCapabilityRev(expertId) {
+    return capabilityRev[String(expertId)] || 0;
+  }
+
+  function bumpCapabilityRev(expertId) {
+    var key = String(expertId);
+    capabilityRev[key] = (capabilityRev[key] || 0) + 1;
+    return capabilityRev[key];
+  }
+
+  function bindingSkillId(b) {
+    if (typeof b === 'string') return String(b).trim();
+    return String(b.skillId || b.id || b.canonicalName || b.name || '').trim();
+  }
+
+  function bindingToolId(b) {
+    if (typeof b === 'string') return String(b).trim();
+    return String(b.toolId || b.toolset || '').trim();
+  }
+
+  function normalizeSkillIds(bindings) {
+    return (bindings || []).map(bindingSkillId).filter(function (id) { return !!id; });
+  }
+
+  function normalizeToolIds(bindings) {
+    return (bindings || []).map(bindingToolId).filter(function (id) { return !!id; });
+  }
+
+  function sidecarPutSkills(expertId, assignedIds) {
+    return window.SidecarApi.putExpertSkills(String(expertId), { assigned: assignedIds })
+      .then(function (data) {
+        if (!data || !Array.isArray(data.assigned)) {
+          var err = window.SidecarApi.getLastError && window.SidecarApi.getLastError();
+          return Promise.reject(new Error((err && err.message) || '保存技能配给失败'));
+        }
+        applySkillsApiResponse(String(expertId), data);
+        return data;
+      });
+  }
+
+  function sidecarPutTools(expertId, assignedIds) {
+    return window.SidecarApi.putExpertTools(String(expertId), { assigned: assignedIds })
+      .then(function (data) {
+        if (!data || !data.assigned || !Array.isArray(data.assigned.toolsets)) {
+          var err = window.SidecarApi.getLastError && window.SidecarApi.getLastError();
+          return Promise.reject(new Error((err && err.message) || '保存工具配给失败'));
+        }
+        applyToolsApiResponse(String(expertId), data);
+        return data;
+      });
+  }
+
+  function hydrateExpertFromRemote(e, opts) {
+    opts = opts || {};
+    var skipCapabilities = !!opts.skipCapabilities;
+    var expertId = String(e.profile || e.id);
+    if (!expertId) return;
+    var detail = isDetailPayload(e);
+    ensureExpertDefaults(expertId);
+    var personaPatch = e.persona ? {
+      coreDutyMd: e.persona.coreDutyMd || e.coreDutyMd || '',
+      workflowMd: e.persona.workflowMd || e.workflowMd || '',
+      behaviorMd: e.persona.behaviorMd || e.behaviorMd || ''
+    } : {
+      coreDutyMd: e.coreDutyMd,
+      workflowMd: e.workflowMd,
+      behaviorMd: e.behaviorMd
+    };
+    var prevPersona = state.personas[expertId] || {};
+    if (detail || e.coreDutyMd !== undefined || e.workflowMd !== undefined || e.behaviorMd !== undefined || e.persona) {
+      state.personas[expertId] = {
+        coreDutyMd: personaPatch.coreDutyMd != null ? personaPatch.coreDutyMd : (prevPersona.coreDutyMd || ''),
+        workflowMd: personaPatch.workflowMd != null ? personaPatch.workflowMd : (prevPersona.workflowMd || ''),
+        behaviorMd: personaPatch.behaviorMd != null ? personaPatch.behaviorMd : (prevPersona.behaviorMd || '')
+      };
+    }
+    if (!skipCapabilities) {
+      if (detail && e.skillsDetail !== undefined) {
+        state.skillBindings[expertId] = e.skillsDetail.map(function (s) {
+          return {
+            skillId: s.skillId,
+            params: {},
+            name: s.name,
+            description: s.description,
+            category: s.category || '',
+            useCount: s.useCount || 0
+          };
+        });
+      } else if (DEV_MOCK && Array.isArray(e.skills) && !detail) {
+        state.skillBindings[expertId] = e.skills.map(function (sid) {
+          return { skillId: sid, enabled: true, params: getDefaultSkillParams(sid) };
+        });
+      } else if (detail && e.skillBindings && e.skillBindings.length) {
+        state.skillBindings[expertId] = e.skillBindings.map(function (b) {
+          return { skillId: b.skillId, enabled: b.enabled !== false, params: b.params || {} };
+        });
+      }
+      if (detail && e.toolsDetail !== undefined && Array.isArray(e.toolsDetail.toolsets)) {
+        state.toolBindings[expertId] = e.toolsDetail.toolsets.map(function (t) {
+          var tid = t.toolset || t;
+          return {
+            toolId: tid,
+            toolset: tid,
+            label: t.label || '',
+            description: t.description || '',
+            globallyDisabled: !!t.globallyDisabled,
+            status: t.configured ? 'configured' : 'unconfigured',
+            config: getDefaultToolConfig(tid)
+          };
+        });
+      } else if (detail && e.toolsDetail !== undefined) {
+        state.toolBindings[expertId] = [];
+      } else if (detail && e.toolBindings && e.toolBindings.length) {
+        state.toolBindings[expertId] = e.toolBindings.map(function (b) {
+          var tid = b.toolset || b.toolId || b;
+          return {
+            toolId: tid,
+            toolset: tid,
+            label: b.label || '',
+            description: b.description || '',
+            status: b.configured ? 'configured' : 'unconfigured',
+            config: b.config || getDefaultToolConfig(tid)
+          };
+        });
+      } else if (DEV_MOCK && e.tools && e.tools.length && !detail) {
+        state.toolBindings[expertId] = e.tools.map(function (t) {
+          if (typeof t === 'string') return { toolset: t, toolId: t, enabled: true };
+          var tid = t.toolset || t.toolId || t;
+          return Object.assign({ toolId: tid, toolset: tid, enabled: true }, t);
+        });
+      }
+    }
+    var expert = state.experts.find(function (x) { return String(x.id) === expertId; });
+    if (expert && e.domains) expert.expertise = e.domains;
+    if (e.tasks && e.tasks.length) {
+      state.tasks = state.tasks.filter(function (t) { return String(t.expertId) !== expertId; });
+      e.tasks.forEach(function (t) {
+        state.tasks.unshift({
+          id: t.id,
+          title: t.title,
+          type: t.source === 'project' ? 'project' : 'dialogue',
+          status: t.status || 'pending',
+          expertId: expertId,
+          ownerId: 'admin',
+          archived: false,
+          titleSet: !!t.titleSet,
+          artifactCount: t.artifactCount || 0,
+          createdAt: t.createdAt || nowIso(),
+          updatedAt: t.createdAt || nowIso()
+        });
+      });
+    }
+    if (e.memories) {
+      state.memories = (state.memories || []).filter(function (m) { return String(m.expertId) !== expertId; });
+      e.memories.forEach(function (m) {
+        state.memories.push({
+          id: m.id,
+          expertId: expertId,
+          content: m.content,
+          category: m.category || 'other',
+          source: m.source || 'long_term',
+          createdAt: m.createdAt || nowIso()
+        });
+      });
+    }
+    if (e.materials) {
+      state.workspaceFiles = state.workspaceFiles || {};
+      state.workspaceFiles[expertId] = e.materials.map(function (m) {
+        return {
+          id: m.id,
+          name: m.name,
+          size: m.size,
+          type: m.mimeType || 'file',
+          createdAt: m.createdAt || nowIso()
+        };
+      });
+    }
+    if (e.artifacts) {
+      state.taskArtifacts = state.taskArtifacts || {};
+      e.artifacts.forEach(function (a) {
+        if (!state.taskArtifacts[a.taskId]) state.taskArtifacts[a.taskId] = [];
+        var exists = state.taskArtifacts[a.taskId].some(function (x) { return x.id === a.id; });
+        if (!exists) {
+          state.taskArtifacts[a.taskId].push({
+            id: a.id,
+            taskId: a.taskId,
+            title: a.title,
+            content: a.content,
+            type: a.type || 'text',
+            createdAt: a.createdAt || nowIso()
+          });
+        }
+      });
+    }
+    if (e.imChannels) {
+      state.imChannels = state.imChannels || {};
+      state.imChannels[expertId] = e.imChannels.map(function (c) {
+        return Object.assign({ subscriptions: [] }, c);
+      });
+    }
+    if (e.permissions) {
+      state.permissions = state.permissions || {};
+      state.permissions[expertId] = e.permissions.map(function (p) {
+        return {
+          id: p.id,
+          label: p.label,
+          permission: p.permission,
+          subjectType: p.subjectType,
+          subjectId: p.subjectId
+        };
+      });
+    }
+    mergeExpertDetailMeta(expertId, e, { skipCapabilities: skipCapabilities });
+  }
+
+  function applyExpertDetailRemote(detail, opts) {
+    opts = opts || {};
+    if (!detail) return null;
+    var mapped = mapRemoteExpert(detail);
+    var idx = state.experts.findIndex(function (e) { return String(e.id) === mapped.id; });
+    if (idx >= 0) state.experts[idx] = Object.assign({}, state.experts[idx], mapped);
+    else state.experts.push(mapped);
+    hydrateExpertFromRemote(detail, opts);
+    persist();
+    window.dispatchEvent(new CustomEvent('app-store-updated', { detail: { expertId: mapped.id } }));
+    return mapped;
+  }
+
+  function ensureExpertDefaults(expertId) {
+    if (!state.personas[expertId]) {
+      state.personas[expertId] = { coreDutyMd: '', workflowMd: '', behaviorMd: '' };
+    }
+    if (!state.skillBindings[expertId]) state.skillBindings[expertId] = [];
+    if (!state.toolBindings[expertId]) state.toolBindings[expertId] = [];
+  }
+
   async function syncExpertsFromSidecar() {
     if (DEV_MOCK) return;
     if (!window.SidecarApi || !window.SidecarApi.listExperts) return;
+    state.skillBindings = {};
+    state.toolBindings = {};
+    state.expertDetailMeta = {};
+    if (window.SidecarApi.provisionBundledProfiles) {
+      await window.SidecarApi.provisionBundledProfiles();
+    }
+    if (window.SidecarApi.syncProfiles) {
+      await window.SidecarApi.syncProfiles();
+    }
     var remote = await window.SidecarApi.listExperts();
-    if (!remote || !remote.length) return;
-    state.experts = remote.map(function (e) {
-      return {
-        id: String(e.profile),
-        name: e.displayName || e.profile,
-        avatar: e.avatarUrl || DEFAULT_EXPERT_AVATAR,
-        description: e.intro || '',
-        expertise: e.domains || [],
-        category: '工艺制造',
-        visibility: 'public',
-        status: 'active',
-        updatedAt: nowIso()
-      };
+    if (remote === null) {
+      sidecarAvailable = false;
+      window.dispatchEvent(new CustomEvent('sidecar-status', {
+        detail: { ok: false, error: window.SidecarApi.getLastError && window.SidecarApi.getLastError() }
+      }));
+      return;
+    }
+    sidecarAvailable = true;
+    window.dispatchEvent(new CustomEvent('sidecar-status', { detail: { ok: true } }));
+    var remoteIds = {};
+    var mapped = remote.map(function (e) {
+      remoteIds[String(e.profile)] = true;
+      return mapRemoteExpert(e);
     });
-    state.experts.forEach(function (e) {
-      if (!state.personas[e.id]) {
-        state.personas[e.id] = { coreDutyMd: '', workflowMd: '', behaviorMd: '' };
-      }
-      if (!state.skillBindings[e.id]) state.skillBindings[e.id] = [];
-      if (!state.toolBindings[e.id]) state.toolBindings[e.id] = [];
+    var localOnly = state.experts.filter(function (e) {
+      var id = String(e.id);
+      if (/^\d+$/.test(id)) return false;
+      if (/^id_/.test(id)) return false;
+      return !remoteIds[id];
     });
+    state.experts = mapped.length > 0 ? mapped : mapped.concat(localOnly);
+    remote.forEach(function (e) {
+      hydrateExpertFromRemote(e, { skipCapabilities: true });
+    });
+    state.experts.forEach(function (e) { ensureExpertDefaults(e.id); });
     persist();
     window.dispatchEvent(new CustomEvent('app-store-updated'));
   }
@@ -393,6 +754,73 @@
     if (updated) persist();
   }
 
+  function seedExpertToStateExpert(seed) {
+    return {
+      id: String(seed.id),
+      name: seed.name,
+      avatar: seed.avatar,
+      description: seed.description,
+      expertise: (seed.expertise || []).slice(0, 3),
+      category: seed.category,
+      visibility: 'public',
+      status: 'active',
+      updatedAt: seed.updatedAt || nowIso()
+    };
+  }
+
+  function migrateSeedExpertProfiles() {
+    var seeds = window.EXPERTS_DATA || [];
+    var seedById = {};
+    var seedByName = {};
+    seeds.forEach(function (s) {
+      seedById[String(s.id)] = s;
+      seedByName[String(s.name)] = s;
+    });
+    var matchedSeedIds = {};
+    var updated = false;
+    state.experts.forEach(function (e) {
+      var seed = seedByName[String(e.name)] || seedById[String(e.id)];
+      if (!seed) return;
+      matchedSeedIds[String(seed.id)] = true;
+      if (String(e.id) !== String(seed.id) && /^\d+$/.test(String(e.id))) {
+        e.id = String(seed.id);
+        updated = true;
+      }
+      if (seed.name && e.name !== seed.name) {
+        e.name = seed.name;
+        updated = true;
+      }
+      if (seed.avatar && e.avatar !== seed.avatar) {
+        e.avatar = seed.avatar;
+        updated = true;
+      }
+      var nextExpertise = (seed.expertise || []).slice(0, 3);
+      if (JSON.stringify(e.expertise || []) !== JSON.stringify(nextExpertise)) {
+        e.expertise = nextExpertise.slice();
+        updated = true;
+      }
+      if (seed.description && e.description !== seed.description) {
+        e.description = seed.description;
+        updated = true;
+      }
+      if (seed.category && e.category !== seed.category) {
+        e.category = seed.category;
+        updated = true;
+      }
+    });
+    seeds.forEach(function (seed) {
+      var seedId = String(seed.id);
+      var exists = matchedSeedIds[seedId] || state.experts.some(function (e) {
+        return String(e.id) === seedId || String(e.name) === String(seed.name);
+      });
+      if (!exists) {
+        state.experts.push(seedExpertToStateExpert(seed));
+        updated = true;
+      }
+    });
+    if (updated) persist();
+  }
+
   function seedIfEmpty() {
     if (state.experts.length > 0) return;
 
@@ -402,7 +830,7 @@
         name: e.name,
         avatar: e.avatar,
         description: e.description,
-        expertise: e.expertise || [],
+        expertise: (e.expertise || []).slice(0, 3),
         category: e.category,
         visibility: 'public',
         status: 'active',
@@ -502,8 +930,58 @@
     if (updated) persist();
   }
 
+  function migrateProjectIds() {
+    var updated = false;
+    state.projects.forEach(function (p) {
+      if (!p.id) {
+        p.id = uid();
+        updated = true;
+      }
+    });
+    if (updated) persist();
+  }
+
+  function seedDemoProjectsIfEmpty() {
+    if (!DEV_MOCK || state.projects.length > 0 || state.experts.length === 0) return;
+    var seedExperts = state.experts;
+    var p1 = {
+      id: uid(),
+      name: '12寸产线良率提升项目',
+      icon: '🏭',
+      description: '针对近期良率波动，组织工艺、质量、设备专家联合攻关。',
+      visibility: 'public',
+      status: 'active',
+      updatedAt: nowIso()
+    };
+    var p2 = {
+      id: uid(),
+      name: '供应链数字化规划',
+      icon: '📊',
+      description: '构建多工厂物料计划数字孪生模型，提升交付准时率。',
+      visibility: 'public',
+      status: 'active',
+      updatedAt: nowIso()
+    };
+    state.projects = [p1, p2];
+    if (seedExperts[0] && seedExperts[2] && seedExperts[4]) {
+      state.projectMembers = [
+        { id: uid(), projectId: p1.id, expertId: seedExperts[0].id, role: 'lead', progress: 80, progressSummary: '已完成根因分析，待验证', joinedAt: nowIso() },
+        { id: uid(), projectId: p1.id, expertId: seedExperts[4].id, role: 'member', progress: 40, progressSummary: 'SPC 报告进行中', joinedAt: nowIso() },
+        { id: uid(), projectId: p1.id, expertId: seedExperts[2].id, role: 'member', progress: 0, progressSummary: '待开始设备关联分析', joinedAt: nowIso() },
+        { id: uid(), projectId: p2.id, expertId: seedExperts[3].id, role: 'lead', progress: 55, progressSummary: '需求预测模型已初版', joinedAt: nowIso() },
+        { id: uid(), projectId: p2.id, expertId: seedExperts[5].id, role: 'member', progress: 30, progressSummary: '数据治理规范起草中', joinedAt: nowIso() }
+      ];
+      state.projectOutputs = [
+        { id: uid(), projectId: p1.id, expertId: seedExperts[0].id, title: '良率波动根因分析报告 v1', content: '主要根因：etch 区 3 号 chamber 压力偏差 +12%。建议参数回标并加严 SPC 监控。', createdAt: nowIso() }
+      ];
+      state.projectTasks = defaultProjectTasksFor(p1).concat(defaultProjectTasksFor(p2));
+      state.projectFiles = defaultProjectFilesFor(p1).concat(defaultProjectFilesFor(p2));
+    }
+    persist();
+  }
+
   function defaultProjectTasksFor(p) {
-    var members = state.projectMembers.filter(function (m) { return m.projectId === p.id; });
+    var members = state.projectMembers.filter(function (m) { return sameId(m.projectId, p.id); });
     if (p.name.indexOf('良率') >= 0 && members.length >= 2) {
       var lead = members[0];
       var device = members.find(function (m) { return m.expertId !== lead.expertId; }) || members[1];
@@ -583,7 +1061,7 @@
       title = PROJECT_TASK_TITLE_RENAMES[title];
     }
     if (title === '执行分配工作项' || title === null) {
-      var project = state.projects.find(function (p) { return p.id === t.projectId; });
+      var project = state.projects.find(function (p) { return sameId(p.id, t.projectId); });
       var idx = t.sortOrder || 0;
       if (project && project.name.indexOf('良率') >= 0) title = YIELD_TASK_TITLES[idx % YIELD_TASK_TITLES.length];
       else if (project && project.name.indexOf('供应链') >= 0) title = SUPPLY_TASK_TITLES[idx % SUPPLY_TASK_TITLES.length];
@@ -716,14 +1194,14 @@
 
   function findProjectTaskId(projectId, title) {
     var task = (state.projectTasks || []).find(function (t) {
-      return t.projectId === projectId && t.title === title;
+      return sameId(t.projectId, projectId) && t.title === title;
     });
     return task ? task.id : null;
   }
 
   function findProjectMemberExpertId(projectId, role) {
     var member = (state.projectMembers || []).find(function (m) {
-      return m.projectId === projectId && m.role === role;
+      return sameId(m.projectId, projectId) && m.role === role;
     });
     return member ? member.expertId : null;
   }
@@ -733,9 +1211,9 @@
     var pid = project.id;
     if (project.name.indexOf('良率') >= 0) {
       var eProcess = findProjectMemberExpertId(pid, 'lead') ||
-        (state.projectTasks.find(function (t) { return t.projectId === pid && t.title === '良率根因分析'; }) || {}).expertId;
-      var eQuality = (state.projectTasks.find(function (t) { return t.projectId === pid && t.title === 'SPC 数据分析'; }) || {}).expertId;
-      var eDevice = (state.projectTasks.find(function (t) { return t.projectId === pid && t.title === '设备关联分析'; }) || {}).expertId;
+        (state.projectTasks.find(function (t) { return sameId(t.projectId, pid) && t.title === '良率根因分析'; }) || {}).expertId;
+      var eQuality = (state.projectTasks.find(function (t) { return sameId(t.projectId, pid) && t.title === 'SPC 数据分析'; }) || {}).expertId;
+      var eDevice = (state.projectTasks.find(function (t) { return sameId(t.projectId, pid) && t.title === '设备关联分析'; }) || {}).expertId;
       var tRoot = findProjectTaskId(pid, '良率根因分析');
       var tSpc = findProjectTaskId(pid, 'SPC 数据分析');
       var tDevice = findProjectTaskId(pid, '设备关联分析');
@@ -745,12 +1223,12 @@
         { role: 'user', type: 'chat', scope: 'group', taskId: tRoot, offsetMin: 8, content: '请工艺专家先输出良率波动根因摘要。' },
         { role: 'expert', type: 'chat', taskId: tRoot, expertId: eProcess, offsetMin: 12, content: '收到，已开始拉取 etch 区近 4 周良率数据，预计 30 分钟内给出初步判断。' },
         { role: 'expert', type: 'thought', taskId: tRoot, expertId: eProcess, offsetMin: 16, content: 'Thought: 需要先拉取近 4 周各站点良率趋势，对比 etch 区 chamber 参数变更记录，再交叉 SPC 异常点。' },
-        { role: 'expert', type: 'action', taskId: tRoot, expertId: eProcess, toolName: 'MES 数据查询 API', offsetMin: 20, content: '正在调用 [MES 数据查询 API] 获取 etch 区良率时序数据…' },
+        { role: 'expert', type: 'action', taskId: tRoot, expertId: eProcess, toolName: 'MES 数据查询 API', offsetMin: 20, content: '' },
         { role: 'expert', type: 'chat', taskId: tRoot, expertId: eProcess, offsetMin: 28, content: '初步判断与 etch 区 3 号 chamber 压力漂移相关（+12%），详细报告今日内提交。' },
         { role: 'user', type: 'chat', targetExpertId: eQuality, taskId: tSpc, offsetMin: 38, content: '质量专家，SPC 异常点排查进展如何？' },
         { role: 'expert', type: 'thought', taskId: tSpc, expertId: eQuality, offsetMin: 42, content: 'Thought: 需先确认 etch-3 站点控制图异常规则命中情况，再更新缺陷 pareto 对比上周。' },
         { role: 'expert', type: 'chat', taskId: tSpc, expertId: eQuality, offsetMin: 48, content: '已锁定 etch-3 连续 3 点超 UCL，正在生成更新版缺陷 pareto。' },
-        { role: 'expert', type: 'action', taskId: tSpc, expertId: eQuality, toolName: 'SPC 分析工具', offsetMin: 55, content: '正在调用 [SPC 分析工具] 生成 etch-3 控制图与判异报告…' },
+        { role: 'expert', type: 'action', taskId: tSpc, expertId: eQuality, toolName: 'SPC 分析工具', offsetMin: 55, content: '' },
         { role: 'expert', type: 'chat', taskId: tSpc, expertId: eQuality, offsetMin: 62, content: 'Top1 颗粒污染占比升至 38%（+6pp），与工艺专家判断一致，建议同步加严清洁周期。' },
         { role: 'expert', type: 'thought', taskId: tDevice, expertId: eDevice, offsetMin: 70, content: 'Thought: 待根因报告确认后，关联设备 PM 记录与 alarm 日志做交叉验证。' },
         { role: 'user', type: 'chat', targetExpertId: eDevice, taskId: tDevice, offsetMin: 76, content: '设备专家，chamber PM 记录和 alarm 日志准备好了吗？' },
@@ -761,8 +1239,8 @@
     }
     if (project.name.indexOf('供应链') >= 0) {
       var eSupply = findProjectMemberExpertId(pid, 'lead') ||
-        (state.projectTasks.find(function (t) { return t.projectId === pid && t.title === '需求预测建模'; }) || {}).expertId;
-      var eDigital = (state.projectTasks.find(function (t) { return t.projectId === pid && t.title === '数据治理规范'; }) || {}).expertId;
+        (state.projectTasks.find(function (t) { return sameId(t.projectId, pid) && t.title === '需求预测建模'; }) || {}).expertId;
+      var eDigital = (state.projectTasks.find(function (t) { return sameId(t.projectId, pid) && t.title === '数据治理规范'; }) || {}).expertId;
       var tForecast = findProjectTaskId(pid, '需求预测建模');
       var tGovern = findProjectTaskId(pid, '数据治理规范');
       return [
@@ -773,7 +1251,7 @@
         { role: 'expert', type: 'chat', taskId: tGovern, expertId: eDigital, offsetMin: 22, content: '主数据治理规范草案已完成 60%，编码规则章节待与 ERP 团队对齐。' },
         { role: 'user', type: 'chat', targetExpertId: eSupply, taskId: tForecast, offsetMin: 32, content: 'Q3 Top20 SKU 预测校准结果什么时候能出？' },
         { role: 'expert', type: 'chat', taskId: tForecast, expertId: eSupply, offsetMin: 38, content: '今天下午可出初版，已纳入 6 月促销增量与海外订单反馈。' },
-        { role: 'expert', type: 'action', taskId: tForecast, expertId: eSupply, toolName: '需求预测引擎', offsetMin: 45, content: '正在调用 [需求预测引擎] 训练多 SKU 预测模型…' },
+        { role: 'expert', type: 'action', taskId: tForecast, expertId: eSupply, toolName: '需求预测引擎', offsetMin: 45, content: '' },
         { role: 'expert', type: 'chat', taskId: tGovern, expertId: eDigital, offsetMin: 55, content: 'WMS 库位热力图已导出，可供预测模型的区域分仓特征使用。' },
         { role: 'user', type: 'chat', scope: 'group', offsetMin: 68, content: '周五下午安排阶段评审会，请准备汇报材料。' },
         { role: 'expert', type: 'chat', taskId: tForecast, expertId: eSupply, offsetMin: 74, content: '收到，同步准备 Q3 预测校准摘要和偏差分析。' },
@@ -802,7 +1280,7 @@
   }
 
   function markProjectUserTouched(projectId) {
-    var project = state.projects.find(function (p) { return p.id === projectId; });
+      var project = state.projects.find(function (p) { return sameId(p.id, projectId); });
     if (project) project.userTouched = true;
   }
 
@@ -813,7 +1291,7 @@
   }
 
   function ensureProjectDemoMessages(projectId) {
-    var project = state.projects.find(function (p) { return p.id === projectId; });
+      var project = state.projects.find(function (p) { return sameId(p.id, projectId); });
     if (!project || !getDemoProjectMessageDefs(project).length) return false;
     var current = state.projectMessages[projectId] || [];
     if (projectHasUserActivity(project, current)) return false;
@@ -850,30 +1328,49 @@
     isDevMock: function () {
       return DEV_MOCK;
     },
+    isSidecarAvailable: function () {
+      return sidecarAvailable;
+    },
     uid: uid,
     nowIso: nowIso,
     init: function () {
-      seedIfEmpty();
+      if (DEV_MOCK) {
+        seedIfEmpty();
+      }
       migrateExpertRoleNames();
+      if (DEV_MOCK) {
+        migrateSeedExpertProfiles();
+      }
+      migrateProjectIds();
+      seedDemoProjectsIfEmpty();
       migrateProjectsVisibility();
       migrateProjectTasks();
       migrateProjectTaskTitles();
       migrateProjectTaskStatus();
       migrateProjectFiles();
       migrateProjectMessageTypes();
-      syncDemoData();
-      syncExpertsFromSidecar();
+      if (DEV_MOCK) {
+        syncDemoData();
+      }
+      if (!DEV_MOCK) {
+        syncExpertsFromSidecar();
+      }
       return state;
     },
     reset: function () {
       state = defaultState();
       persist();
-      seedIfEmpty();
-      syncDemoData();
+      if (DEV_MOCK) {
+        seedIfEmpty();
+        syncDemoData();
+      } else {
+        syncExpertsFromSidecar();
+      }
     },
     getState: function () { return state; },
 
     getExperts: function () {
+      if (DEV_MOCK) migrateSeedExpertProfiles();
       return state.experts.slice().sort(function (a, b) {
         return (b.updatedAt || '').localeCompare(a.updatedAt || '');
       });
@@ -892,7 +1389,7 @@
           displayName: expert.name,
           intro: expert.description || '',
           avatarUrl: expert.avatar || null,
-          domains: expert.expertise || []
+          domains: (expert.expertise || []).slice(0, 3)
         });
       }
       return expert;
@@ -903,7 +1400,7 @@
         name: payload.name,
         avatar: payload.avatar || DEFAULT_EXPERT_AVATAR,
         description: payload.description,
-        expertise: payload.expertise || [],
+        expertise: (payload.expertise || []).slice(0, 3),
         category: payload.category || '工艺制造',
         visibility: payload.visibility || 'internal',
         status: 'active',
@@ -914,19 +1411,74 @@
       state.skillBindings[expert.id] = payload.skillIds || [];
       state.toolBindings[expert.id] = payload.toolIds || [];
       persist();
-      if (window.SidecarApi && window.SidecarApi.createExpert) {
+      if (!DEV_MOCK && window.SidecarApi && window.SidecarApi.createExpert) {
         window.SidecarApi.createExpert({
           profile: String(expert.id),
           displayName: expert.name,
           intro: expert.description || '',
           avatarUrl: expert.avatar || null,
-          domains: expert.expertise || [],
+          domains: (expert.expertise || []).slice(0, 3),
           coreDutyMd: (payload.persona && payload.persona.coreDutyMd) || '',
           workflowMd: (payload.persona && payload.persona.workflowMd) || '',
           behaviorMd: (payload.persona && payload.persona.behaviorMd) || '',
           skills: payload.skillIds || [],
           tools: payload.toolIds || []
+        }).then(function (remote) {
+          if (!remote || !remote.profile) {
+            var e = window.SidecarApi.getLastError && window.SidecarApi.getLastError();
+            if (e) {
+              console.warn('[AppStore] createExpert sidecar unavailable:', e.message);
+              if (window.ElementPlus && window.ElementPlus.ElMessage) {
+                ElementPlus.ElMessage.warning('sidecar 连接异常，当前仅本地保存。请检查 SIDECAR_API_BASE。');
+              }
+            }
+            return;
+          }
+          sidecarAvailable = true;
+          if (String(remote.profile) !== String(expert.id)) {
+            var oldId = String(expert.id);
+            var newId = String(remote.profile);
+            expert.id = newId;
+            if (state.personas[oldId]) {
+              state.personas[newId] = state.personas[oldId];
+              delete state.personas[oldId];
+            }
+            if (state.skillBindings[oldId]) {
+              state.skillBindings[newId] = state.skillBindings[oldId];
+              delete state.skillBindings[oldId];
+            }
+            if (state.toolBindings[oldId]) {
+              state.toolBindings[newId] = state.toolBindings[oldId];
+              delete state.toolBindings[oldId];
+            }
+            if (state.imChannels[oldId]) {
+              state.imChannels[newId] = state.imChannels[oldId];
+              delete state.imChannels[oldId];
+            }
+            if (state.permissions[oldId]) {
+              state.permissions[newId] = state.permissions[oldId];
+              delete state.permissions[oldId];
+            }
+            if (state.workspaceFiles[oldId]) {
+              state.workspaceFiles[newId] = state.workspaceFiles[oldId];
+              delete state.workspaceFiles[oldId];
+            }
+            state.tasks.forEach(function (t) {
+              if (String(t.expertId) === oldId) t.expertId = newId;
+            });
+            persist();
+            window.dispatchEvent(new CustomEvent('app-store-updated'));
+          } else {
+            window.dispatchEvent(new CustomEvent('app-store-updated'));
+          }
+        }).catch(function (error) {
+          console.warn('[AppStore] createExpert sidecar request failed:', error && error.message ? error.message : error);
+          if (window.ElementPlus && window.ElementPlus.ElMessage) {
+            ElementPlus.ElMessage.warning('sidecar 连接异常，当前仅本地保存。请检查 SIDECAR_API_BASE。');
+          }
         });
+      } else if (!DEV_MOCK) {
+        console.warn('[AppStore] createExpert sidecar client unavailable');
       }
       return expert;
     },
@@ -954,6 +1506,58 @@
 
     getPersona: function (expertId) {
       return state.personas[expertId] || { coreDutyMd: '', workflowMd: '', behaviorMd: '' };
+    },
+    getExpertDetailMeta: function (expertId) {
+      return (state.expertDetailMeta && state.expertDetailMeta[expertId]) || {
+        skillsDetail: [],
+        skillsCatalog: [],
+        toolsDetail: {},
+        toolsCatalog: [],
+        memoryMeta: {},
+        gateway: {}
+      };
+    },
+    getSkillsDetail: function (expertId) {
+      return this.getExpertDetailMeta(expertId).skillsDetail || [];
+    },
+    getSkillsCatalog: function (expertId) {
+      var meta = this.getExpertDetailMeta(expertId);
+      if (meta.skillsCatalog && meta.skillsCatalog.length) return meta.skillsCatalog;
+      if (DEV_MOCK && window.SKILLS_CATALOG) {
+        return window.SKILLS_CATALOG.map(function (s) {
+          return {
+            skillId: s.id,
+            name: s.name,
+            description: s.description || '',
+            category: s.category || ''
+          };
+        });
+      }
+      return [];
+    },
+    getToolsDetail: function (expertId) {
+      return this.getExpertDetailMeta(expertId).toolsDetail || {};
+    },
+    getToolsCatalog: function (expertId) {
+      var meta = this.getExpertDetailMeta(expertId);
+      if (meta.toolsCatalog && meta.toolsCatalog.length) return meta.toolsCatalog;
+      if (DEV_MOCK && window.TOOLS_CATALOG) {
+        return window.TOOLS_CATALOG.map(function (t) {
+          return {
+            toolset: t.id,
+            label: t.name,
+            description: t.description || '',
+            configured: true
+          };
+        });
+      }
+      return [];
+    },
+    getMemoryMeta: function (expertId) {
+      return this.getExpertDetailMeta(expertId).memoryMeta || {};
+    },
+    getGatewayMeta: function (expertId) {
+      return this.getExpertDetailMeta(expertId).gateway || {};
     },
     savePersona: function (expertId, persona) {
       var old = state.personas[expertId];
@@ -997,8 +1601,7 @@
     },
 
     getSkillIds: function (expertId) {
-      var bindings = state.skillBindings[expertId] || [];
-      return bindings.map(function (b) { return typeof b === 'string' ? b : b.skillId; });
+      return normalizeSkillIds(state.skillBindings[expertId] || []);
     },
     getSkillBindings: function (expertId) {
       var raw = state.skillBindings[expertId] || [];
@@ -1006,39 +1609,66 @@
         if (typeof b === 'string') {
           return { skillId: b, enabled: true, params: getDefaultSkillParams(b) };
         }
-        return b;
-      });
+        var sid = bindingSkillId(b);
+        return Object.assign({}, b, { skillId: sid });
+      }).filter(function (b) { return !!b.skillId; });
     },
     setSkillBindings: function (expertId, bindings) {
-      state.skillBindings[expertId] = bindings;
+      var key = String(expertId);
+      state.skillBindings[key] = bindings;
       persist();
-      if (!DEV_MOCK && window.SidecarApi && window.SidecarApi.patchExpert) {
-        var skillIds = (bindings || []).map(function (b) { return typeof b === 'string' ? b : b.skillId; });
-        window.SidecarApi.patchExpert(String(expertId), { skills: skillIds });
+      var assigned = normalizeSkillIds(bindings);
+      if (!DEV_MOCK && window.SidecarApi && window.SidecarApi.putExpertSkills) {
+        bumpCapabilityRev(key);
+        return sidecarPutSkills(key, assigned);
       }
+      return Promise.resolve({ assigned: state.skillBindings[key] });
     },
     addSkillBinding: function (expertId, skillId) {
-      if (!state.skillBindings[expertId]) state.skillBindings[expertId] = [];
-      if (state.skillBindings[expertId].some(function (b) {
-        return (typeof b === 'string' ? b : b.skillId) === skillId;
-      })) return;
-      state.skillBindings[expertId].push({
-        skillId: skillId, enabled: true, params: getDefaultSkillParams(skillId)
+      return this.addSkillBindings(expertId, [skillId]);
+    },
+    addSkillBindings: function (expertId, skillIds) {
+      var key = String(expertId);
+      if (!state.skillBindings[key]) state.skillBindings[key] = [];
+      var catalog = this.getSkillsCatalog(key);
+      var catalogById = {};
+      catalog.forEach(function (s) { catalogById[s.skillId] = s; });
+      (skillIds || []).forEach(function (skillId) {
+        if (!skillId) return;
+        var sid = String(skillId).trim();
+        if (state.skillBindings[key].some(function (b) { return bindingSkillId(b) === sid; })) return;
+        var meta = catalogById[sid] || {};
+        state.skillBindings[key].push({
+          skillId: sid,
+          params: getDefaultSkillParams(sid),
+          name: meta.name || sid,
+          description: meta.description || '',
+          category: meta.category || ''
+        });
       });
       persist();
-      if (!DEV_MOCK && window.SidecarApi && window.SidecarApi.patchExpert) {
-        window.SidecarApi.patchExpert(String(expertId), { skills: this.getSkillIds(expertId) });
+      var assigned = this.getSkillIds(key);
+      if (!DEV_MOCK && window.SidecarApi && window.SidecarApi.putExpertSkills) {
+        bumpCapabilityRev(key);
+        return sidecarPutSkills(key, assigned);
       }
+      return Promise.resolve({ assigned: state.skillBindings[key] });
     },
     removeSkillBinding: function (expertId, skillId) {
-      if (!state.skillBindings[expertId]) return;
-      state.skillBindings[expertId] = state.skillBindings[expertId].filter(function (b) {
-        return (typeof b === 'string' ? b : b.skillId) !== skillId;
+      var key = String(expertId);
+      if (!state.skillBindings[key]) return Promise.resolve(null);
+      var target = String(skillId || '').trim();
+      var next = (state.skillBindings[key] || []).filter(function (b) {
+        return bindingSkillId(b) !== target;
       });
-      persist();
-      if (!DEV_MOCK && window.SidecarApi && window.SidecarApi.patchExpert) {
-        window.SidecarApi.patchExpert(String(expertId), { skills: this.getSkillIds(expertId) });
+      var assigned = normalizeSkillIds(next);
+      if (!DEV_MOCK && window.SidecarApi && window.SidecarApi.putExpertSkills) {
+        bumpCapabilityRev(key);
+        return sidecarPutSkills(key, assigned);
       }
+      state.skillBindings[key] = next;
+      persist();
+      return Promise.resolve({ assigned: state.skillBindings[key] });
     },
     toggleSkillBinding: function (expertId, skillId, enabled) {
       if (!state.skillBindings[expertId]) return;
@@ -1068,8 +1698,7 @@
     },
 
     getToolIds: function (expertId) {
-      var bindings = state.toolBindings[expertId] || [];
-      return bindings.map(function (b) { return typeof b === 'string' ? b : b.toolId; });
+      return normalizeToolIds(state.toolBindings[expertId] || []);
     },
     getToolBindings: function (expertId) {
       var raw = state.toolBindings[expertId] || [];
@@ -1081,35 +1710,62 @@
       });
     },
     setToolBindings: function (expertId, bindings) {
-      state.toolBindings[expertId] = bindings;
+      var key = String(expertId);
+      state.toolBindings[key] = bindings;
       persist();
-      if (!DEV_MOCK && window.SidecarApi && window.SidecarApi.patchExpert) {
-        var toolIds = (bindings || []).map(function (b) { return typeof b === 'string' ? b : b.toolId; });
-        window.SidecarApi.patchExpert(String(expertId), { tools: toolIds });
+      var assigned = normalizeToolIds(bindings);
+      if (!DEV_MOCK && window.SidecarApi && window.SidecarApi.putExpertTools) {
+        bumpCapabilityRev(key);
+        return sidecarPutTools(key, assigned);
       }
+      return Promise.resolve({ assigned: { toolsets: state.toolBindings[key] } });
     },
     addToolBinding: function (expertId, toolId) {
-      if (!state.toolBindings[expertId]) state.toolBindings[expertId] = [];
-      if (state.toolBindings[expertId].some(function (b) {
-        return (typeof b === 'string' ? b : b.toolId) === toolId;
-      })) return;
-      state.toolBindings[expertId].push({
-        toolId: toolId, enabled: true, status: 'unconfigured', config: getDefaultToolConfig(toolId)
+      return this.addToolBindings(expertId, [toolId]);
+    },
+    addToolBindings: function (expertId, toolIds) {
+      var key = String(expertId);
+      if (!state.toolBindings[key]) state.toolBindings[key] = [];
+      var catalog = this.getToolsCatalog(key);
+      var catalogById = {};
+      catalog.forEach(function (t) { catalogById[t.toolset] = t; });
+      (toolIds || []).forEach(function (toolId) {
+        if (!toolId) return;
+        var tid = String(toolId).trim();
+        if (state.toolBindings[key].some(function (b) { return bindingToolId(b) === tid; })) return;
+        var meta = catalogById[tid] || {};
+        state.toolBindings[key].push({
+          toolId: tid,
+          toolset: tid,
+          label: meta.label || tid,
+          description: meta.description || '',
+          status: meta.configured === false ? 'unconfigured' : 'configured',
+          config: getDefaultToolConfig(tid)
+        });
       });
       persist();
-      if (!DEV_MOCK && window.SidecarApi && window.SidecarApi.patchExpert) {
-        window.SidecarApi.patchExpert(String(expertId), { tools: this.getToolIds(expertId) });
+      var assigned = this.getToolIds(key);
+      if (!DEV_MOCK && window.SidecarApi && window.SidecarApi.putExpertTools) {
+        bumpCapabilityRev(key);
+        return sidecarPutTools(key, assigned);
       }
+      return Promise.resolve({ assigned: { toolsets: state.toolBindings[key] } });
     },
     removeToolBinding: function (expertId, toolId) {
-      if (!state.toolBindings[expertId]) return;
-      state.toolBindings[expertId] = state.toolBindings[expertId].filter(function (b) {
-        return (typeof b === 'string' ? b : b.toolId) !== toolId;
+      var key = String(expertId);
+      if (!state.toolBindings[key]) return Promise.resolve(null);
+      var target = String(toolId || '').trim();
+      var next = (state.toolBindings[key] || []).filter(function (b) {
+        return bindingToolId(b) !== target;
       });
-      persist();
-      if (!DEV_MOCK && window.SidecarApi && window.SidecarApi.patchExpert) {
-        window.SidecarApi.patchExpert(String(expertId), { tools: this.getToolIds(expertId) });
+      var assigned = normalizeToolIds(next);
+      if (!DEV_MOCK && window.SidecarApi && window.SidecarApi.putExpertTools) {
+        bumpCapabilityRev(key);
+        return sidecarPutTools(key, assigned);
       }
+      state.toolBindings[key] = next;
+      persist();
+      return Promise.resolve({ assigned: { toolsets: state.toolBindings[key] } });
     },
     toggleToolBinding: function (expertId, toolId, enabled) {
       if (!state.toolBindings[expertId]) return;
@@ -1163,11 +1819,31 @@
       };
       state.memories.unshift(m);
       persist();
+      if (!DEV_MOCK && window.SidecarApi && window.SidecarApi.postMemory) {
+        window.SidecarApi.postMemory(String(expertId), { content: content, category: category || 'other' })
+          .then(function (remote) {
+            if (remote && remote.id) m.id = remote.id;
+            persist();
+          });
+      }
       return m;
     },
-    deleteMemory: function (memoryId) {
+    deleteMemory: function (memoryId, expertId) {
       state.memories = state.memories.filter(function (m) { return m.id !== memoryId; });
       persist();
+      if (!DEV_MOCK && window.SidecarApi && window.SidecarApi.deleteMemory && expertId) {
+        window.SidecarApi.deleteMemory(String(expertId), memoryId);
+      }
+    },
+    updateMemory: function (memoryId, patch) {
+      var updated = null;
+      state.memories = state.memories.map(function (m) {
+        if (m.id !== memoryId) return m;
+        updated = Object.assign({}, m, patch || {}, { updatedAt: nowIso() });
+        return updated;
+      });
+      persist();
+      return updated;
     },
 
     getTasksByExpert: function (expertId, type, includeArchived) {
@@ -1180,11 +1856,23 @@
         return (b.updatedAt || '').localeCompare(a.updatedAt || '');
       });
     },
+    fetchExpertDetailRemote: async function (expertId) {
+      if (DEV_MOCK || !window.SidecarApi || !window.SidecarApi.getExpert) return null;
+      var requestId = String(expertId);
+      var revAtStart = getCapabilityRev(requestId);
+      var detail = await window.SidecarApi.getExpert(requestId);
+      if (!detail) return null;
+      if (String(detail.profile || detail.id) !== requestId) return null;
+      if (getCapabilityRev(requestId) !== revAtStart) {
+        return applyExpertDetailRemote(detail, { skipCapabilities: true });
+      }
+      return applyExpertDetailRemote(detail);
+    },
     fetchTasksByExpertRemote: async function (expertId) {
       if (DEV_MOCK || !window.SidecarApi || !window.SidecarApi.listTasks) return null;
       var remote = await window.SidecarApi.listTasks(String(expertId));
       if (!remote) return null;
-      return remote.map(function (t) {
+      var mapped = remote.map(function (t) {
         return {
           id: t.id,
           title: t.title,
@@ -1193,11 +1881,16 @@
           expertId: String(expertId),
           ownerId: 'admin',
           archived: false,
-          titleSet: true,
+          titleSet: !!t.titleSet,
           createdAt: t.createdAt || nowIso(),
           updatedAt: t.createdAt || nowIso()
         };
       });
+      var expertKey = String(expertId);
+      state.tasks = state.tasks.filter(function (t) { return String(t.expertId) !== expertKey; });
+      mapped.forEach(function (t) { state.tasks.unshift(t); });
+      persist();
+      return mapped;
     },
     getTask: function (taskId) {
       return state.tasks.find(function (t) { return t.id === taskId; }) || null;
@@ -1220,6 +1913,27 @@
       persist();
       return task;
     },
+    createTaskRemote: async function (expertId, title) {
+      if (DEV_MOCK || !window.SidecarApi || !window.SidecarApi.createTask) return null;
+      var remote = await window.SidecarApi.createTask(String(expertId), title || '新任务');
+      if (!remote) return null;
+      var task = {
+        id: remote.id,
+        title: remote.title || title || '新任务',
+        type: 'dialogue',
+        status: remote.status || 'pending',
+        expertId: String(expertId),
+        ownerId: 'admin',
+        archived: false,
+        titleSet: !!remote.titleSet,
+        createdAt: remote.createdAt || nowIso(),
+        updatedAt: remote.createdAt || nowIso()
+      };
+      state.tasks.unshift(task);
+      state.messages[task.id] = [];
+      persist();
+      return task;
+    },
     updateTask: function (taskId, patch) {
       var t = state.tasks.find(function (x) { return x.id === taskId; });
       if (!t) return null;
@@ -1227,8 +1941,25 @@
       if (patch.status !== undefined || patch.title !== undefined) {
         t.userTouched = true;
       }
+      if (patch.title !== undefined) {
+        t.titleSet = true;
+      }
       persist();
       return t;
+    },
+    updateTaskRemote: async function (expertId, taskId, patch) {
+      if (DEV_MOCK || !window.SidecarApi || !window.SidecarApi.updateTask) return null;
+      var body = {};
+      if (patch && patch.title !== undefined) body.title = patch.title;
+      if (patch && patch.status !== undefined) body.status = patch.status;
+      if (!Object.keys(body).length) return null;
+      var resp = await window.SidecarApi.updateTask(String(expertId), String(taskId), body);
+      if (!resp || resp.ok !== true) return null;
+      var localPatch = Object.assign({}, patch);
+      if (resp.title !== undefined) localPatch.title = resp.title;
+      if (resp.status !== undefined) localPatch.status = resp.status;
+      this.updateTask(taskId, localPatch);
+      return resp;
     },
     deleteTask: function (taskId) {
       state.tasks = state.tasks.filter(function (t) { return t.id !== taskId; });
@@ -1237,6 +1968,13 @@
         state.taskArtifacts = state.taskArtifacts.filter(function (a) { return a.taskId !== taskId; });
       }
       persist();
+    },
+    deleteTaskRemote: async function (expertId, taskId) {
+      if (DEV_MOCK || !window.SidecarApi || !window.SidecarApi.deleteTask) return null;
+      var resp = await window.SidecarApi.deleteTask(String(expertId), String(taskId));
+      if (!resp || resp.ok !== true) return null;
+      this.deleteTask(taskId);
+      return true;
     },
     archiveTask: function (taskId, archived) {
       var t = state.tasks.find(function (x) { return x.id === taskId; });
@@ -1259,9 +1997,12 @@
       return remote.map(function (m) {
         return {
           id: m.id,
-          role: m.role,
-          type: 'chat',
+          role: m.role === 'assistant' ? 'expert' : m.role,
+          type: m.type || m.msgType || 'chat',
           content: m.content,
+          expertId: String(expertId),
+          toolName: m.toolName || null,
+          skillName: m.skillName || null,
           createdAt: m.createdAt
         };
       });
@@ -1285,7 +2026,7 @@
         task.updatedAt = nowIso();
         task.userTouched = true;
       }
-      if (task && msg.role === 'user' && !task.titleSet) {
+      if (DEV_MOCK && task && msg.role === 'user' && !task.titleSet) {
         task.title = msg.content.slice(0, 30) + (msg.content.length > 30 ? '…' : '');
         task.titleSet = true;
       }
@@ -1310,7 +2051,7 @@
       });
     },
     getProject: function (id) {
-      return state.projects.find(function (p) { return p.id === id; }) || null;
+      return state.projects.find(function (p) { return sameId(p.id, id); }) || null;
     },
     createProject: function (payload) {
       var project = {
@@ -1333,30 +2074,30 @@
       return project;
     },
     saveProject: function (project) {
-      var idx = state.projects.findIndex(function (p) { return p.id === project.id; });
+      var idx = state.projects.findIndex(function (p) { return sameId(p.id, project.id); });
       project.updatedAt = nowIso();
       if (idx >= 0) state.projects[idx] = project;
       persist();
       return project;
     },
     deleteProject: function (id) {
-      var removedTaskIds = state.tasks.filter(function (t) { return t.projectId === id; }).map(function (t) { return t.id; });
-      state.projects = state.projects.filter(function (p) { return p.id !== id; });
-      state.projectMembers = state.projectMembers.filter(function (m) { return m.projectId !== id; });
+      var removedTaskIds = state.tasks.filter(function (t) { return sameId(t.projectId, id); }).map(function (t) { return t.id; });
+      state.projects = state.projects.filter(function (p) { return !sameId(p.id, id); });
+      state.projectMembers = state.projectMembers.filter(function (m) { return !sameId(m.projectId, id); });
       delete state.projectMessages[id];
-      state.projectOutputs = state.projectOutputs.filter(function (o) { return o.projectId !== id; });
-      state.projectTasks = state.projectTasks.filter(function (t) { return t.projectId !== id; });
-      state.projectFiles = state.projectFiles.filter(function (f) { return f.projectId !== id; });
-      state.tasks = state.tasks.filter(function (t) { return t.projectId !== id; });
+      state.projectOutputs = state.projectOutputs.filter(function (o) { return !sameId(o.projectId, id); });
+      state.projectTasks = state.projectTasks.filter(function (t) { return !sameId(t.projectId, id); });
+      state.projectFiles = state.projectFiles.filter(function (f) { return !sameId(f.projectId, id); });
+      state.tasks = state.tasks.filter(function (t) { return !sameId(t.projectId, id); });
       removedTaskIds.forEach(function (tid) { delete state.messages[tid]; });
       persist();
     },
 
     getProjectMembers: function (projectId) {
-      return state.projectMembers.filter(function (m) { return m.projectId === projectId; });
+      return state.projectMembers.filter(function (m) { return sameId(m.projectId, projectId); });
     },
     addProjectMember: function (projectId, expertId) {
-      if (state.projectMembers.some(function (m) { return m.projectId === projectId && m.expertId === expertId; })) return;
+      if (state.projectMembers.some(function (m) { return sameId(m.projectId, projectId) && sameId(m.expertId, expertId); })) return;
       state.projectMembers.push({
         id: uid(),
         projectId: projectId,
@@ -1367,7 +2108,7 @@
         joinedAt: nowIso()
       });
       markProjectUserTouched(projectId);
-      var pMember = state.projects.find(function (x) { return x.id === projectId; });
+      var pMember = state.projects.find(function (x) { return sameId(x.id, projectId); });
       if (pMember) pMember.updatedAt = nowIso();
       persist();
     },
@@ -1388,7 +2129,7 @@
     getProjectsByExpert: function (expertId, visibility) {
       var pids = state.projectMembers.filter(function (m) { return m.expertId === expertId; }).map(function (m) { return m.projectId; });
       return state.projects.filter(function (p) {
-        if (pids.indexOf(p.id) < 0) return false;
+        if (!pids.some(function (pid) { return sameId(pid, p.id); })) return false;
         if (visibility && p.visibility !== visibility) return false;
         return true;
       });
@@ -1414,7 +2155,7 @@
       };
       if (msg.role === 'user') message.fromUser = true;
       state.projectMessages[projectId].push(message);
-      var p = state.projects.find(function (x) { return x.id === projectId; });
+      var p = state.projects.find(function (x) { return sameId(x.id, projectId); });
       if (p) {
         if (msg.role === 'user') markProjectUserTouched(projectId);
         p.updatedAt = nowIso();
@@ -1424,11 +2165,11 @@
     },
 
     getProjectOutputs: function (projectId) {
-      return state.projectOutputs.filter(function (o) { return o.projectId === projectId; });
+      return state.projectOutputs.filter(function (o) { return sameId(o.projectId, projectId); });
     },
     getProjectTasks: function (projectId) {
       return (state.projectTasks || [])
-        .filter(function (t) { return t.projectId === projectId; })
+        .filter(function (t) { return sameId(t.projectId, projectId); })
         .map(function (t) {
           var expert = t.expertId ? AppStore.getExpert(t.expertId) : null;
           var status = normalizeProjectTaskStatus(t.status);
@@ -1448,7 +2189,7 @@
     normalizeProjectTaskStatus: normalizeProjectTaskStatus,
     getProjectFiles: function (projectId) {
       return (state.projectFiles || [])
-        .filter(function (f) { return f.projectId === projectId; })
+        .filter(function (f) { return sameId(f.projectId, projectId); })
         .sort(function (a, b) { return (b.updatedAt || '').localeCompare(a.updatedAt || ''); });
     },
     addProjectOutput: function (payload) {
@@ -1478,7 +2219,7 @@
       if (!state.projectFiles) state.projectFiles = [];
       state.projectFiles.unshift(f);
       markProjectUserTouched(payload.projectId);
-      var p = state.projects.find(function (x) { return x.id === payload.projectId; });
+      var p = state.projects.find(function (x) { return sameId(x.id, payload.projectId); });
       if (p) p.updatedAt = nowIso();
       persist();
       return f;
@@ -1487,18 +2228,37 @@
     getImChannels: function (expertId) {
       return state.imChannels[expertId] || [];
     },
-    saveImChannels: function (expertId, channels) {
+    saveImChannels: function (expertId, channels, opts) {
+      opts = opts || {};
       state.imChannels[expertId] = channels;
+      if (opts.gatewayEnabled !== undefined) {
+        state.expertDetailMeta = state.expertDetailMeta || {};
+        var prev = state.expertDetailMeta[expertId] || {};
+        state.expertDetailMeta[expertId] = Object.assign({}, prev, {
+          gateway: Object.assign({}, prev.gateway || {}, { enabled: !!opts.gatewayEnabled })
+        });
+      }
       persist();
+      if (opts.skipRemote) return;
+      if (!DEV_MOCK && window.SidecarApi && window.SidecarApi.putImChannels) {
+        window.SidecarApi.putImChannels(String(expertId), {
+          channels: channels,
+          gatewayEnabled: opts.gatewayEnabled
+        });
+      }
     },
 
     getPermissions: function (expertId) {
       if (!state.permissions[expertId]) {
-        state.permissions[expertId] = [
-          { id: uid(), subjectType: 'role', subjectId: 'admin', permission: 'admin', label: '管理员' },
-          { id: uid(), subjectType: 'role', subjectId: 'user', permission: 'use', label: '普通用户（可使用）' }
-        ];
-        persist();
+        if (DEV_MOCK) {
+          state.permissions[expertId] = [
+            { id: uid(), subjectType: 'role', subjectId: 'admin', permission: 'admin', label: '管理员' },
+            { id: uid(), subjectType: 'role', subjectId: 'user', permission: 'use', label: '普通用户（可使用）' }
+          ];
+          persist();
+        } else {
+          state.permissions[expertId] = [];
+        }
       }
       return state.permissions[expertId];
     },
@@ -1592,11 +2352,11 @@
       });
       this.addMessage(taskId, {
         role: 'expert', type: 'skill', expertId: expert.id, skillName: cap.skill,
-        content: '正在运用 [' + cap.skill + '] 技能分析：「' + (snippet || '当前任务') + '」'
+        content: ''
       });
       this.addMessage(taskId, {
         role: 'expert', type: 'action', expertId: expert.id, toolName: cap.tool,
-        content: '正在调用 [' + cap.tool + '] 获取相关数据…'
+        content: ''
       });
     },
 

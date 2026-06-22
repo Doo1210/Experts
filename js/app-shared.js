@@ -53,6 +53,14 @@
     };
   }
 
+  function decodeRoutePart(value) {
+    try {
+      return decodeURIComponent(value || '');
+    } catch (_ignore) {
+      return value || '';
+    }
+  }
+
   function parseRoute() {
     var hash = location.hash.slice(1) || '/experts';
     var parts = hash.split('?')[0].split('/').filter(Boolean);
@@ -71,11 +79,11 @@
         r.query.create = '1';
       } else if (parts[2] === 'tasks') {
         r.name = 'expert-tasks';
-        r.params.id = parts[1];
-        r.params.taskId = parts[3] || null;
+        r.params.id = decodeRoutePart(parts[1]);
+        r.params.taskId = parts[3] ? decodeRoutePart(parts[3]) : null;
       } else {
         r.name = 'expert-detail';
-        r.params.id = parts[1];
+        r.params.id = decodeRoutePart(parts[1]);
       }
     } else if (parts[0] === 'projects') {
       if (parts.length === 1) r.name = 'projects';
@@ -84,7 +92,7 @@
         r.query.create = '1';
       } else {
         r.name = 'project-detail';
-        r.params.id = parts[1];
+        r.params.id = decodeRoutePart(parts[1]);
       }
     }
     return r;

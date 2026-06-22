@@ -91,12 +91,28 @@
         return 'status-' + normalizeTaskStatus(task.status);
       }
 
+      function resetProjectView() {
+        project.value = null;
+        members.value = [];
+        messages.value = [];
+        outputs.value = [];
+        projectTasks.value = [];
+        projectFiles.value = [];
+        chatTarget.value = null;
+        selectedProjectTaskId.value = null;
+      }
+
       function load() {
-        project.value = store.getProject(props.projectId);
-        if (!project.value) return;
+        var currentProject = store.getProject(props.projectId);
+        if (!currentProject) {
+          resetProjectView();
+          return;
+        }
+        project.value = currentProject;
+        allExperts.value = store.getExperts();
         members.value = store.getProjectMembers(props.projectId).map(function (m) {
           return Object.assign({}, m, { expert: store.getExpert(m.expertId) });
-        });
+        }).filter(function (m) { return !!m.expert; });
         messages.value = store.getProjectMessages(props.projectId);
         outputs.value = store.getProjectOutputs(props.projectId);
         projectTasks.value = store.getProjectTasks(props.projectId);
@@ -129,6 +145,53 @@
           });
         }
         return messages.value;
+      });
+
+      function statusContent(content) {
+        var text = String(content || '');
+        if (/^正在(运用|使用技能|调用|准备技能调用|生成工具调用)/.test(text)) return '';
+        return text;
+      }
+
+      function isExpertLogMessage(m) {
+        return m && m.role === 'expert';
+      }
+
+      function pushExpertLogTurn(groups, buffer) {
+        if (!buffer.items.length) return;
+        var first = buffer.items[0] || {};
+        groups.push({
+          id: buffer.id || ('project-expert-turn-' + groups.length),
+          kind: 'expert-turn',
+          expertId: messageExpertId(first),
+          expertName: messageExpertName(first),
+          expertAvatar: messageExpertAvatar(first),
+          items: buffer.items.slice()
+        });
+        buffer.id = '';
+        buffer.expertId = null;
+        buffer.items = [];
+      }
+
+      var chatGroups = Vue.computed(function () {
+        var groups = [];
+        var expertBuffer = { id: '', expertId: null, items: [] };
+        filteredMessages.value.forEach(function (m) {
+          if (isExpertLogMessage(m)) {
+            var resolvedExpertId = messageExpertId(m);
+            if (expertBuffer.items.length && expertBuffer.expertId !== resolvedExpertId) {
+              pushExpertLogTurn(groups, expertBuffer);
+            }
+            if (!expertBuffer.id) expertBuffer.id = m.id || ('project-expert-turn-' + groups.length);
+            expertBuffer.expertId = resolvedExpertId;
+            expertBuffer.items.push(m);
+            return;
+          }
+          pushExpertLogTurn(groups, expertBuffer);
+          groups.push({ id: m.id || ('project-message-' + groups.length), kind: 'message', message: m });
+        });
+        pushExpertLogTurn(groups, expertBuffer);
+        return groups;
       });
 
       var logViewLabel = Vue.computed(function () {
@@ -164,14 +227,56 @@
         return chatTarget.value === target;
       }
 
+      function fallbackExpert() {
+        var lead = members.value.find(function (m) { return m.role === 'lead' && m.expert; });
+        var firstMember = members.value.find(function (m) { return m.expert; });
+        return (lead || firstMember || {}).expert || null;
+      }
+
+      function expertById(expertId) {
+        if (!expertId) return null;
+        return store.getExpert(expertId) ||
+          ((members.value.find(function (m) { return m.expertId === expertId; }) || {}).expert) ||
+          null;
+      }
+
+      function resolveMessageExpert(message) {
+        if (!message) return fallbackExpert();
+        var expert = expertById(message.expertId);
+        if (expert) return expert;
+        if (message.taskId) {
+          var task = projectTasks.value.find(function (t) { return t.id === message.taskId; });
+          expert = expertById(task && task.expertId);
+          if (expert) return expert;
+        }
+        expert = expertById(message.targetExpertId);
+        if (expert) return expert;
+        return fallbackExpert();
+      }
+
       function expertName(expertId) {
-        var e = store.getExpert(expertId);
-        return e ? e.name : '专家';
+        var e = expertById(expertId);
+        return e ? e.name : '模拟专家';
       }
 
       function expertAvatar(expertId) {
-        var e = store.getExpert(expertId);
-        return e ? e.avatar : '';
+        var e = expertById(expertId);
+        return e ? e.avatar : 'https://api.dicebear.com/7.x/bottts-neutral/svg?seed=project-expert';
+      }
+
+      function messageExpertName(message) {
+        var e = resolveMessageExpert(message);
+        return e ? e.name : '模拟专家';
+      }
+
+      function messageExpertAvatar(message) {
+        var e = resolveMessageExpert(message);
+        return e ? e.avatar : 'https://api.dicebear.com/7.x/bottts-neutral/svg?seed=project-expert';
+      }
+
+      function messageExpertId(message) {
+        var e = resolveMessageExpert(message);
+        return e ? e.id : null;
       }
 
       function send() {
@@ -324,16 +429,27 @@
         sidebarPanel.value = sidebarPanel.value === panel ? null : panel;
       }
 
+      function handleStoreUpdated() {
+        load();
+      }
+
       Vue.watch(function () { return props.projectId; }, function () {
         chatTarget.value = null;
         load();
       });
-      Vue.onMounted(load);
+      Vue.onMounted(function () {
+        load();
+        window.addEventListener('app-store-updated', handleStoreUpdated);
+      });
+      Vue.onBeforeUnmount(function () {
+        window.removeEventListener('app-store-updated', handleStoreUpdated);
+      });
 
       return {
         project: project, sidebarPanel: sidebarPanel, workspaceTab: workspaceTab,
         chatTarget: chatTarget, todoStats: todoStats,
-        filteredMessages: filteredMessages, logViewLabel: logViewLabel, chatPlaceholder: chatPlaceholder,
+        filteredMessages: filteredMessages, chatGroups: chatGroups,
+        logViewLabel: logViewLabel, chatPlaceholder: chatPlaceholder,
         members: members, projectTasks: projectTasks, projectFiles: projectFiles,
         messages: messages, outputs: outputs, inputText: inputText, allExperts: allExperts,
         chatBox: chatBox,
@@ -349,10 +465,12 @@
         previewItem: previewItem, previewVisible: previewVisible,
         taskStatusLabel: taskStatusLabel, taskStatusType: taskStatusType, taskStatusClass: taskStatusClass,
         taskDisplayTitle: taskDisplayTitle, isTaskDone: isTaskDone,
+        statusContent: statusContent,
         selectChatTarget: selectChatTarget,
         selectProjectTask: selectProjectTask,
         selectedProjectTaskId: selectedProjectTaskId,
         isChatTargetActive: isChatTargetActive, expertName: expertName, expertAvatar: expertAvatar,
+        messageExpertName: messageExpertName, messageExpertAvatar: messageExpertAvatar,
         send: send, openAddMemberDialog: openAddMemberDialog, closeAddMemberDialog: closeAddMemberDialog,
         isAddMemberSelected: isAddMemberSelected, toggleAddMember: toggleAddMember,
         submitAddMembers: submitAddMembers, resetAddMemberDialog: resetAddMemberDialog,
@@ -360,7 +478,8 @@
         handleMaterialFileSelect: handleMaterialFileSelect,
         removeMember: removeMember,
         openPreview: openPreview, fileTypeIcon: fileTypeIcon, getMemberTaskStats: getMemberTaskStats,
-        toggleSidebarPanel: toggleSidebarPanel
+        toggleSidebarPanel: toggleSidebarPanel,
+        renderMarkdown: window.renderMarkdown
       };
     },
     template: '\
@@ -449,42 +568,58 @@
               </div>\
               <div class="project-log-area">\
                 <div class="chat-messages project-log-scroll" ref="chatBox">\
-                  <div v-if="filteredMessages.length === 0" class="project-log-empty">暂无日志，请选择沟通对象</div>\
-                  <template v-for="msg in filteredMessages" :key="msg.id">\
-                    <details v-if="msg.type === \'thought\'" class="log-thought-block">\
-                      <summary>思考过程 · {{ expertName(msg.expertId) }}</summary>\
-                      <div class="log-thought-content">{{ msg.content }}</div>\
-                    </details>\
-                    <div v-else-if="msg.type === \'action\'" class="log-action-card">\
-                      <div class="log-action-icon">⚡</div>\
-                      <div class="log-action-body">\
-                        <div class="log-action-title">{{ expertName(msg.expertId) }} 正在调用工具</div>\
-                        <div class="log-action-tool" v-if="msg.toolName">[{{ msg.toolName }}]</div>\
-                        <div class="log-action-desc">{{ msg.content }}</div>\
-                      </div>\
-                    </div>\
-                    <div v-else class="msg-row" :class="msg.role">\
-                      <template v-if="msg.role === \'expert\'">\
-                        <div class="msg-col">\
-                          <div class="msg-header">\
-                            <img class="msg-avatar" :src="expertAvatar(msg.expertId)" :alt="expertName(msg.expertId)" />\
-                            <span class="msg-sender">{{ expertName(msg.expertId) }}</span>\
-                          </div>\
-                          <div class="msg-bubble">\
-                            <div v-if="msg.content" class="msg-text">{{ msg.content }}</div>\
-                            <div v-if="msg.attachments && msg.attachments.length" class="msg-attachments">\
-                              <div v-for="att in msg.attachments" :key="att.id" class="msg-attachment-chip">\
+                  <div v-if="chatGroups.length === 0" class="project-log-empty">暂无日志，请选择沟通对象</div>\
+                  <template v-else v-for="group in chatGroups" :key="group.id">\
+                    <div v-if="group.kind === \'expert-turn\'" class="msg-row expert project-log-expert-turn">\
+                      <div class="msg-col">\
+                        <div class="msg-header">\
+                          <img class="msg-avatar" :src="group.expertAvatar" :alt="group.expertName" />\
+                          <span class="msg-sender">{{ group.expertName }}</span>\
+                        </div>\
+                        <template v-for="item in group.items" :key="item.id">\
+                          <details v-if="item.type === \'thought\'" class="log-thought-block">\
+                            <summary>思考过程</summary>\
+                            <div class="log-thought-content">{{ item.content }}</div>\
+                          </details>\
+                          <details v-else-if="item.type === \'skill\'" class="log-skill-card">\
+                            <summary class="log-skill-summary">\
+                              <span class="log-skill-icon">🧩</span>\
+                              <span class="log-skill-body">\
+                                <span class="log-skill-title">使用技能</span>\
+                                <span class="log-skill-name" v-if="item.skillName">{{ item.skillName }}</span>\
+                                <span class="log-skill-desc" v-if="statusContent(item.content)">{{ statusContent(item.content) }}</span>\
+                              </span>\
+                            </summary>\
+                            <div class="log-skill-result" v-if="statusContent(item.content)">{{ statusContent(item.content) }}</div>\
+                          </details>\
+                          <details v-else-if="item.type === \'action\'" class="log-action-card">\
+                            <summary class="log-action-summary">\
+                              <span class="log-action-icon">⚡</span>\
+                              <span class="log-action-body">\
+                                <span class="log-action-title">调用工具</span>\
+                                <span class="log-action-tool" v-if="item.toolName">[{{ item.toolName }}]</span>\
+                                <span class="log-action-desc" v-if="statusContent(item.content)">{{ statusContent(item.content) }}</span>\
+                              </span>\
+                            </summary>\
+                            <div class="log-action-result" v-if="statusContent(item.content)">{{ statusContent(item.content) }}</div>\
+                          </details>\
+                          <div v-else class="msg-bubble">\
+                            <div v-if="item.content" class="msg-text markdown-body" v-html="renderMarkdown(item.content)"></div>\
+                            <div v-if="item.attachments && item.attachments.length" class="msg-attachments">\
+                              <div v-for="att in item.attachments" :key="att.id" class="msg-attachment-chip">\
                                 <span class="msg-attachment-icon">📎</span>\
                                 <span class="msg-attachment-name">{{ att.name }}</span>\
                               </div>\
                             </div>\
                           </div>\
-                        </div>\
-                      </template>\
-                      <div v-else class="msg-bubble">\
-                        <div v-if="msg.content" class="msg-text">{{ msg.content }}</div>\
-                        <div v-if="msg.attachments && msg.attachments.length" class="msg-attachments">\
-                          <div v-for="att in msg.attachments" :key="att.id" class="msg-attachment-chip">\
+                        </template>\
+                      </div>\
+                    </div>\
+                    <div v-else class="msg-row" :class="group.message.role">\
+                      <div class="msg-bubble">\
+                        <div v-if="group.message.content" class="msg-text">{{ group.message.content }}</div>\
+                        <div v-if="group.message.attachments && group.message.attachments.length" class="msg-attachments">\
+                          <div v-for="att in group.message.attachments" :key="att.id" class="msg-attachment-chip">\
                             <span class="msg-attachment-icon">📎</span>\
                             <span class="msg-attachment-name">{{ att.name }}</span>\
                           </div>\
@@ -698,7 +833,7 @@
                     <span class="member-picker-name">{{ e.name }}</span>\
                     <span class="member-picker-desc-text">{{ e.description || \'暂无介绍\' }}</span>\
                     <div v-if="e.expertise && e.expertise.length" class="member-picker-tags">\
-                      <span v-for="(tag, idx) in e.expertise.slice(0, 2)" :key="tag" class="member-picker-tag">{{ tag }}</span>\
+                      <span v-for="(tag, idx) in e.expertise.slice(0, 3)" :key="tag" class="member-picker-tag">{{ tag }}</span>\
                     </div>\
                   </div>\
                   <span class="member-picker-check" :class="{ \'member-picker-check-on\': isAddMemberSelected(e.id) }">\
