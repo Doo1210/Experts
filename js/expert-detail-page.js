@@ -97,11 +97,20 @@
 
       var loadSeq = 0;
 
+      function normalizePersonaForEditor(raw) {
+        var p = raw || {};
+        var sections = [];
+        if (p.coreDutyMd && String(p.coreDutyMd).trim()) sections.push(String(p.coreDutyMd).trim());
+        if (p.workflowMd && String(p.workflowMd).trim()) sections.push(String(p.workflowMd).trim());
+        if (p.behaviorMd && String(p.behaviorMd).trim()) sections.push(String(p.behaviorMd).trim());
+        return { coreDutyMd: sections.join('\n\n'), workflowMd: '', behaviorMd: '' };
+      }
+
       function applyBaseLocalState() {
         var eid = String(props.expertId);
         expert.value = store.getExpert(eid);
         if (!expert.value) return false;
-        persona.value = Object.assign({}, store.getPersona(eid));
+        persona.value = normalizePersonaForEditor(store.getPersona(eid));
         tasks.value = store.getTasksByExpert(eid);
         memories.value = store.getMemories(eid);
         materials.value = store.getWorkspaceFiles(eid);
@@ -230,6 +239,8 @@
       }
 
       function savePersona() {
+        persona.value.workflowMd = '';
+        persona.value.behaviorMd = '';
         store.savePersona(props.expertId, persona.value);
         ElementPlus.ElMessage.success('人设已保存');
       }
@@ -835,18 +846,14 @@
       function restorePersonaVersion(idx) {
         var snap = store.restorePersonaVersion(props.expertId, idx);
         if (!snap) return;
-        persona.value = Object.assign({}, snap);
+        persona.value = normalizePersonaForEditor(snap);
         personaHistoryVisible.value = false;
         ElementPlus.ElMessage.success('已恢复到版本 ' + (idx + 1));
       }
 
       function exportPersonaMd() {
-        var tab = personaPreviewTab.value;
-        var content = persona.value[tab] || '';
-        var filename = '';
-        if (tab === 'coreDutyMd') filename = '核心职责.md';
-        else if (tab === 'workflowMd') filename = '工作流程.md';
-        else filename = '行为准则.md';
+        var content = persona.value.coreDutyMd || '';
+        var filename = '人设.md';
         var blob = new Blob([content], { type: 'text/markdown;charset=utf-8' });
         var url = URL.createObjectURL(blob);
         var a = document.createElement('a');
@@ -865,7 +872,9 @@
         if (!file) return;
         var reader = new FileReader();
         reader.onload = function (ev) {
-          persona.value[personaPreviewTab.value] = ev.target.result || '';
+          persona.value.coreDutyMd = ev.target.result || '';
+          persona.value.workflowMd = '';
+          persona.value.behaviorMd = '';
           ElementPlus.ElMessage.success('已导入 ' + file.name);
         };
         reader.readAsText(file);
@@ -873,13 +882,11 @@
       }
 
       function personaPreviewContent() {
-        return persona.value[personaPreviewTab.value] || '';
+        return persona.value.coreDutyMd || '';
       }
 
       function personaPreviewTabLabel() {
-        if (personaPreviewTab.value === 'coreDutyMd') return '核心职责';
-        if (personaPreviewTab.value === 'workflowMd') return '工作流程';
-        return '行为准则';
+        return '人设.md';
       }
 
       // ---- 技能 Tab 方法 ----
@@ -1226,19 +1233,81 @@
         ElementPlus.ElMessage.success(channel.label + ' 连接测试通过');
       }
 
-      function insertMarkdown(prefix, suffix) {
-        var textarea = document.querySelector('.persona-textarea textarea');
+      function getPersonaTextarea() {
+        return document.querySelector('.persona-textarea textarea');
+      }
+
+      function applyPersonaMarkdown(text, selectionStart, selectionEnd) {
+        persona.value.coreDutyMd = text;
+        Vue.nextTick(function () {
+          var textarea = getPersonaTextarea();
+          if (!textarea) return;
+          textarea.focus();
+          textarea.setSelectionRange(selectionStart, selectionEnd);
+        });
+      }
+
+      function insertMarkdown(prefix, suffix, placeholder) {
+        var textarea = getPersonaTextarea();
         if (!textarea) return;
         var start = textarea.selectionStart;
         var end = textarea.selectionEnd;
-        var text = persona.value[personaPreviewTab.value] || '';
-        var selected = text.substring(start, end);
+        var text = persona.value.coreDutyMd || '';
+        var selected = text.substring(start, end) || placeholder || '';
         var replacement = prefix + selected + suffix;
-        persona.value[personaPreviewTab.value] = text.substring(0, start) + replacement + text.substring(end);
-        Vue.nextTick(function () {
-          textarea.focus();
-          textarea.setSelectionRange(start + prefix.length, start + prefix.length + selected.length);
-        });
+        applyPersonaMarkdown(
+          text.substring(0, start) + replacement + text.substring(end),
+          start + prefix.length,
+          start + prefix.length + selected.length
+        );
+      }
+
+      function insertLineMarkdown(marker, placeholder) {
+        var textarea = getPersonaTextarea();
+        if (!textarea) return;
+        var start = textarea.selectionStart;
+        var end = textarea.selectionEnd;
+        var text = persona.value.coreDutyMd || '';
+        var selected = text.substring(start, end);
+        if (!selected) {
+          insertMarkdown(marker, '', placeholder || '');
+          return;
+        }
+        var lineStart = text.lastIndexOf('\n', start - 1) + 1;
+        var lineEndIdx = text.indexOf('\n', end);
+        var lineEnd = lineEndIdx === -1 ? text.length : lineEndIdx;
+        var block = text.substring(lineStart, lineEnd);
+        var lines = block.split('\n');
+        var numbered = marker === '1. ';
+        var replacement = lines.map(function (line, idx) {
+          return (numbered ? ((idx + 1) + '. ') : marker) + line;
+        }).join('\n');
+        applyPersonaMarkdown(
+          text.substring(0, lineStart) + replacement + text.substring(lineEnd),
+          lineStart,
+          lineStart + replacement.length
+        );
+      }
+
+      function insertPersonaMarkdown(type) {
+        if (type === 'h1') insertLineMarkdown('# ', '一级标题');
+        else if (type === 'h2') insertLineMarkdown('## ', '二级标题');
+        else if (type === 'h3') insertLineMarkdown('### ', '三级标题');
+        else if (type === 'h4') insertLineMarkdown('#### ', '四级标题');
+        else if (type === 'h5') insertLineMarkdown('##### ', '五级标题');
+        else if (type === 'h6') insertLineMarkdown('###### ', '六级标题');
+        else if (type === 'bold') insertMarkdown('**', '**', '加粗文本');
+        else if (type === 'italic') insertMarkdown('*', '*', '斜体文本');
+        else if (type === 'strike') insertMarkdown('~~', '~~', '删除线文本');
+        else if (type === 'quote') insertLineMarkdown('> ', '引用内容');
+        else if (type === 'ul') insertLineMarkdown('- ', '列表项');
+        else if (type === 'ol') insertLineMarkdown('1. ', '列表项');
+        else if (type === 'task') insertLineMarkdown('- [ ] ', '待办事项');
+        else if (type === 'inlineCode') insertMarkdown('`', '`', 'code');
+        else if (type === 'codeBlock') insertMarkdown('```\n', '\n```', 'code');
+        else if (type === 'link') insertMarkdown('[', '](url)', '链接文本');
+        else if (type === 'table') insertMarkdown('\n| 字段 | 说明 |\n| --- | --- |\n| 核心职责 |  |\n\n', '', '');
+        else if (type === 'hr') insertMarkdown('\n---\n', '', '');
       }
 
       function renderMarkdown(md) {
@@ -1311,7 +1380,7 @@
         exportPersonaMd: exportPersonaMd, triggerPersonaImport: triggerPersonaImport,
         handlePersonaImport: handlePersonaImport,
         personaPreviewContent: personaPreviewContent, personaPreviewTabLabel: personaPreviewTabLabel,
-        renderMarkdown: renderMarkdown, insertMarkdown: insertMarkdown,
+        renderMarkdown: renderMarkdown, insertMarkdown: insertMarkdown, insertPersonaMarkdown: insertPersonaMarkdown,
         // 技能 Tab
         openSkillPicker: openSkillPicker, confirmSkillPicker: confirmSkillPicker,
         removeSkillBinding: removeSkillBinding,
@@ -1389,21 +1458,77 @@
                     <h3 class="detail-section-title">人设</h3>\
                     <p class="detail-section-desc">定义专家的核心职责、工作流程与行为准则</p>\
                   </div>\
+                  <div class="detail-action-bar detail-action-bar--split">\
+                    <input ref="personaImportInput" type="file" accept=".md" class="material-file-input-hidden" @change="handlePersonaImport">\
+                    <div class="detail-action-left">\
+                      <el-button size="small" @click="triggerPersonaImport">\
+                        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" style="margin-right:4px"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>\
+                        导入人设.md\
+                      </el-button>\
+                      <el-button size="small" @click="exportPersonaMd">\
+                        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" style="margin-right:4px"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>\
+                        导出人设.md\
+                      </el-button>\
+                      <el-button size="small" @click="loadPersonaHistory">版本历史</el-button>\
+                    </div>\
+                    <div class="detail-action-right">\
+                      <el-button type="primary" size="small" @click="savePersona">保存人设</el-button>\
+                    </div>\
+                  </div>\
                   <div class="persona-split-layout">\
                     <div class="persona-edit-panel">\
                       <div class="persona-edit-tabs">\
-                        <button type="button" class="persona-edit-tab" :class="{ active: personaPreviewTab === \'coreDutyMd\' }" @click="personaPreviewTab = \'coreDutyMd\'">核心职责</button>\
-                        <button type="button" class="persona-edit-tab" :class="{ active: personaPreviewTab === \'workflowMd\' }" @click="personaPreviewTab = \'workflowMd\'">工作流程</button>\
-                        <button type="button" class="persona-edit-tab" :class="{ active: personaPreviewTab === \'behaviorMd\' }" @click="personaPreviewTab = \'behaviorMd\'">行为准则</button>\
+                        <button type="button" class="persona-edit-tab active">人设.md</button>\
                       </div>\
                       <div class="persona-edit-toolbar">\
-                        <button type="button" class="persona-toolbar-btn" title="加粗" @click="insertMarkdown(\'**\', \'**\')"><b>B</b></button>\
-                        <button type="button" class="persona-toolbar-btn" title="斜体" @click="insertMarkdown(\'*\', \'*\')"><i>I</i></button>\
-                        <button type="button" class="persona-toolbar-btn" title="标题" @click="insertMarkdown(\'## \', \'\')">H2</button>\
-                        <button type="button" class="persona-toolbar-btn" title="列表" @click="insertMarkdown(\'- \', \'\')">•</button>\
-                        <button type="button" class="persona-toolbar-btn" title="链接" @click="insertMarkdown(\'[\', \'](url)\')">🔗</button>\
+                        <el-dropdown trigger="hover" @command="insertPersonaMarkdown">\
+                          <button type="button" class="persona-toolbar-menu-btn" aria-label="标题"><span class="persona-toolbar-icon">H</span><span class="persona-toolbar-caret">▾</span></button>\
+                          <template #dropdown>\
+                            <el-dropdown-menu class="persona-markdown-dropdown">\
+                              <el-dropdown-item command="h1" aria-label="一级标题 H1"><el-tooltip content="一级标题 H1" placement="right" :show-after="300"><span class="persona-dropdown-icon">H1</span></el-tooltip></el-dropdown-item>\
+                              <el-dropdown-item command="h2" aria-label="二级标题 H2"><el-tooltip content="二级标题 H2" placement="right" :show-after="300"><span class="persona-dropdown-icon">H2</span></el-tooltip></el-dropdown-item>\
+                              <el-dropdown-item command="h3" aria-label="三级标题 H3"><el-tooltip content="三级标题 H3" placement="right" :show-after="300"><span class="persona-dropdown-icon">H3</span></el-tooltip></el-dropdown-item>\
+                              <el-dropdown-item command="h4" aria-label="四级标题 H4"><el-tooltip content="四级标题 H4" placement="right" :show-after="300"><span class="persona-dropdown-icon">H4</span></el-tooltip></el-dropdown-item>\
+                              <el-dropdown-item command="h5" aria-label="五级标题 H5"><el-tooltip content="五级标题 H5" placement="right" :show-after="300"><span class="persona-dropdown-icon">H5</span></el-tooltip></el-dropdown-item>\
+                              <el-dropdown-item command="h6" aria-label="六级标题 H6"><el-tooltip content="六级标题 H6" placement="right" :show-after="300"><span class="persona-dropdown-icon">H6</span></el-tooltip></el-dropdown-item>\
+                            </el-dropdown-menu>\
+                          </template>\
+                        </el-dropdown>\
+                        <el-dropdown trigger="hover" @command="insertPersonaMarkdown">\
+                          <button type="button" class="persona-toolbar-menu-btn" aria-label="文本样式"><span class="persona-toolbar-icon"><b>B</b></span><span class="persona-toolbar-caret">▾</span></button>\
+                          <template #dropdown>\
+                            <el-dropdown-menu class="persona-markdown-dropdown">\
+                              <el-dropdown-item command="bold" aria-label="加粗"><el-tooltip content="加粗" placement="right" :show-after="300"><span class="persona-dropdown-icon"><b>B</b></span></el-tooltip></el-dropdown-item>\
+                              <el-dropdown-item command="italic" aria-label="斜体"><el-tooltip content="斜体" placement="right" :show-after="300"><span class="persona-dropdown-icon"><i>I</i></span></el-tooltip></el-dropdown-item>\
+                              <el-dropdown-item command="strike" aria-label="删除线"><el-tooltip content="删除线" placement="right" :show-after="300"><span class="persona-dropdown-icon"><s>S</s></span></el-tooltip></el-dropdown-item>\
+                              <el-dropdown-item command="inlineCode" aria-label="行内代码"><el-tooltip content="行内代码" placement="right" :show-after="300"><span class="persona-dropdown-icon">`</span></el-tooltip></el-dropdown-item>\
+                            </el-dropdown-menu>\
+                          </template>\
+                        </el-dropdown>\
+                        <el-dropdown trigger="hover" @command="insertPersonaMarkdown">\
+                          <button type="button" class="persona-toolbar-menu-btn" aria-label="列表与引用"><span class="persona-toolbar-icon">☷</span><span class="persona-toolbar-caret">▾</span></button>\
+                          <template #dropdown>\
+                            <el-dropdown-menu class="persona-markdown-dropdown">\
+                              <el-dropdown-item command="ul" aria-label="无序列表"><el-tooltip content="无序列表" placement="right" :show-after="300"><span class="persona-dropdown-icon">•</span></el-tooltip></el-dropdown-item>\
+                              <el-dropdown-item command="ol" aria-label="有序列表"><el-tooltip content="有序列表" placement="right" :show-after="300"><span class="persona-dropdown-icon">1.</span></el-tooltip></el-dropdown-item>\
+                              <el-dropdown-item command="task" aria-label="待办事项"><el-tooltip content="待办事项" placement="right" :show-after="300"><span class="persona-dropdown-icon">☐</span></el-tooltip></el-dropdown-item>\
+                              <el-dropdown-item command="quote" aria-label="引用"><el-tooltip content="引用" placement="right" :show-after="300"><span class="persona-dropdown-icon">&gt;</span></el-tooltip></el-dropdown-item>\
+                            </el-dropdown-menu>\
+                          </template>\
+                        </el-dropdown>\
+                        <el-dropdown trigger="hover" @command="insertPersonaMarkdown">\
+                          <button type="button" class="persona-toolbar-menu-btn" aria-label="插入内容"><span class="persona-toolbar-icon">＋</span><span class="persona-toolbar-caret">▾</span></button>\
+                          <template #dropdown>\
+                            <el-dropdown-menu class="persona-markdown-dropdown">\
+                              <el-dropdown-item command="link" aria-label="链接"><el-tooltip content="链接" placement="right" :show-after="300"><span class="persona-dropdown-icon">⌁</span></el-tooltip></el-dropdown-item>\
+                              <el-dropdown-item command="codeBlock" aria-label="代码块"><el-tooltip content="代码块" placement="right" :show-after="300"><span class="persona-dropdown-icon">{ }</span></el-tooltip></el-dropdown-item>\
+                              <el-dropdown-item command="table" aria-label="表格"><el-tooltip content="表格" placement="right" :show-after="300"><span class="persona-dropdown-icon">表</span></el-tooltip></el-dropdown-item>\
+                              <el-dropdown-item command="hr" aria-label="分割线"><el-tooltip content="分割线" placement="right" :show-after="300"><span class="persona-dropdown-icon">—</span></el-tooltip></el-dropdown-item>\
+                            </el-dropdown-menu>\
+                          </template>\
+                        </el-dropdown>\
                       </div>\
-                      <el-input v-model="persona[personaPreviewTab]" type="textarea" :rows="14" :placeholder="personaSectionEmpty(personaPreviewTab) ? \'尚未配置 — 在此编辑后保存\' : (\'描述\' + personaPreviewTabLabel() + \'…\')" class="persona-textarea" />\
+                      <el-input v-model="persona.coreDutyMd" type="textarea" :rows="14" placeholder="编辑人设.md，支持 Markdown 格式" class="persona-textarea" />\
                     </div>\
                     <div class="persona-preview-panel">\
                       <div class="persona-preview-head">\
@@ -1411,21 +1536,6 @@
                       </div>\
                       <div class="persona-preview-content" v-html="renderMarkdown(personaPreviewContent())"></div>\
                     </div>\
-                  </div>\
-                  <div class="detail-tab-footer" style="justify-content:space-between;flex-wrap:wrap;gap:8px">\
-                    <div style="display:flex;gap:8px">\
-                      <input ref="personaImportInput" type="file" accept=".md" class="material-file-input-hidden" @change="handlePersonaImport">\
-                      <el-button size="small" @click="triggerPersonaImport">\
-                        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" style="margin-right:4px"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>\
-                        导入人设\
-                      </el-button>\
-                      <el-button size="small" @click="exportPersonaMd">\
-                        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" style="margin-right:4px"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>\
-                        导出人设\
-                      </el-button>\
-                      <el-button size="small" @click="loadPersonaHistory">版本历史</el-button>\
-                    </div>\
-                    <el-button type="primary" @click="savePersona">保存人设</el-button>\
                   </div>\
                 </div>\
               </el-tab-pane>\

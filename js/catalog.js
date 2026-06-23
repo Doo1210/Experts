@@ -19,7 +19,7 @@ window.TOOLS_CATALOG = [
   { id: 'tool-notify', name: '消息通知', type: 'api', description: '向 IM 渠道推送任务进展' }
 ];
 
-/** Hermes Profile toolset 中文标签（只读 UI，非 Mock 绑定源） */
+/** Profile toolset 中文标签（只读 UI，非 Mock 绑定源） */
 window.HERMES_TOOLSET_LABELS = {
   terminal: '终端与进程',
   file: '文件读写',
@@ -88,13 +88,13 @@ window.IM_CHANNEL_TYPES = [
   },
   {
     id: 'wecom',
-    label: '企业微信 AI Bot',
-    name: '企业微信 AI Bot',
-    description: '通过企业微信智能机器人 WebSocket 接入，无需公网回调地址。',
+    label: '企业微信群机器人',
+    name: '企业微信群机器人',
+    description: '通过企业微信群机器人接入群消息，适合群内自动应答与通知协作。',
     docsUrl: 'https://developer.work.weixin.qq.com/document/path/91770',
     credentialFields: [
-      { key: 'WECOM_BOT_ID', label: 'Bot ID', description: '企业微信 AI Bot 的 Bot ID。', required: true },
-      { key: 'WECOM_SECRET', label: 'Secret', description: '企业微信 AI Bot 的 Secret。', password: true, required: true },
+      { key: 'WECOM_BOT_ID', label: 'Bot ID', description: '企业微信群机器人的 Bot ID。', required: true },
+      { key: 'WECOM_SECRET', label: 'Secret', description: '企业微信群机器人的 Secret。', password: true, required: true },
       { key: 'WECOM_ALLOWED_USERS', label: '允许用户 ID', description: '逗号分隔；用于限制可访问用户。' },
       { key: 'WECOM_HOME_CHANNEL', label: 'Home Chat ID', description: '定时任务与通知投递的默认会话 ID。' },
       { key: 'WECOM_DM_POLICY', label: '私聊策略', description: 'open、allowlist、disabled 或 pairing。' },
@@ -104,9 +104,9 @@ window.IM_CHANNEL_TYPES = [
   },
   {
     id: 'wecom_callback',
-    label: '企业微信自建应用',
-    name: '企业微信自建应用',
-    description: '通过企业微信自建应用回调接入，适合需要双向消息和企业应用身份的场景。',
+    label: '企业微信',
+    name: '企业微信',
+    description: '通过企业微信应用回调接入，适合需要双向消息和企业应用身份的场景。',
     docsUrl: 'https://developer.work.weixin.qq.com/document/path/90930',
     credentialFields: [
       { key: 'WECOM_CALLBACK_CORP_ID', label: 'Corp ID', description: '企业微信企业 ID。', required: true },
