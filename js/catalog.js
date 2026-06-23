@@ -62,60 +62,49 @@ window.IM_CHANNEL_TYPES = [
     id: 'dingtalk',
     label: '钉钉',
     name: '钉钉',
-    description: '通过钉钉 Stream Mode 接入群聊与私聊，无需公网回调地址。',
+    description: '连接到钉钉群，支持群聊消息协作。',
     docsUrl: 'https://open.dingtalk.com/document/orgapp/the-robot-development-process',
     credentialFields: [
-      { key: 'DINGTALK_CLIENT_ID', label: 'AppKey (Client ID)', description: '钉钉应用凭证中的 AppKey。', required: true },
-      { key: 'DINGTALK_CLIENT_SECRET', label: 'AppSecret (Client Secret)', description: '钉钉应用凭证中的 AppSecret。', password: true, required: true }
+      { key: 'DINGTALK_CLIENT_ID', label: 'Client ID', description: 'DingTalk client ID (App key)。', required: true },
+      { key: 'DINGTALK_CLIENT_SECRET', label: 'Client secret', description: 'DingTalk client secret (App secret)。', password: true, required: true }
     ]
   },
   {
     id: 'feishu',
     label: '飞书 / Lark',
     name: '飞书 / Lark',
-    description: '通过飞书 / Lark 机器人接入消息，可使用 WebSocket 或 Webhook 模式。',
+    description: '连接到飞书 / Lark，支持机器人消息与事件回调。',
     docsUrl: 'https://open.feishu.cn/document/uAjLw4CM/ukTMukTMukTM/reference/im-v1/intro',
     credentialFields: [
-      { key: 'FEISHU_APP_ID', label: 'App ID', description: '飞书 / Lark 应用的 App ID。', required: true },
-      { key: 'FEISHU_APP_SECRET', label: 'App Secret', description: '飞书 / Lark 应用的 App Secret。', password: true, required: true },
-      { key: 'FEISHU_DOMAIN', label: 'Domain', description: '国内飞书填 feishu，国际 Lark 填 lark，默认 feishu。' },
-      { key: 'FEISHU_CONNECTION_MODE', label: '连接模式', description: 'websocket 或 webhook，默认 websocket。' },
-      { key: 'FEISHU_ALLOWED_USERS', label: '允许用户 ID', description: '逗号分隔；留空时可使用配对或开放策略。' },
-      { key: 'FEISHU_HOME_CHANNEL', label: 'Home Chat ID', description: '定时任务与通知投递的默认会话 ID。' },
-      { key: 'FEISHU_VERIFICATION_TOKEN', label: 'Webhook Verification Token', description: 'Webhook 模式签名校验字段，和 Encrypt Key 至少配置一个。', password: true },
-      { key: 'FEISHU_ENCRYPT_KEY', label: 'Webhook Encrypt Key', description: 'Webhook 模式事件加密密钥，和 Verification Token 至少配置一个。', password: true }
-    ]
-  },
-  {
-    id: 'wecom',
-    label: '企业微信群机器人',
-    name: '企业微信群机器人',
-    description: '通过企业微信群机器人接入群消息，适合群内自动应答与通知协作。',
-    docsUrl: 'https://developer.work.weixin.qq.com/document/path/91770',
-    credentialFields: [
-      { key: 'WECOM_BOT_ID', label: 'Bot ID', description: '企业微信群机器人的 Bot ID。', required: true },
-      { key: 'WECOM_SECRET', label: 'Secret', description: '企业微信群机器人的 Secret。', password: true, required: true },
-      { key: 'WECOM_ALLOWED_USERS', label: '允许用户 ID', description: '逗号分隔；用于限制可访问用户。' },
-      { key: 'WECOM_HOME_CHANNEL', label: 'Home Chat ID', description: '定时任务与通知投递的默认会话 ID。' },
-      { key: 'WECOM_DM_POLICY', label: '私聊策略', description: 'open、allowlist、disabled 或 pairing。' },
-      { key: 'WECOM_GROUP_POLICY', label: '群聊策略', description: 'open、allowlist 或 disabled。' },
-      { key: 'WECOM_WEBSOCKET_URL', label: 'WebSocket URL', description: '高级项；默认 wss://openws.work.weixin.qq.com。' }
+      { key: 'FEISHU_APP_ID', label: 'App ID', description: 'Feishu / Lark app ID。', required: true },
+      { key: 'FEISHU_APP_SECRET', label: 'App secret', description: 'Feishu / Lark app secret。', password: true, required: true },
+      { key: 'FEISHU_ENCRYPT_KEY', label: 'Encrypt key', description: 'Feishu / Lark encrypt key。', password: true },
+      { key: 'FEISHU_VERIFICATION_TOKEN', label: 'Verification token', description: 'Feishu / Lark verification token。', password: true }
     ]
   },
   {
     id: 'wecom_callback',
     label: '企业微信',
     name: '企业微信',
-    description: '通过企业微信应用回调接入，适合需要双向消息和企业应用身份的场景。',
+    description: '连接到企业微信自建应用，支持双向消息与应用回调。',
     docsUrl: 'https://developer.work.weixin.qq.com/document/path/90930',
     credentialFields: [
-      { key: 'WECOM_CALLBACK_CORP_ID', label: 'Corp ID', description: '企业微信企业 ID。', required: true },
-      { key: 'WECOM_CALLBACK_CORP_SECRET', label: 'Corp Secret', description: '自建应用 Secret。', password: true, required: true },
-      { key: 'WECOM_CALLBACK_AGENT_ID', label: 'Agent ID', description: '自建应用 Agent ID。', required: true },
-      { key: 'WECOM_CALLBACK_TOKEN', label: 'Callback Token', description: '接收消息服务器配置中的 Token。', password: true },
-      { key: 'WECOM_CALLBACK_ENCODING_AES_KEY', label: 'EncodingAESKey', description: '接收消息服务器配置中的 EncodingAESKey。', password: true },
-      { key: 'WECOM_CALLBACK_PORT', label: '回调服务端口', description: '本地 HTTP 回调服务端口，默认 8645。' },
-      { key: 'WECOM_CALLBACK_ALLOWED_USERS', label: '允许用户 ID', description: '逗号分隔；用于限制可访问用户。' }
+      { key: 'WECOM_CALLBACK_CORP_ID', label: 'WeCom Corp ID', description: '企业微信企业 ID。', required: true },
+      { key: 'WECOM_CALLBACK_CORP_SECRET', label: 'WeCom Corp Secret', description: '企业微信应用 corp secret。', password: true, required: true },
+      { key: 'WECOM_CALLBACK_AGENT_ID', label: 'WeCom Agent ID', description: '企业微信应用 agent ID。', required: true },
+      { key: 'WECOM_CALLBACK_TOKEN', label: 'WeCom Token', description: '企业微信 callback verification token。', password: true },
+      { key: 'WECOM_CALLBACK_ENCODING_AES_KEY', label: 'WeCom AES Key', description: '企业微信 callback AES encoding key。', password: true }
+    ]
+  },
+  {
+    id: 'wecom',
+    label: '企业微信群机器人',
+    name: '企业微信群机器人',
+    description: '通过群机器人 webhook 发送消息到企业微信群，仅支持发送消息。',
+    docsUrl: 'https://developer.work.weixin.qq.com/document/path/91770',
+    credentialFields: [
+      { key: 'WECOM_BOT_ID', label: 'WeCom Bot ID', description: '企业微信群机器人 ID / webhook key。', required: true },
+      { key: 'WECOM_SECRET', label: 'WeCom Secret', description: '企业微信群机器人 secret。', password: true }
     ]
   }
 ];

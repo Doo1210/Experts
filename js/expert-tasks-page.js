@@ -352,10 +352,6 @@
         }, 900);
       }
 
-      // ---- 任务列表增强 ----
-      var taskSearchQuery = Vue.ref('');
-      var taskStatusFilter = Vue.ref('all');
-
       function loadPanelArtifacts(taskId) {
         panelArtifacts.value = taskId ? store.getTaskArtifacts(taskId) : [];
         if (taskId && store.fetchTaskArtifactsRemote) {
@@ -478,25 +474,15 @@
         return groups;
       });
 
-      // ---- 任务列表增强 ----
       var filteredTasks = Vue.computed(function () {
-        var list = tasks.value;
-        if (taskSearchQuery.value.trim()) {
-          var q = taskSearchQuery.value.trim().toLowerCase();
-          list = list.filter(function (t) { return (t.title || '').toLowerCase().indexOf(q) >= 0; });
-        }
-        if (taskStatusFilter.value !== 'all') {
-          list = list.filter(function (t) { return t.status === taskStatusFilter.value; });
-        }
-        return list;
+        return tasks.value;
       });
 
       var taskStats = Vue.computed(function () {
-        var counts = { total: tasks.value.length, active: tasks.value.length, pending: 0, running: 0, completed: 0 };
+        var counts = { total: tasks.value.length, running: 0, ready: 0 };
         tasks.value.forEach(function (t) {
-          if (t.status === 'pending') counts.pending++;
-          else if (t.status === 'running') counts.running++;
-          else if (t.status === 'completed') counts.completed++;
+          if (t.status === 'running') counts.running++;
+          else counts.ready++;
         });
         return counts;
       });
@@ -831,8 +817,6 @@
         selectTask: selectTask, newTask: newTask, send: send,
         editTask: editTask, deleteTaskItem: deleteTaskItem,
         toggleTaskArtifacts: toggleTaskArtifacts, closeArtifactPanel: closeArtifactPanel, handleTaskMenu: handleTaskMenu,
-        // 任务列表增强
-        taskSearchQuery: taskSearchQuery, taskStatusFilter: taskStatusFilter,
         filteredTasks: filteredTasks, taskStats: taskStats,
         // 产物面板增强
         artifactPreviewVisible: artifactPreviewVisible, artifactPreviewItem: artifactPreviewItem,
@@ -1039,23 +1023,21 @@
                 任务列表\
               </h4>\
             </div>\
-            <div class="task-list-toolbar">\
-              <el-input v-model="taskSearchQuery" placeholder="搜索任务..." size="small" clearable class="task-list-search">\
-                <template #prefix>\
-                  <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>\
-                </template>\
-              </el-input>\
-              <el-select v-model="taskStatusFilter" size="small" class="task-list-filter">\
-                <el-option label="全部状态" value="all" />\
-                <el-option label="待开始" value="pending" />\
-                <el-option label="执行中" value="running" />\
-                <el-option label="已完成" value="completed" />\
-              </el-select>\
-            </div>\
             <div class="task-list-stats">\
-              <span class="task-stat-item" title="全部">📋 {{ taskStats.total }}</span>\
-              <span class="task-stat-item" title="进行中">▶ {{ taskStats.running }}</span>\
-              <span class="task-stat-item" title="已完成">✅ {{ taskStats.completed }}</span>\
+              <span class="task-stat-item" title="任务总数">\
+                <span class="task-stat-total-icon">\
+                  <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 6h13M8 12h13M8 18h13"/><path d="M3 6h.01M3 12h.01M3 18h.01"/></svg>\
+                </span>\
+                {{ taskStats.total }}\
+              </span>\
+              <span class="task-stat-item" title="运行中">\
+                <span class="task-stat-running-icon"></span>\
+                {{ taskStats.running }}\
+              </span>\
+              <span class="task-stat-item" title="已就绪">\
+                <span class="task-status-dot-wrap task-stat-status-icon"><span class="task-status-dot"></span></span>\
+                {{ taskStats.ready }}\
+              </span>\
             </div>\
             <div class="task-list-scroll">\
               <div class="task-list">\

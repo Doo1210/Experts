@@ -55,6 +55,13 @@
       var materialSearchQuery = Vue.ref('');
       var materialPreviewVisible = Vue.ref(false);
       var materialPreviewItem = Vue.ref(null);
+      var workspaceCurrentFolderId = Vue.ref(null);
+      var workspaceFolderDialogVisible = Vue.ref(false);
+      var workspaceFolderDialogMode = Vue.ref('create');
+      var workspaceEditingItem = Vue.ref(null);
+      var workspaceFolderName = Vue.ref('');
+      var workspaceDragItem = Vue.ref(null);
+      var workspaceRootDragOver = Vue.ref(false);
       var MAX_UPLOAD_FILE_SIZE = 10 * 1024 * 1024;
 
       // ---- 记忆 Tab 新增 ----
@@ -69,8 +76,6 @@
 
       // ---- 人设 Tab 新增 ----
       var personaPreviewTab = Vue.ref('coreDutyMd');
-      var personaHistoryVisible = Vue.ref(false);
-      var personaHistory = Vue.ref([]);
       var personaImportInput = Vue.ref(null);
 
       var detailMeta = Vue.ref({ skillsDetail: [], skillsCatalog: [], toolsDetail: {}, toolsCatalog: [], memoryMeta: {}, gateway: {} });
@@ -158,6 +163,14 @@
 
       function mergeImChannelWithCatalog(channel, template) {
         var out = Object.assign({ subscriptions: [] }, template ? makeImCatalogChannel(template) : {}, channel);
+        if (template) {
+          out.type = template.id || template.type || out.type;
+          out.id = template.id || template.type || out.id;
+          out.label = template.label || template.name || out.label;
+          out.name = template.name || template.label || out.name;
+          out.description = template.description || out.description;
+          out.docsUrl = template.docsUrl || out.docsUrl;
+        }
         var templateFields = template && template.credentialFields ? template.credentialFields : null;
         if (templateFields && templateFields.length) {
           var oldFields = channel.credentialFields || [];
@@ -183,6 +196,10 @@
 
       function normalizeImChannels(channels) {
         var map = imCatalogMap();
+        var order = {};
+        (catalog.IM_CHANNEL_TYPES || []).forEach(function (c, index) {
+          order[String(c.id || c.type)] = index;
+        });
         var seen = {};
         var normalized = (channels || []).map(function (c) {
           var pid = String(c.id || c.type);
@@ -193,7 +210,13 @@
           var pid = String(c.id || c.type);
           if (!seen[pid]) normalized.push(makeImCatalogChannel(c));
         });
-        return normalized;
+        return normalized.sort(function (a, b) {
+          var ai = order[String(a.id || a.type)];
+          var bi = order[String(b.id || b.type)];
+          if (ai === undefined) ai = 999;
+          if (bi === undefined) bi = 999;
+          return ai - bi;
+        });
       }
 
       function ensureImChannelSelected() {
@@ -414,20 +437,20 @@
               String(t.id || '').toLowerCase().indexOf(q) >= 0;
           });
         }
-        if (taskStatusFilter.value !== 'all') {
-          list = list.filter(function (t) { return t.status === taskStatusFilter.value; });
+        if (taskStatusFilter.value === 'running') {
+          list = list.filter(function (t) { return t.status === 'running'; });
+        } else if (taskStatusFilter.value === 'ready') {
+          list = list.filter(function (t) { return t.status !== 'running'; });
         }
         return list;
       });
 
       var taskStats = Vue.computed(function () {
         var list = dialogueTasks.value;
-        var counts = { total: list.length, pending: 0, running: 0, completed: 0, archived: 0 };
+        var counts = { total: list.length, running: 0, ready: 0 };
         list.forEach(function (t) {
-          if (t.archived) counts.archived++;
-          else if (t.status === 'pending') counts.pending++;
-          else if (t.status === 'running') counts.running++;
-          else if (t.status === 'completed') counts.completed++;
+          if (t.status === 'running') counts.running++;
+          else counts.ready++;
         });
         return counts;
       });
@@ -591,46 +614,86 @@
         return list;
       });
 
+      var workspaceFolders = Vue.computed(function () {
+        return materials.value.filter(function (f) { return f.kind === 'folder'; });
+      });
+
+      var workspaceCurrentFolder = Vue.computed(function () {
+        if (!workspaceCurrentFolderId.value) return null;
+        return workspaceFolders.value.find(function (f) { return String(f.id) === String(workspaceCurrentFolderId.value); }) || null;
+      });
+
+      var workspaceBreadcrumbs = Vue.computed(function () {
+        var crumbs = [{ id: null, name: 'workspace' }];
+        var map = {};
+        workspaceFolders.value.forEach(function (f) { map[String(f.id)] = f; });
+        var stack = [];
+        var cursor = workspaceCurrentFolder.value;
+        var guard = 0;
+        while (cursor && guard < 20) {
+          stack.unshift(cursor);
+          cursor = cursor.parentId ? map[String(cursor.parentId)] : null;
+          guard += 1;
+        }
+        stack.forEach(function (f) { crumbs.push({ id: f.id, name: f.name }); });
+        return crumbs;
+      });
+
       var workspaceFiles = Vue.computed(function () {
+        var currentParent = workspaceCurrentFolderId.value ? String(workspaceCurrentFolderId.value) : null;
         var rows = [];
         materials.value.forEach(function (f) {
+          var parentId = f.parentId ? String(f.parentId) : null;
+          if (parentId !== currentParent) return;
           rows.push({
-            id: 'material-' + f.id,
+            id: f.id,
             source: 'upload',
             raw: f,
             name: f.name,
-            type: f.type || 'document',
+            kind: f.kind || 'material',
+            type: f.type || (f.kind === 'folder' ? 'folder' : 'document'),
+            parentId: parentId,
             createdAt: f.createdAt,
+            updatedAt: f.updatedAt || f.createdAt,
+            updatedBy: f.updatedBy || '我',
             size: f.size || 0,
             content: f.content || ''
           });
         });
-        expertArtifacts.value.forEach(function (a) {
-          rows.push({
-            id: 'artifact-' + a.id,
-            source: 'generated',
-            raw: a,
-            name: a.title || '未命名文件',
-            type: a.type || 'document',
-            createdAt: a.createdAt,
-            taskId: a.taskId,
-            taskTitle: a.taskTitle || '',
-            content: a.content || ''
+        if (!currentParent) {
+          expertArtifacts.value.forEach(function (a) {
+            rows.push({
+              id: 'artifact-' + a.id,
+              source: 'generated',
+              raw: a,
+              name: a.title || '未命名文件',
+              kind: 'artifact',
+              type: a.type || 'document',
+              parentId: null,
+              createdAt: a.createdAt,
+              updatedAt: a.updatedAt || a.createdAt,
+              updatedBy: a.updatedBy || '任务生成',
+              taskId: a.taskId,
+              taskTitle: a.taskTitle || '',
+              content: a.content || ''
+            });
           });
-        });
-        if (materialSearchQuery.value.trim()) {
-          var q = materialSearchQuery.value.trim().toLowerCase();
-          rows = rows.filter(function (f) {
-            return (f.name || '').toLowerCase().indexOf(q) >= 0 ||
-              (f.taskTitle || '').toLowerCase().indexOf(q) >= 0;
-          });
-        }
-        if (materialTypeFilter.value !== 'all') {
-          rows = rows.filter(function (f) { return f.type === materialTypeFilter.value; });
         }
         return rows.sort(function (a, b) {
+          if ((a.kind === 'folder') !== (b.kind === 'folder')) return a.kind === 'folder' ? -1 : 1;
+          if (a.kind === 'folder') return (a.name || '').localeCompare(b.name || '', 'zh-Hans-CN');
           return (b.createdAt || '').localeCompare(a.createdAt || '');
         });
+      });
+
+      var workspaceStats = Vue.computed(function () {
+        var folders = workspaceFiles.value.filter(function (f) { return f.kind === 'folder'; }).length;
+        var files = workspaceFiles.value.length - folders;
+        return folders + ' 个文件夹 · ' + files + ' 个文件';
+      });
+
+      var workspacePathLabel = Vue.computed(function () {
+        return workspaceBreadcrumbs.value.map(function (c) { return c.name; }).join(' / ');
       });
 
       function workspaceFileTypeClass(file) {
@@ -638,11 +701,13 @@
       }
 
       function workspaceFileIcon(file) {
+        if (file && file.kind === 'folder') return '📁';
         return fileTypeIcon(file && file.type);
       }
 
       function workspaceFileMeta(file) {
         if (!file) return '';
+        if (file.kind === 'folder') return workspaceFolderChildCount(file.raw) + ' 项 · ' + (file.createdAt || '');
         var parts = [];
         if (file.taskTitle) parts.push('来自任务：' + file.taskTitle);
         if (file.size) parts.push(formatFileSize(file.size));
@@ -650,14 +715,87 @@
         return parts.join(' · ');
       }
 
+      function workspaceTypeLabel(file) {
+        if (!file) return '—';
+        if (file.kind === 'folder') return '文件夹';
+        var name = String(file.name || '');
+        var match = name.match(/\.([a-z0-9]+)$/i);
+        if (match && match[1]) return match[1].toLowerCase();
+        var typeMap = { spreadsheet: 'xlsx', document: 'docx', data: 'json', report: 'pdf' };
+        return typeMap[file.type] || '文件';
+      }
+
+      function workspaceUpdatedAt(file) {
+        return (file && (file.updatedAt || file.createdAt)) || '—';
+      }
+
+      function workspaceSourceLabel(file) {
+        return file && file.source === 'generated' ? '任务' : '用户';
+      }
+
+      function workspaceSizeLabel(file) {
+        if (!file) return '—';
+        if (file.kind === 'folder') return '-';
+        if (file.size) return formatFileSize(file.size);
+        if (file.content) return formatFileSize(new Blob([file.content]).size);
+        return '—';
+      }
+
+      function workspaceFolderChildCount(folder) {
+        if (!folder) return 0;
+        return materials.value.filter(function (f) { return String(f.parentId || '') === String(folder.id); }).length;
+      }
+
+      function openWorkspaceFolder(file) {
+        if (!file || file.kind !== 'folder') return;
+        workspaceCurrentFolderId.value = file.raw.id;
+      }
+
+      function openWorkspaceBreadcrumb(crumb) {
+        workspaceCurrentFolderId.value = crumb && crumb.id ? crumb.id : null;
+      }
+
+      function workspaceBreadcrumbDropTarget(crumb) {
+        if (!crumb || !crumb.id) return null;
+        var folder = materials.value.find(function (f) {
+          return String(f.id) === String(crumb.id) && f.kind === 'folder';
+        });
+        if (!folder) return null;
+        return {
+          id: folder.id,
+          source: 'upload',
+          raw: folder,
+          name: folder.name,
+          kind: 'folder',
+          type: 'folder',
+          parentId: folder.parentId || null
+        };
+      }
+
+      function canDropWorkspaceBreadcrumb(crumb) {
+        return canDropWorkspaceItem(workspaceBreadcrumbDropTarget(crumb));
+      }
+
+      function workspaceBreadcrumbClass(index, crumb) {
+        return {
+          active: index === workspaceBreadcrumbs.value.length - 1,
+          'is-drop-target': canDropWorkspaceBreadcrumb(crumb)
+        };
+      }
+
+      function onWorkspaceBreadcrumbDrop(crumb) {
+        onWorkspaceDrop(workspaceBreadcrumbDropTarget(crumb));
+      }
+
       function openWorkspaceFilePreview(file) {
         if (!file) return;
+        if (file.kind === 'folder') return openWorkspaceFolder(file);
         if (file.source === 'generated') openArtifactPreview(file.raw);
         else openMaterialPreview(file.raw);
       }
 
       function downloadWorkspaceFile(file) {
-        if (!file) return;
+        if (!file || file.kind === 'folder') return;
         if (file.source === 'generated') downloadArtifact(file.raw);
         else downloadMaterial(file.raw);
       }
@@ -665,6 +803,114 @@
       function deleteWorkspaceFile(file) {
         if (!file || file.source !== 'upload') return;
         deleteMaterial(file.raw);
+      }
+
+      function openCreateWorkspaceFolderDialog() {
+        workspaceFolderDialogMode.value = 'create';
+        workspaceEditingItem.value = null;
+        workspaceFolderName.value = '';
+        workspaceFolderDialogVisible.value = true;
+      }
+
+      function openRenameWorkspaceItem(file) {
+        if (!file || file.source !== 'upload') return;
+        workspaceFolderDialogMode.value = 'rename';
+        workspaceEditingItem.value = file;
+        workspaceFolderName.value = file.name || '';
+        workspaceFolderDialogVisible.value = true;
+      }
+
+      function submitWorkspaceFolderDialog() {
+        var name = workspaceFolderName.value.trim();
+        if (!name) { ElementPlus.ElMessage.warning('请输入名称'); return; }
+        if (/[\\/:*?"<>|]/.test(name)) { ElementPlus.ElMessage.warning('名称不能包含特殊字符'); return; }
+        var parentId = workspaceFolderDialogMode.value === 'rename' && workspaceEditingItem.value ? workspaceEditingItem.value.parentId : (workspaceCurrentFolderId.value || null);
+        var duplicate = materials.value.some(function (f) {
+          if (workspaceFolderDialogMode.value === 'rename' && workspaceEditingItem.value && String(f.id) === String(workspaceEditingItem.value.raw.id)) return false;
+          return String(f.parentId || '') === String(parentId || '') && (f.name || '').trim() === name;
+        });
+        if (duplicate) { ElementPlus.ElMessage.warning('当前目录下已存在同名项目'); return; }
+        if (workspaceFolderDialogMode.value === 'rename' && workspaceEditingItem.value) {
+          store.renameWorkspaceItem(props.expertId, workspaceEditingItem.value.raw.id, name);
+          ElementPlus.ElMessage.success('已重命名');
+        } else {
+          store.addWorkspaceFolder(props.expertId, { name: name, parentId: workspaceCurrentFolderId.value || null });
+          ElementPlus.ElMessage.success('文件夹已创建');
+        }
+        workspaceFolderDialogVisible.value = false;
+        materials.value = store.getWorkspaceFiles(props.expertId);
+      }
+
+      function deleteWorkspaceFolder(file) {
+        if (!file || file.kind !== 'folder') return;
+        ElementPlus.ElMessageBox.confirm(
+          '确定删除文件夹「' + file.name + '」？仅空文件夹可删除。', '删除文件夹',
+          { confirmButtonText: '删除', cancelButtonText: '取消', type: 'warning' }
+        ).then(function () {
+          var ok = store.deleteWorkspaceFolder(props.expertId, file.raw.id);
+          if (!ok) { ElementPlus.ElMessage.warning('请先移除文件夹内的内容'); return; }
+          materials.value = store.getWorkspaceFiles(props.expertId);
+          ElementPlus.ElMessage.success('文件夹已删除');
+        }).catch(function () {});
+      }
+
+      function handleWorkspaceItemCommand(command, file) {
+        if (!file) return;
+        if (command === 'open') openWorkspaceFilePreview(file);
+        if (command === 'preview') openWorkspaceFilePreview(file);
+        if (command === 'download') downloadWorkspaceFile(file);
+        if (command === 'task') goToArtifactTask(file.taskId);
+        if (command === 'rename' && file.source === 'upload') openRenameWorkspaceItem(file);
+        if (command === 'delete' && file.source === 'upload') {
+          if (file.kind === 'folder') deleteWorkspaceFolder(file);
+          else deleteWorkspaceFile(file);
+        }
+      }
+
+      function onWorkspaceDragStart(file, ev) {
+        if (!file || file.source !== 'upload') return;
+        workspaceDragItem.value = file;
+        if (ev && ev.dataTransfer) {
+          ev.dataTransfer.effectAllowed = 'move';
+          ev.dataTransfer.setData('text/plain', file.raw.id);
+        }
+      }
+
+      function onWorkspaceDragEnd() {
+        workspaceDragItem.value = null;
+        workspaceRootDragOver.value = false;
+      }
+
+      function canDropWorkspaceItem(target) {
+        var drag = workspaceDragItem.value;
+        if (!drag) return false;
+        if (target && target.kind !== 'folder') return false;
+        var targetId = target ? target.raw.id : null;
+        if (String(drag.raw.id) === String(targetId)) return false;
+        if (String(drag.parentId || '') === String(targetId || '')) return false;
+        if (drag.kind === 'folder' && targetId) {
+          var cursor = target.raw;
+          var guard = 0;
+          while (cursor && guard < 20) {
+            if (String(cursor.id) === String(drag.raw.id)) return false;
+            cursor = cursor.parentId ? materials.value.find(function (f) { return String(f.id) === String(cursor.parentId); }) : null;
+            guard += 1;
+          }
+        }
+        return true;
+      }
+
+      function onWorkspaceDrop(target) {
+        if (!canDropWorkspaceItem(target)) { workspaceRootDragOver.value = false; return; }
+        var drag = workspaceDragItem.value;
+        var targetId = target ? target.raw.id : null;
+        var ok = store.moveWorkspaceItem(props.expertId, drag.raw.id, targetId);
+        workspaceDragItem.value = null;
+        workspaceRootDragOver.value = false;
+        if (ok) {
+          materials.value = store.getWorkspaceFiles(props.expertId);
+          ElementPlus.ElMessage.success('已移动到 ' + (target ? target.name : 'workspace'));
+        }
       }
 
       function openMaterialUpload() {
@@ -693,7 +939,8 @@
               name: file.name,
               type: AppShared.inferProjectFileType(file.name),
               size: file.size,
-              content: content
+              content: content,
+              parentId: workspaceCurrentFolderId.value || null
             });
             done += 1;
             if (done === queue.length) {
@@ -838,22 +1085,9 @@
       }
 
       // ---- 人设 Tab 方法 ----
-      function loadPersonaHistory() {
-        personaHistory.value = store.getPersonaHistory(props.expertId);
-        personaHistoryVisible.value = true;
-      }
-
-      function restorePersonaVersion(idx) {
-        var snap = store.restorePersonaVersion(props.expertId, idx);
-        if (!snap) return;
-        persona.value = normalizePersonaForEditor(snap);
-        personaHistoryVisible.value = false;
-        ElementPlus.ElMessage.success('已恢复到版本 ' + (idx + 1));
-      }
-
       function exportPersonaMd() {
         var content = persona.value.coreDutyMd || '';
-        var filename = '人设.md';
+        var filename = 'soul.md';
         var blob = new Blob([content], { type: 'text/markdown;charset=utf-8' });
         var url = URL.createObjectURL(blob);
         var a = document.createElement('a');
@@ -886,7 +1120,7 @@
       }
 
       function personaPreviewTabLabel() {
-        return '人设.md';
+        return 'soul.md';
       }
 
       // ---- 技能 Tab 方法 ----
@@ -1359,11 +1593,20 @@
         // 资料 Tab
         materialFileInput: materialFileInput, materialTypeFilter: materialTypeFilter, materialSearchQuery: materialSearchQuery,
         materialPreviewVisible: materialPreviewVisible, materialPreviewItem: materialPreviewItem,
-        filteredMaterials: filteredMaterials, workspaceFiles: workspaceFiles,
+        workspaceCurrentFolderId: workspaceCurrentFolderId, workspaceFolderDialogVisible: workspaceFolderDialogVisible,
+        workspaceFolderDialogMode: workspaceFolderDialogMode, workspaceFolderName: workspaceFolderName,
+        workspaceDragItem: workspaceDragItem, workspaceRootDragOver: workspaceRootDragOver,
+        filteredMaterials: filteredMaterials, workspaceFiles: workspaceFiles, workspaceStats: workspaceStats, workspaceBreadcrumbs: workspaceBreadcrumbs, workspacePathLabel: workspacePathLabel,
         openMaterialUpload: openMaterialUpload, handleMaterialFileSelect: handleMaterialFileSelect,
         openMaterialPreview: openMaterialPreview, downloadMaterial: downloadMaterial, deleteMaterial: deleteMaterial,
         workspaceFileTypeClass: workspaceFileTypeClass, workspaceFileIcon: workspaceFileIcon, workspaceFileMeta: workspaceFileMeta,
+        workspaceTypeLabel: workspaceTypeLabel, workspaceUpdatedAt: workspaceUpdatedAt, workspaceSourceLabel: workspaceSourceLabel, workspaceSizeLabel: workspaceSizeLabel,
         openWorkspaceFilePreview: openWorkspaceFilePreview, downloadWorkspaceFile: downloadWorkspaceFile, deleteWorkspaceFile: deleteWorkspaceFile,
+        openCreateWorkspaceFolderDialog: openCreateWorkspaceFolderDialog, submitWorkspaceFolderDialog: submitWorkspaceFolderDialog,
+        openWorkspaceFolder: openWorkspaceFolder, openWorkspaceBreadcrumb: openWorkspaceBreadcrumb,
+        canDropWorkspaceBreadcrumb: canDropWorkspaceBreadcrumb, workspaceBreadcrumbClass: workspaceBreadcrumbClass, onWorkspaceBreadcrumbDrop: onWorkspaceBreadcrumbDrop,
+        openRenameWorkspaceItem: openRenameWorkspaceItem, deleteWorkspaceFolder: deleteWorkspaceFolder, handleWorkspaceItemCommand: handleWorkspaceItemCommand,
+        onWorkspaceDragStart: onWorkspaceDragStart, onWorkspaceDragEnd: onWorkspaceDragEnd, canDropWorkspaceItem: canDropWorkspaceItem, onWorkspaceDrop: onWorkspaceDrop,
         fileTypeIcon: fileTypeIcon, formatFileSize: formatFileSize,
         // 记忆 Tab
         memoryCategoryFilter: memoryCategoryFilter, memorySourceFilter: memorySourceFilter, memorySearchQuery: memorySearchQuery,
@@ -1374,9 +1617,7 @@
         addMemoryWithCategory: addMemoryWithCategory, openCreateMemoryDialog: openCreateMemoryDialog,
         openEditMemoryDialog: openEditMemoryDialog, saveMemoryDialog: saveMemoryDialog, deleteMemoryFromDialog: deleteMemoryFromDialog,
         // 人设 Tab
-        personaPreviewTab: personaPreviewTab, personaHistoryVisible: personaHistoryVisible,
-        personaHistory: personaHistory, personaImportInput: personaImportInput,
-        loadPersonaHistory: loadPersonaHistory, restorePersonaVersion: restorePersonaVersion,
+        personaPreviewTab: personaPreviewTab, personaImportInput: personaImportInput,
         exportPersonaMd: exportPersonaMd, triggerPersonaImport: triggerPersonaImport,
         handlePersonaImport: handlePersonaImport,
         personaPreviewContent: personaPreviewContent, personaPreviewTabLabel: personaPreviewTabLabel,
@@ -1463,22 +1704,21 @@
                     <div class="detail-action-left">\
                       <el-button size="small" @click="triggerPersonaImport">\
                         <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" style="margin-right:4px"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>\
-                        导入人设.md\
+                        导入soul.md\
                       </el-button>\
                       <el-button size="small" @click="exportPersonaMd">\
                         <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" style="margin-right:4px"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>\
-                        导出人设.md\
+                        导出soul.md\
                       </el-button>\
-                      <el-button size="small" @click="loadPersonaHistory">版本历史</el-button>\
                     </div>\
                     <div class="detail-action-right">\
-                      <el-button type="primary" size="small" @click="savePersona">保存人设</el-button>\
+                      <el-button type="primary" size="small" @click="savePersona">保存</el-button>\
                     </div>\
                   </div>\
                   <div class="persona-split-layout">\
                     <div class="persona-edit-panel">\
                       <div class="persona-edit-tabs">\
-                        <button type="button" class="persona-edit-tab active">人设.md</button>\
+                        <button type="button" class="persona-edit-tab active">soul.md</button>\
                       </div>\
                       <div class="persona-edit-toolbar">\
                         <el-dropdown trigger="hover" @command="insertPersonaMarkdown">\
@@ -1528,7 +1768,7 @@
                           </template>\
                         </el-dropdown>\
                       </div>\
-                      <el-input v-model="persona.coreDutyMd" type="textarea" :rows="14" placeholder="编辑人设.md，支持 Markdown 格式" class="persona-textarea" />\
+                      <el-input v-model="persona.coreDutyMd" type="textarea" :rows="14" placeholder="编辑soul.md，支持 Markdown 格式" class="persona-textarea" />\
                     </div>\
                     <div class="persona-preview-panel">\
                       <div class="persona-preview-head">\
@@ -1546,46 +1786,64 @@
                     <h3 class="detail-section-title">工作空间</h3>\
                     <p class="detail-section-desc">统一展示上传文件与任务生成文件，便于专家执行任务时引用</p>\
                   </div>\
-                  <div class="detail-action-bar detail-action-bar--split">\
+                  <div class="detail-action-bar detail-action-bar--split workspace-action-bar">\
                     <input ref="materialFileInput" type="file" multiple class="material-file-input-hidden" @change="handleMaterialFileSelect">\
-                    <div class="detail-action-left">\
-                      <el-input v-model="materialSearchQuery" placeholder="搜索文件..." size="small" clearable style="width:200px" />\
-                      <el-select v-model="materialTypeFilter" size="small" style="width:110px">\
-                        <el-option label="全部类型" value="all" />\
-                        <el-option label="文档" value="document" />\
-                        <el-option label="表格" value="spreadsheet" />\
-                        <el-option label="数据" value="data" />\
-                        <el-option label="报告" value="report" />\
-                      </el-select>\
+                    <div class="detail-action-left workspace-breadcrumbs">\
+                      <template v-for="(crumb, index) in workspaceBreadcrumbs" :key="crumb.id || \'root\'">\
+                        <button type="button" class="workspace-breadcrumb" :class="workspaceBreadcrumbClass(index, crumb)" @click="openWorkspaceBreadcrumb(crumb)" @dragover.prevent="canDropWorkspaceBreadcrumb(crumb)" @drop.prevent="onWorkspaceBreadcrumbDrop(crumb)">{{ crumb.name }}</button>\
+                        <span v-if="index < workspaceBreadcrumbs.length - 1" class="workspace-breadcrumb-sep">/</span>\
+                      </template>\
+                      <span class="workspace-stat-pill">{{ workspaceStats }}</span>\
                     </div>\
                     <div class="detail-action-right">\
+                      <el-button size="small" @click="openCreateWorkspaceFolderDialog">新建文件夹</el-button>\
                       <el-button type="primary" size="small" @click="openMaterialUpload">上传文件</el-button>\
                     </div>\
                   </div>\
-                  <div class="workspace-directory">\
-                    <div class="workspace-directory-root">\
-                      <span class="workspace-directory-folder-icon">📁</span>\
-                      <span class="workspace-directory-folder-name">workspace/</span>\
-                    </div>\
+                  <div class="workspace-list-panel">\
                     <div v-if="workspaceFiles.length === 0" class="profile-empty-state workspace-directory-empty">\
-                      <p class="profile-empty-title">工作目录暂无文件</p>\
-                      <p class="profile-empty-desc">可上传文件供专家参考；任务执行后生成的文件也会汇总到这里。</p>\
+                      <p class="profile-empty-title">工作目录暂无内容</p>\
+                      <p class="profile-empty-desc">你可以新建文件夹整理资料，或上传文件供专家执行任务时引用。</p>\
+                      <div class="workspace-empty-actions">\
+                        <el-button size="small" @click="openCreateWorkspaceFolderDialog">新建文件夹</el-button>\
+                        <el-button type="primary" size="small" @click="openMaterialUpload">上传文件</el-button>\
+                      </div>\
                     </div>\
-                    <div v-else class="workspace-directory-list">\
-                      <div v-for="file in workspaceFiles" :key="file.id" class="workspace-directory-row">\
-                        <span class="workspace-directory-branch"></span>\
-                        <span class="workspace-file-icon-wrap" :class="workspaceFileTypeClass(file)">\
-                          <span class="workspace-file-icon">{{ workspaceFileIcon(file) }}</span>\
-                        </span>\
-                        <div class="workspace-directory-info">\
-                          <div class="workspace-directory-name">{{ file.name }}</div>\
-                          <div class="workspace-directory-meta">{{ workspaceFileMeta(file) }}</div>\
+                    <div v-else class="workspace-list-table">\
+                      <div class="workspace-list-row workspace-list-head">\
+                        <div class="workspace-list-cell workspace-list-name-cell">名称</div>\
+                        <div class="workspace-list-cell workspace-list-type-cell">类型</div>\
+                        <div class="workspace-list-cell workspace-list-updater-cell">来源</div>\
+                        <div class="workspace-list-cell workspace-list-time-cell">更新时间</div>\
+                        <div class="workspace-list-cell workspace-list-size-cell">大小</div>\
+                        <div class="workspace-list-cell workspace-list-action-cell">操作</div>\
+                      </div>\
+                      <div v-for="file in workspaceFiles" :key="file.id" class="workspace-list-row workspace-list-item" :class="{ \'is-folder\': file.kind === \'folder\', \'is-drop-target\': canDropWorkspaceItem(file) }" :draggable="file.source === \'upload\'" @dragstart="onWorkspaceDragStart(file, $event)" @dragend="onWorkspaceDragEnd" @dragover.prevent="file.kind === \'folder\' && canDropWorkspaceItem(file)" @drop.prevent="file.kind === \'folder\' && onWorkspaceDrop(file)">\
+                        <div class="workspace-list-cell workspace-list-name-cell" @click="file.kind === \'folder\' && openWorkspaceFolder(file)" @dblclick="openWorkspaceFilePreview(file)">\
+                          <span class="workspace-file-icon-wrap" :class="workspaceFileTypeClass(file)">\
+                            <span class="workspace-file-icon">{{ workspaceFileIcon(file) }}</span>\
+                          </span>\
+                          <span class="workspace-list-name-text">{{ file.name }}</span>\
                         </div>\
-                        <div class="workspace-directory-actions">\
-                          <el-button link type="primary" size="small" @click="openWorkspaceFilePreview(file)">预览</el-button>\
-                          <el-button link type="primary" size="small" @click="downloadWorkspaceFile(file)">下载</el-button>\
-                          <el-button v-if="file.taskId" link type="primary" size="small" @click="goToArtifactTask(file.taskId)">跳转任务</el-button>\
-                          <el-button v-if="file.source === \'upload\'" link type="danger" size="small" @click="deleteWorkspaceFile(file)">删除</el-button>\
+                        <div class="workspace-list-cell workspace-list-type-cell">{{ workspaceTypeLabel(file) }}</div>\
+                        <div class="workspace-list-cell workspace-list-updater-cell">{{ workspaceSourceLabel(file) }}</div>\
+                        <div class="workspace-list-cell workspace-list-time-cell">{{ workspaceUpdatedAt(file) }}</div>\
+                        <div class="workspace-list-cell workspace-list-size-cell">{{ workspaceSizeLabel(file) }}</div>\
+                        <div class="workspace-list-cell workspace-list-action-cell">\
+                          <template v-if="file.kind !== \'folder\'">\
+                            <el-button link type="primary" size="small" @click="openWorkspaceFilePreview(file)">预览</el-button>\
+                            <el-button link type="primary" size="small" @click="downloadWorkspaceFile(file)">下载</el-button>\
+                            <el-button v-if="file.taskId" link type="primary" size="small" @click="goToArtifactTask(file.taskId)">跳转至任务</el-button>\
+                          </template>\
+                          <el-dropdown trigger="click" @command="handleWorkspaceItemCommand($event, file)">\
+                            <button type="button" class="workspace-more-btn workspace-more-btn-vertical" aria-label="更多操作">⋮</button>\
+                            <template #dropdown>\
+                              <el-dropdown-menu>\
+                                <el-dropdown-item command="rename" :disabled="file.source !== \'upload\'">重命名</el-dropdown-item>\
+                                <el-dropdown-item command="delete" :disabled="file.source !== \'upload\'" class="workspace-danger-dropdown-item">删除</el-dropdown-item>\
+                              </el-dropdown-menu>\
+                            </template>\
+                          </el-dropdown>\
                         </div>\
                       </div>\
                     </div>\
@@ -1601,25 +1859,18 @@
                   </div>\
                   <div class="detail-action-bar detail-action-bar--tasks">\
                     <div class="task-tab-stats">\
-                      <span class="task-tab-stat-item">共 <strong>{{ taskStats.total }}</strong> 个</span>\
+                      <span class="task-tab-stat-item">任务总数 <strong>{{ taskStats.total }}</strong></span>\
                       <span class="task-tab-stat-sep">·</span>\
-                      <span class="task-tab-stat-item">待开始 <strong>{{ taskStats.pending }}</strong></span>\
+                      <span class="task-tab-stat-item">运行中 <strong>{{ taskStats.running }}</strong></span>\
                       <span class="task-tab-stat-sep">·</span>\
-                      <span class="task-tab-stat-item">进行中 <strong>{{ taskStats.running }}</strong></span>\
-                      <span class="task-tab-stat-sep">·</span>\
-                      <span class="task-tab-stat-item">已完成 <strong>{{ taskStats.completed }}</strong></span>\
-                      <template v-if="taskStats.archived">\
-                        <span class="task-tab-stat-sep">·</span>\
-                        <span class="task-tab-stat-item">已归档 <strong>{{ taskStats.archived }}</strong></span>\
-                      </template>\
+                      <span class="task-tab-stat-item">已就绪 <strong>{{ taskStats.ready }}</strong></span>\
                     </div>\
                     <div class="task-tab-tools">\
                       <el-input v-model="taskSearchQuery" placeholder="搜索任务名称或 ID..." size="small" clearable style="width:200px" />\
                       <el-select v-model="taskStatusFilter" size="small" style="width:110px">\
-                        <el-option label="全部状态" value="all" />\
-                        <el-option label="待开始" value="pending" />\
-                        <el-option label="进行中" value="running" />\
-                        <el-option label="已完成" value="completed" />\
+                        <el-option label="全部" value="all" />\
+                        <el-option label="运行中" value="running" />\
+                        <el-option label="已就绪" value="ready" />\
                       </el-select>\
                       <el-button type="primary" size="small" @click="openNewTaskDialog">+ 新建任务</el-button>\
                     </div>\
@@ -1940,6 +2191,17 @@
             <el-button type="primary" @click="submitNewTask">创建</el-button>\
           </template>\
         </el-dialog>\
+        <el-dialog v-model="workspaceFolderDialogVisible" :title="workspaceFolderDialogMode === \'rename\' ? \'重命名\' : \'新建文件夹\'" width="420px" :close-on-click-modal="false" append-to-body>\
+          <el-form label-position="top">\
+            <el-form-item :label="workspaceFolderDialogMode === \'rename\' ? \'名称\' : \'文件夹名称\'" required>\
+              <el-input v-model="workspaceFolderName" placeholder="请输入名称" maxlength="60" show-word-limit @keyup.enter="submitWorkspaceFolderDialog" />\
+            </el-form-item>\
+          </el-form>\
+          <template #footer>\
+            <el-button @click="workspaceFolderDialogVisible = false">取消</el-button>\
+            <el-button type="primary" @click="submitWorkspaceFolderDialog">保存</el-button>\
+          </template>\
+        </el-dialog>\
         <!-- 文件预览对话框 -->\
         <el-dialog v-model="artifactPreviewVisible" title="文件预览" width="560px" append-to-body @closed="artifactPreviewItem = null">\
           <div v-if="artifactPreviewItem" style="max-height:400px;overflow:auto">\
@@ -1968,22 +2230,6 @@
           <template #footer>\
             <el-button @click="materialPreviewVisible = false">关闭</el-button>\
             <el-button type="primary" @click="downloadMaterial(materialPreviewItem); materialPreviewVisible = false">下载</el-button>\
-          </template>\
-        </el-dialog>\
-        <!-- 人设版本历史对话框 -->\
-        <el-dialog v-model="personaHistoryVisible" title="版本历史" width="500px" append-to-body>\
-          <div v-if="personaHistory.length === 0" style="text-align:center;color:#909399;padding:20px">暂无历史版本</div>\
-          <div v-else class="persona-history-list">\
-            <div v-for="(ver, idx) in personaHistory" :key="ver.savedAt" class="persona-history-item">\
-              <div class="persona-history-item-left">\
-                <span class="persona-history-version">版本 {{ personaHistory.length - idx }}</span>\
-                <span class="persona-history-time">{{ ver.savedAt }}</span>\
-              </div>\
-              <el-button size="small" @click="restorePersonaVersion(idx)">恢复</el-button>\
-            </div>\
-          </div>\
-          <template #footer>\
-            <el-button @click="personaHistoryVisible = false">关闭</el-button>\
           </template>\
         </el-dialog>\
         <el-dialog v-model="memoryDialogVisible" :title="memoryDialogMode === \'edit\' ? \'编辑记忆\' : \'新增记忆\'" width="520px" append-to-body class="form-dialog memory-dialog">\

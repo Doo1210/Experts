@@ -623,6 +623,8 @@
           name: m.name,
           size: m.size,
           type: m.mimeType || 'file',
+          kind: 'material',
+          parentId: null,
           createdAt: m.createdAt || nowIso()
         };
       });
@@ -2268,12 +2270,34 @@
     },
 
     getWorkspaceFiles: function (expertId) {
-      return (state.workspaceFiles[expertId] || []).slice().sort(function (a, b) {
+      return (state.workspaceFiles[expertId] || []).map(function (item) {
+        return Object.assign({ parentId: null }, item);
+      }).sort(function (a, b) {
+        if ((a.kind === 'folder') !== (b.kind === 'folder')) return a.kind === 'folder' ? -1 : 1;
+        if (a.kind === 'folder') return (a.name || '').localeCompare(b.name || '', 'zh-Hans-CN');
         return (b.createdAt || '').localeCompare(a.createdAt || '');
       });
     },
+    addWorkspaceFolder: function (expertId, payload) {
+      if (!state.workspaceFiles[expertId]) state.workspaceFiles[expertId] = [];
+      var parentId = payload && payload.parentId ? String(payload.parentId) : null;
+      var name = String(payload && payload.name || '').trim();
+      var folder = {
+        id: uid(),
+        name: name,
+        type: 'folder',
+        kind: 'folder',
+        parentId: parentId,
+        createdAt: nowIso(),
+        updatedAt: nowIso()
+      };
+      state.workspaceFiles[expertId].push(folder);
+      persist();
+      return folder;
+    },
     addWorkspaceFile: function (expertId, payload) {
       if (!state.workspaceFiles[expertId]) state.workspaceFiles[expertId] = [];
+      payload = payload || {};
       var f = {
         id: uid(),
         name: typeof payload === 'string' ? payload : payload.name,
@@ -2281,16 +2305,54 @@
         size: payload.size || 0,
         content: payload.content || '',
         kind: 'material',
-        createdAt: nowIso()
+        parentId: payload.parentId ? String(payload.parentId) : null,
+        createdAt: nowIso(),
+        updatedAt: nowIso()
       };
       state.workspaceFiles[expertId].push(f);
       persist();
       return f;
     },
+    renameWorkspaceItem: function (expertId, itemId, name) {
+      var list = state.workspaceFiles[expertId] || [];
+      var item = list.find(function (f) { return String(f.id) === String(itemId); });
+      if (!item) return null;
+      item.name = String(name || '').trim();
+      item.updatedAt = nowIso();
+      persist();
+      return item;
+    },
+    moveWorkspaceItem: function (expertId, itemId, parentId) {
+      var list = state.workspaceFiles[expertId] || [];
+      var item = list.find(function (f) { return String(f.id) === String(itemId); });
+      if (!item) return false;
+      var targetParentId = parentId ? String(parentId) : null;
+      if (String(item.id) === String(targetParentId)) return false;
+      if (item.kind === 'folder') {
+        var cursor = targetParentId;
+        while (cursor) {
+          if (String(cursor) === String(item.id)) return false;
+          var parent = list.find(function (f) { return String(f.id) === String(cursor); });
+          cursor = parent && parent.parentId ? String(parent.parentId) : null;
+        }
+      }
+      item.parentId = targetParentId;
+      item.updatedAt = nowIso();
+      persist();
+      return true;
+    },
     deleteWorkspaceFile: function (expertId, fileId) {
       if (!state.workspaceFiles[expertId]) return;
-      state.workspaceFiles[expertId] = state.workspaceFiles[expertId].filter(function (f) { return f.id !== fileId; });
+      state.workspaceFiles[expertId] = state.workspaceFiles[expertId].filter(function (f) { return String(f.id) !== String(fileId); });
       persist();
+    },
+    deleteWorkspaceFolder: function (expertId, folderId) {
+      if (!state.workspaceFiles[expertId]) return false;
+      var hasChildren = state.workspaceFiles[expertId].some(function (f) { return String(f.parentId || '') === String(folderId); });
+      if (hasChildren) return false;
+      state.workspaceFiles[expertId] = state.workspaceFiles[expertId].filter(function (f) { return String(f.id) !== String(folderId); });
+      persist();
+      return true;
     },
 
     getExpertArtifacts: function (expertId) {

@@ -9,11 +9,12 @@
     var showCreateDialog = Vue.ref(false);
     var saving = Vue.ref(false);
     var defaultPersona = {
-      coreDutyMd: '## 核心职责\n\n',
-      workflowMd: '## 工作流程\n\n1. \n2. \n3. ',
-      behaviorMd: '## 行为准则\n\n- '
+      coreDutyMd: '## 核心职责\n\n\n## 工作流程\n\n1. \n2. \n3. \n\n## 行为准则\n\n- ',
+      workflowMd: '',
+      behaviorMd: ''
     };
     var createAvatarInput = Vue.ref(null);
+    var createPersonaInput = Vue.ref(null);
     var createSkillsCatalog = Vue.ref([]);
     var createToolsCatalog = Vue.ref([]);
     var createSkillAssigned = Vue.ref([]);
@@ -39,7 +40,7 @@
     var createForm = Vue.ref(emptyCreateForm());
     var createStep = Vue.ref(0);
     var expertiseTagInput = Vue.ref('');
-    var CREATE_STEP_TITLES = ['基础信息', '人设文档', '技能配置', '工具配置'];
+    var CREATE_STEP_TITLES = ['基础信息', '人设', '技能', '工具'];
 
     function resetCreateForm() {
       createForm.value = emptyCreateForm();
@@ -238,6 +239,24 @@
       }
     }
 
+    function triggerCreatePersonaUpload() {
+      if (createPersonaInput.value) createPersonaInput.value.click();
+    }
+
+    function handleCreatePersonaChange(e) {
+      var file = e.target.files && e.target.files[0];
+      if (!file) return;
+      var reader = new FileReader();
+      reader.onload = function (ev) {
+        createForm.value.coreDutyMd = ev.target.result || '';
+        createForm.value.workflowMd = '';
+        createForm.value.behaviorMd = '';
+        ElementPlus.ElMessage.success('已上传 ' + file.name);
+      };
+      reader.readAsText(file);
+      e.target.value = '';
+    }
+
     function openCreateDialog() {
       resetCreateForm();
       showCreateDialog.value = true;
@@ -304,8 +323,8 @@
         toolIds: toolIds,
         persona: {
           coreDutyMd: createForm.value.coreDutyMd,
-          workflowMd: createForm.value.workflowMd,
-          behaviorMd: createForm.value.behaviorMd
+          workflowMd: '',
+          behaviorMd: ''
         }
       });
       applyCreateCapabilities(expert.id);
@@ -321,6 +340,7 @@
       createStep: createStep,
       createStepTitles: CREATE_STEP_TITLES,
       createAvatarInput: createAvatarInput,
+      createPersonaInput: createPersonaInput,
       expertiseTagInput: expertiseTagInput,
       saving: saving,
       capabilitiesLoading: capabilitiesLoading,
@@ -348,6 +368,8 @@
       submitCreate: submitCreate,
       triggerCreateAvatarUpload: triggerCreateAvatarUpload,
       handleCreateAvatarChange: handleCreateAvatarChange,
+      triggerCreatePersonaUpload: triggerCreatePersonaUpload,
+      handleCreatePersonaChange: handleCreatePersonaChange,
       addCreateExpertiseTag: addCreateExpertiseTag,
       removeCreateExpertiseTag: removeCreateExpertiseTag,
       onExpertiseTagKeydown: onExpertiseTagKeydown
@@ -366,6 +388,7 @@
         createStep: props.wizard.createStep,
         createStepTitles: props.wizard.createStepTitles,
         createAvatarInput: props.wizard.createAvatarInput,
+        createPersonaInput: props.wizard.createPersonaInput,
         expertiseTagInput: props.wizard.expertiseTagInput,
         saving: props.wizard.saving,
         capabilitiesLoading: props.wizard.capabilitiesLoading,
@@ -392,6 +415,8 @@
         submitCreate: props.wizard.submitCreate,
         triggerCreateAvatarUpload: props.wizard.triggerCreateAvatarUpload,
         handleCreateAvatarChange: props.wizard.handleCreateAvatarChange,
+        triggerCreatePersonaUpload: props.wizard.triggerCreatePersonaUpload,
+        handleCreatePersonaChange: props.wizard.handleCreatePersonaChange,
         addCreateExpertiseTag: props.wizard.addCreateExpertiseTag,
         removeCreateExpertiseTag: props.wizard.removeCreateExpertiseTag,
         onExpertiseTagKeydown: props.wizard.onExpertiseTagKeydown,
@@ -483,21 +508,16 @@
               </div>\
             </div>\
             <div v-show="createStep === 1" class="wizard-step-content wizard-step-persona">\
-              <p class="wizard-step-desc">定义专家的核心职责、工作流程与行为准则，支持 Markdown 格式</p>\
-              <el-form label-position="top" class="form-dialog-form wizard-persona-form">\
-                <el-form-item label="核心职责">\
-                  <el-input v-model="createForm.coreDutyMd" type="textarea" :rows="4" placeholder="描述专家的主要职责与目标" />\
-                </el-form-item>\
-                <el-form-item label="工作流程">\
-                  <el-input v-model="createForm.workflowMd" type="textarea" :rows="4" placeholder="描述专家处理任务的典型步骤" />\
-                </el-form-item>\
-                <el-form-item label="行为准则">\
-                  <el-input v-model="createForm.behaviorMd" type="textarea" :rows="4" placeholder="描述专家的沟通风格与约束" />\
-                </el-form-item>\
-              </el-form>\
+              <p class="wizard-step-desc">编写专家人设 Markdown，定义核心职责、工作流程与行为准则</p>\
+              <input ref="createPersonaInput" type="file" accept=".md,text/markdown,text/plain" class="material-file-input-hidden" @change="handleCreatePersonaChange">\
+              <div class="wizard-persona-editor-head">\
+                <span class="wizard-persona-editor-title">人设.md</span>\
+                <el-button size="small" @click="triggerCreatePersonaUpload">上传 Markdown</el-button>\
+              </div>\
+              <el-input v-model="createForm.coreDutyMd" type="textarea" :rows="14" placeholder="编辑人设.md，支持 Markdown 格式" class="wizard-persona-markdown-input" />\
             </div>\
             <div v-show="createStep === 2" class="wizard-step-content wizard-step-bindings">\
-              <p class="wizard-step-desc">配给技能写入 Profile <code>skills.assigned</code>；可从已安装技能池中添加（选填，可跳过）</p>\
+              <p class="wizard-step-desc">为专家配置可调用的业务技能，可从已安装技能池中添加</p>\
               <div class="detail-action-bar">\
                 <span class="detail-action-bar-label">已配给 {{ createSkillAssigned.length }} 项技能</span>\
                 <el-button type="primary" size="small" @click="openCreateSkillPicker">+ 添加技能</el-button>\
@@ -505,7 +525,7 @@
               <div v-loading="capabilitiesLoading">\
                 <div v-if="createSkillAssigned.length === 0" class="profile-empty-state wizard-empty-state">\
                   <p class="profile-empty-title">尚未配给任何技能</p>\
-                  <p class="profile-empty-desc">点击「添加技能」从已安装技能池中选择；也可留空，创建后在详情页继续配置。</p>\
+                  <p class="profile-empty-desc">点击「添加技能」从已安装技能池中选择。</p>\
                 </div>\
                 <div v-else class="detail-table-wrap">\
                   <el-table :data="createSkillAssigned" stripe class="toolset-table" max-height="320">\
@@ -529,7 +549,7 @@
               </div>\
             </div>\
             <div v-show="createStep === 3" class="wizard-step-content wizard-step-bindings">\
-              <p class="wizard-step-desc">配给 toolset 写入 <code>platform_toolsets.cli</code>（选填，可跳过）</p>\
+              <p class="wizard-step-desc">为专家配置可调用工具，并查看已接入的外部服务</p>\
               <div class="detail-action-bar">\
                 <span class="detail-action-bar-label">已配给 {{ createToolAssigned.length }} 个 toolset</span>\
                 <el-button type="primary" size="small" @click="openCreateToolPicker">+ 添加工具</el-button>\
@@ -537,7 +557,7 @@
               <div v-loading="capabilitiesLoading">\
                 <div v-if="createToolAssigned.length === 0" class="profile-empty-state wizard-empty-state">\
                   <p class="profile-empty-title">尚未配给任何工具</p>\
-                  <p class="profile-empty-desc">点击「添加工具」从可选 toolset 列表中挑选；也可留空，创建后在详情页继续配置。</p>\
+                  <p class="profile-empty-desc">点击「添加工具」从可选工具列表中挑选。</p>\
                 </div>\
                 <div v-else class="detail-table-wrap">\
                   <el-table :data="createToolAssigned" stripe class="toolset-table" max-height="320">\
