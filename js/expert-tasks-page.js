@@ -458,6 +458,10 @@
         buffer.items = [];
       }
 
+      var showExpertIntro = Vue.computed(function () {
+        return !currentTaskId.value || !messages.value.length;
+      });
+
       var chatGroups = Vue.computed(function () {
         var groups = [];
         var expertBuffer = { id: '', items: [] };
@@ -807,7 +811,7 @@
       return {
         expert: expert, tasks: tasks,
         remoteError: remoteError,
-        currentTaskId: currentTaskId, messages: messages, chatGroups: chatGroups,
+        currentTaskId: currentTaskId, messages: messages, showExpertIntro: showExpertIntro, chatGroups: chatGroups,
         expertTags: expertTags,
         tagColors: catalog.TAG_COLORS,
         showExpertPreviewDialog: showExpertPreviewDialog, previewStats: previewStats,
@@ -865,7 +869,7 @@
         <div class="task-body">\
         <div class="chat-main">\
           <div class="chat-messages" ref="chatBox">\
-            <div v-if="!currentTaskId" class="chat-empty-expert-card">\
+            <div v-if="showExpertIntro" class="chat-empty-expert-card">\
               <div class="chat-empty-expert-avatar-wrap">\
                 <img class="chat-empty-expert-avatar" :src="expert.avatar" :alt="expert.name">\
               </div>\
