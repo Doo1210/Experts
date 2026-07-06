@@ -544,7 +544,7 @@ body {
 .ws-tree-arrow.expanded { transform: rotate(90deg); }
 .ws-tree-arrow-placeholder { width: 14px; flex-shrink: 0; }
 .ws-tree-icon { width: 18px; flex-shrink: 0; text-align: center; font-size: 13px; line-height: 1; display: inline-flex; align-items: center; justify-content: center; }
-.ws-tree-cwd-star { color: var(--primary, #6366f1); }
+.ws-tree-folder-icon.is-cwd { color: var(--primary, #6366f1); }
 .ws-tree-name {
   flex: 1; min-width: 0;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
