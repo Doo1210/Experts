@@ -158,6 +158,12 @@
         if (!tid) return '工作空间';
         var node = this.findNode(this.tree, tid);
         return node ? node.name : '工作空间';
+      },
+      isRootCwd: function () {
+        return !this.sessionCwd;
+      },
+      isRootSelected: function () {
+        return this.selectedNodeId === '__root__';
       }
     },
     watch: {
@@ -259,6 +265,10 @@
       onSetCwd: function (folder) {
         this.$emit('select-cwd', folder.name);
       },
+      onSetRootCwd: function (ev) {
+        ev.stopPropagation();
+        this.$emit('select-cwd', '');
+      },
       onPreviewFile: function (file) {
         if (file && file.id) this.selectedNodeId = file.id;
         this.$emit('preview-file', file);
@@ -330,11 +340,15 @@
       <aside v-show="open" class="chat-workspace-panel">\
         <div class="chat-workspace-inner">\
           <div class="chat-workspace-head">\
-            <div class="chat-workspace-head-body" title="选中工作空间根目录" @click="selectRoot">\
+            <div class="chat-workspace-head-body" :class="{ \'is-selected\': isRootSelected, \'is-cwd\': isRootCwd }">\
               <span class="task-panel-title-icon">\
-                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>\
+                <svg v-if="isRootCwd" class="ws-tree-cwd-star" viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26"/></svg>\
+                <svg v-else viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>\
               </span>\
-              <div class="chat-workspace-title-line">工作空间</div>\
+              <div class="chat-workspace-title-line" role="button" tabindex="0" @click="selectRoot" @keydown.enter="selectRoot">工作空间</div>\
+              <button v-if="!isRootCwd" type="button" class="ws-head-setcwd-btn" title="设定为当前工作目录" @click="onSetRootCwd">\
+                <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>\
+              </button>\
             </div>\
             <div class="chat-workspace-head-actions">\
               <button type="button" class="ws-head-btn" :title="\'上传文件到「\'+targetFolderName+\'』\'" @click="handleUploadFile">\
@@ -348,7 +362,7 @@
               </button>\
             </div>\
           </div>\
-          <div class="chat-workspace-tree" @click.self="selectRoot">\
+          <div class="chat-workspace-tree">\
             <workspace-tree-node\
               v-for="node in tree"\
               :key="node.id"\

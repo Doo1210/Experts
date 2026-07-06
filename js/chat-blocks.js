@@ -1,7 +1,7 @@
 /**
  * 对话内容块组件集合
- * 包含：ThoughtBlock / ToolCard / UserMessage / ReplyBlock
- * 阶段1将在此文件追加 SubagentCard / ClarifyCard / ApprovalCard / StatusLine / ErrorRow
+ * 包含：ActivityItem（思考 / 工具 / 子智能体 三合一）/ UserMessage / ReplyBlock / StatusLine / ErrorRow
+ * 加载顺序：chat-blocks.js → chat-interactive.js
  */
 (function () {
   /**
@@ -14,87 +14,161 @@
   }
 
   /**
-   * 思考过程折叠区
-   * props: { content, live, open }
-   * - live: 是否为流式实时态（显示光标）
-   * - open: 是否默认展开
+   * 活动项（合并了思考、工具调用、子智能体）
+   * 视觉风格：扁平、纯文字行、可折叠、颜色仅用于状态字符
+   *
+   * props:
+   *   - kind: 'thought' | 'tool' | 'subagent'
+   *   - status: 'thinking' | 'running' | 'success' | 'error'
+   *   - title: 主标题文字（不含前缀），例如工具名 / 子智能体名
+   *   - duration: 耗时（秒）
+   *   - goal: 子智能体的目标描述
+   *   - summary: 结果摘要
+   *   - params: 工具入参
+   *   - result: 工具结果详情（与 summary 互补；如提供则显示完整内容）
+   *   - live: 是否流式
+   *   - open: 是否默认展开
+   *   - content: 思考过程的展开内容（仅 thought 使用）
    */
-  var ThoughtBlock = {
+  var ActivityItem = {
     props: {
+      kind: { type: String, default: 'tool' },
+      status: { type: String, default: 'success' },
+      title: { type: String, default: '' },
+      duration: { type: Number, default: null },
+      goal: { type: String, default: '' },
+      summary: { type: String, default: '' },
+      params: { type: Object, default: null },
+      result: { type: String, default: '' },
       content: { type: String, default: '' },
       live: { type: Boolean, default: false },
       open: { type: Boolean, default: false }
     },
-    template: '\
-      <details class="log-thought-block" :class="{ \'stream-thought-live\': live }" :open="open ? \'\' : null">\
-        <summary>思考过程</summary>\
-        <div class="log-thought-content">{{ content }}<span v-if="live" class="stream-cursor">▍</span></div>\
-      </details>'
-  };
-
-  /**
-   * 工具调用卡片（重做版）
-   * props: { toolName, content, params, summary, duration, progress, isError }
-   * - params: 工具入参对象，渲染为 key-value 表格
-   * - summary: 工具结果摘要
-   * - duration: 执行时长（秒）
-   * - progress: 执行进度（字符串或数字，存在即表示执行中）
-   * - isError: 是否执行失败
-   * - content: 兼容旧字段，作为兜底状态文本
-   */
-  var ToolCard = {
-    props: {
-      toolName: { type: String, default: '' },
-      content: { type: String, default: '' },
-      params: { type: Object, default: null },
-      summary: { type: String, default: '' },
-      duration: { type: Number, default: null },
-      progress: { type: [String, Number], default: null },
-      isError: { type: Boolean, default: false }
+    data: function () {
+      return { isOpen: !!this.open };
+    },
+    watch: {
+      open: function (val) {
+        if (this.isOpen !== val) this.isOpen = val;
+      }
+    },
+    methods: {
+      onToggle: function (e) {
+        this.isOpen = !!e.target.open;
+      }
     },
     computed: {
-      desc: function () {
-        return statusContent(this.content);
+      // 思考专用：是否流式中
+      isThinkingLive: function () {
+        return this.kind === 'thought' && this.status === 'thinking' && this.live;
       },
-      statusLabel: function () {
-        if (this.isError) return '执行失败';
-        if (this.progress !== null && this.progress !== undefined && this.progress !== '') return '执行中';
-        return '执行完成';
+      // 是否有可展开内容
+      hasExpandableContent: function () {
+        if (this.kind === 'thought') return !!this.content;
+        if (this.kind === 'subagent') return !!(this.goal || this.summary || this.result || this.content || (this.params && Object.keys(this.params).length));
+        // tool：兼容旧字段 content（旧 mock 工具调用只有 content 没有 summary）
+        return !!(this.summary || this.result || this.content || (this.params && Object.keys(this.params).length));
       },
+      // 中文前缀
+      prefixText: function () {
+        if (this.kind === 'thought') {
+          if (this.status === 'thinking') return '思考中';
+          return '思考';
+        }
+        if (this.kind === 'subagent') {
+          if (this.status === 'running') return '委派子智能体';
+          if (this.status === 'error') return '子智能体失败';
+          if (this.status === 'thinking') return '子智能体思考中';
+          return '子智能体';
+        }
+        // tool
+        if (this.status === 'running') return '调用工具';
+        if (this.status === 'error') return '工具调用失败';
+        if (this.status === 'thinking') return '准备调用工具';
+        return '调用工具';
+      },
+      // 类型符号：单一灰色字符
+      kindMark: function () {
+        if (this.kind === 'thought') return '✦';
+        if (this.kind === 'subagent') return '→';
+        return '⚙';
+      },
+      // 状态字符（唯一的彩色字符）
+      statusMark: function () {
+        if (this.status === 'running' || this.status === 'thinking') return '…';
+        if (this.status === 'error') return '✕';
+        if (this.status === 'success') return '✓';
+        return '';
+      },
+      // 耗时：仅 thought 显示「用时 N 秒」，其他场景不显示
       durationLabel: function () {
-        if (!this.duration) return '';
-        return '(' + Number(this.duration).toFixed(1) + 's)';
+        if (this.kind !== 'thought') return '';
+        if (this.status === 'thinking') return '';
+        var n = Number(this.duration);
+        if (!isFinite(n)) return '';
+        return '用时 ' + n.toFixed(1) + ' 秒';
       },
+      // 是否显示主标题（工具名 / 子智能体名）
+      shouldShowTitle: function () {
+        if (this.kind === 'thought') return false;
+        return !!this.title;
+      },
+      // 是否显示状态字符
+      shouldShowStatus: function () {
+        return !!this.statusMark;
+      },
+      // 子智能体目标展示文本
+      goalText: function () {
+        if (this.kind !== 'subagent') return '';
+        return this.goal ? ('目标：' + this.goal) : '';
+      },
+      // 参数条目
       paramEntries: function () {
         if (!this.params) return [];
         return Object.keys(this.params).map(function (k) {
           return { key: k, value: String(this.params[k]) };
         }, this);
+      },
+      // 工具结果显示文本（兼容旧 content 字段）
+      resultText: function () {
+        if (this.result) return this.result;
+        if (this.summary) return this.summary;
+        // 旧 mock 的 content 形如 '[数据查询] 执行完成 (1.8s)'，标题行已体现，跳过
+        if (this.content && !/^\[[^\]]+\]\s*执行(完成|失败)/.test(this.content)) {
+          return this.content;
+        }
+        return '';
+      },
+      // 思考展开内容
+      thoughtContent: function () {
+        return this.content || '';
       }
     },
     template: '\
-      <details class="log-action-card" :class="{ \'is-error\': isError, \'is-running\': statusLabel === \'执行中\' }" open>\
-        <summary class="log-action-summary">\
-          <span class="log-action-icon">{{ isError ? \'⚠\' : \'⚡\' }}</span>\
-          <span class="log-action-body">\
-            <span class="log-action-title">调用工具</span>\
-            <span class="log-action-tool" v-if="toolName">[{{ toolName }}]</span>\
-            <span class="log-action-status" :class="{ \'is-error\': isError }">{{ statusLabel }}</span>\
-            <span class="log-action-duration" v-if="durationLabel">{{ durationLabel }}</span>\
-          </span>\
+      <details class="activity-item" :class="[\'kind-\' + kind, \'status-\' + status, { \'is-live\': isThinkingLive, \'is-open\': isOpen }]" :open="isOpen ? \'\' : null" @toggle="onToggle">\
+        <summary class="activity-summary">\
+          <span v-if="hasExpandableContent" class="activity-chevron">{{ isOpen ? "▾" : "▸" }}</span>\
+          <span class="activity-kind-mark">{{ kindMark }}</span>\
+          <span class="activity-prefix">{{ prefixText }}</span>\
+          <span v-if="shouldShowTitle" class="activity-title">{{ title }}</span>\
+          <span v-if="durationLabel" class="activity-duration">{{ durationLabel }}</span>\
+          <span v-if="shouldShowStatus" class="activity-status" :class="\'is-\' + status">{{ statusMark }}</span>\
         </summary>\
-        <div class="log-action-detail">\
-          <div v-if="summary" class="log-action-summary-text">{{ summary }}</div>\
-          <div v-else-if="desc" class="log-action-result">{{ desc }}</div>\
-          <details v-if="paramEntries.length" class="log-action-params-details">\
-            <summary class="log-action-params-title">参数（{{ paramEntries.length }}）</summary>\
-            <div class="log-action-params">\
-              <div v-for="p in paramEntries" :key="p.key" class="log-action-param-row">\
-                <span class="log-action-param-key">{{ p.key }}</span>\
-                <span class="log-action-param-val">{{ p.value }}</span>\
+        <div v-if="hasExpandableContent" class="activity-detail" :class="{ \'is-subagent\': kind === \'subagent\' }">\
+          <div v-if="kind === \'subagent\' && goal" class="activity-goal">{{ goalText }}</div>\
+          <div v-if="kind === \'thought\'" class="activity-thought">{{ thoughtContent }}<span v-if="isThinkingLive" class="stream-cursor">▍</span></div>\
+          <div v-else-if="kind !== \'subagent\' && resultText" class="activity-result">{{ resultText }}</div>\
+          <details v-if="paramEntries.length" class="activity-params-details">\
+            <summary class="activity-params-toggle">参数（{{ paramEntries.length }}）</summary>\
+            <div class="activity-params">\
+              <div v-for="p in paramEntries" :key="p.key" class="activity-param-row">\
+                <span class="activity-param-key">{{ p.key }}</span>\
+                <span class="activity-param-val">{{ p.value }}</span>\
               </div>\
             </div>\
           </details>\
+          <div v-if="kind === \'subagent\'" class="subagent-events"><slot /></div>\
+          <slot v-else />\
         </div>\
       </details>'
   };
@@ -196,8 +270,7 @@
   };
 
   window.ChatBlocks = {
-    ThoughtBlock: ThoughtBlock,
-    ToolCard: ToolCard,
+    ActivityItem: ActivityItem,
     ReplyBlock: ReplyBlock,
     UserMessage: UserMessage,
     StatusLine: StatusLine,

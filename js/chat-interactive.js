@@ -1,53 +1,107 @@
 /**
  * 对话交互块组件集合
- * 包含：SubagentCard / ClarifyCard / ApprovalCard
- * 依赖：window.ChatBlocks (ThoughtBlock / ToolCard / ReplyBlock)
+ * 包含：SubagentCard（委派事件容器） / ClarifyCard / ApprovalCard
+ * 依赖：window.ChatBlocks.ActivityItem
  * 加载顺序：必须在 chat-blocks.js 之后
  */
 (function () {
-  var Blocks = window.ChatBlocks || {};
-  var ThoughtBlock = Blocks.ThoughtBlock;
-  var ToolCard = Blocks.ToolCard;
-  var ReplyBlock = Blocks.ReplyBlock;
+  var ActivityItem = (window.ChatBlocks || {}).ActivityItem;
+  var ReplyBlock = (window.ChatBlocks || {}).ReplyBlock;
+
+  function normalizeSubagentEvent(ev) {
+    if (!ev) return ev;
+    var item = Object.assign({}, ev);
+    if (item.type === 'thought') {
+      if (item.content) {
+        item.content = String(item.content)
+          .replace(/^Thought:\s*/i, '')
+          .replace(/^子智能体[：:]\s*/, '');
+      }
+      var n = Number(item.duration);
+      item.duration = isFinite(n) ? n : 0.8;
+    }
+    return item;
+  }
+
+  function toolStatus(ev) {
+    if (ev.isError) return 'error';
+    if (ev.progress != null && ev.progress !== '') return 'running';
+    return 'success';
+  }
 
   /**
-   * 子代理卡片（单层嵌套，不递归）
-   * props: { subagentName, goal, events }
-   * - events: 子代理内部事件数组，元素结构同主消息
-   *   { id, type: 'thought'|'action'|'chat', content, toolName, params, summary, duration, isError }
+   * 委派子智能体（外层容器）
+   * 内部用 ActivityItem / ReplyBlock 渲染，与主对话流一致
+   *
+   * props:
+   *   - subagentName: 子智能体名
+   *   - goal: 目标描述
+   *   - status: 委派状态（success / running / error）
+   *   - duration: 耗时（秒）
+   *   - summary: 子智能体产出摘要
+   *   - events: 子智能体内部事件数组
+   *     元素结构：{ id, type: 'thought'|'action'|'chat', content, toolName, params, summary, duration, isError }
+   *   - renderMarkdown: 与主对话流相同的 markdown 渲染函数
    */
   var SubagentCard = {
     props: {
       subagentName: { type: String, default: '' },
       goal: { type: String, default: '' },
-      events: { type: Array, default: function () { return []; } }
+      status: { type: String, default: 'success' },
+      duration: { type: Number, default: null },
+      summary: { type: String, default: '' },
+      events: { type: Array, default: function () { return []; } },
+      renderMarkdown: { type: Function, default: null }
     },
     components: {
-      ThoughtBlock: ThoughtBlock,
-      ToolCard: ToolCard,
+      ActivityItem: ActivityItem,
       ReplyBlock: ReplyBlock
     },
+    computed: {
+      outerSummary: function () {
+        return this.events && this.events.length ? '' : this.summary;
+      },
+      normalizedEvents: function () {
+        return (this.events || []).map(normalizeSubagentEvent);
+      }
+    },
+    methods: {
+      eventToolStatus: toolStatus
+    },
     template: '\
-      <div class="subagent-card">\
-        <div class="subagent-summary">\
-          <span class="subagent-icon">🤖</span>\
-          <span class="subagent-body">\
-            <span class="subagent-title">子代理</span>\
-            <span class="subagent-name" v-if="subagentName">[{{ subagentName }}]</span>\
-            <span class="subagent-goal" v-if="goal">{{ goal }}</span>\
-          </span>\
-        </div>\
-        <details v-if="events && events.length" class="subagent-events-details">\
-          <summary class="subagent-events-toggle">查看活动详情（{{ events.length }}）</summary>\
-          <div class="subagent-events">\
-            <template v-for="ev in events" :key="ev.id">\
-              <thought-block v-if="ev.type === \'thought\'" :content="ev.content" />\
-              <tool-card v-else-if="ev.type === \'action\'" :tool-name="ev.toolName" :content="ev.content" :params="ev.params" :summary="ev.summary" :duration="ev.duration" :is-error="ev.isError" />\
-              <reply-block v-else-if="ev.type === \'chat\'" :content="ev.content" />\
-            </template>\
-          </div>\
-        </details>\
-      </div>'
+      <activity-item\
+        kind="subagent"\
+        :status="status"\
+        :title="subagentName"\
+        :duration="duration"\
+        :goal="goal"\
+        :summary="outerSummary"\
+        :open="false">\
+        <template v-for="ev in normalizedEvents" :key="ev.id">\
+          <activity-item\
+            v-if="ev.type === \'thought\'"\
+            kind="thought"\
+            :status="ev.live ? \'thinking\' : \'success\'"\
+            :content="ev.content"\
+            :duration="ev.duration"\
+            :live="!!ev.live" />\
+          <activity-item\
+            v-else-if="ev.type === \'action\'"\
+            kind="tool"\
+            :status="eventToolStatus(ev)"\
+            :title="ev.toolName"\
+            :summary="ev.summary"\
+            :result="ev.result"\
+            :params="ev.params"\
+            :content="ev.content"\
+            :live="!!ev.live" />\
+          <reply-block\
+            v-else-if="ev.type === \'chat\'"\
+            :content="ev.content"\
+            :render-markdown="renderMarkdown"\
+            :live="!!ev.live" />\
+        </template>\
+      </activity-item>'
   };
 
   /**
@@ -144,8 +198,128 @@
       </div>'
   };
 
+  /**
+   * HITL 卡片（合并 ClarifyCard + ApprovalCard）
+   * 用于两类场景：
+   *   - pending：在输入区上方的固定区显示
+   *   - resolved：作为历史消息沉到对话流
+   *
+   * props:
+   *   variant: 'clarify' | 'approval'
+   *   data:    { question?, choices?, answer?, command?, description?, allowPermanent?, choice? }
+   *   mode:    'pending' | 'resolved'  （默认 'pending'）
+   *
+   * emits:
+   *   answer  ({ requestId, choice })           // variant === 'clarify'
+   *   resolve ({ requestId, choice, permanent }) // variant === 'approval'
+   */
+  var HitlCard = {
+    props: {
+      variant: { type: String, required: true },
+      data:    { type: Object, required: true },
+      mode:    { type: String, default: 'pending' }
+    },
+    emits: ['answer', 'resolve'],
+    computed: {
+      isPending:  function () { return this.mode === 'pending'; },
+      isResolved: function () { return this.mode === 'resolved'; },
+      isDanger:   function () { return this.variant === 'approval'; },
+      isClarify:  function () { return this.variant === 'clarify'; },
+
+      requestId: function () { return this.data.requestId || ''; },
+      question:  function () { return this.data.question || ''; },
+      choices:   function () { return this.data.choices || []; },
+      command:   function () { return this.data.command || ''; },
+      description: function () { return this.data.description || ''; },
+      allowPermanent: function () { return !!this.data.allowPermanent; },
+
+      headerTitle: function () {
+        if (this.isClarify) return this.isPending ? '专家需要澄清' : '澄清提问';
+        return this.isPending ? '危险操作待审批' : '操作审批';
+      },
+      headerBadge: function () {
+        if (!this.isPending) return '';
+        return this.isClarify ? '等待选择' : '等待确认';
+      },
+      headerIcon: function () {
+        if (this.isClarify) return '❓';
+        return this.isPending ? '⚠' : '🔐';
+      },
+
+      resolvedAnswer: function () {
+        return this.data.answer != null ? this.data.answer : '';
+      },
+      resolvedChoiceLabel: function () {
+        var c = this.data.choice;
+        if (c === 'allow') return '已允许';
+        if (c === 'allow_permanent') return '已允许并记住';
+        if (c === 'deny') return '已拒绝';
+        return c || '';
+      }
+    },
+    methods: {
+      onSelectChoice: function (choice) {
+        if (!this.isPending) return;
+        this.$emit('answer', { requestId: this.requestId, choice: choice });
+      },
+      onResolve: function (choice) {
+        if (!this.isPending) return;
+        var permanent = choice === 'allow_permanent';
+        this.$emit('resolve', { requestId: this.requestId, choice: choice, permanent: permanent });
+      }
+    },
+    template: '\
+      <div class="hitl-card"\
+           :class="[\'variant-\' + variant, \'mode-\' + mode, isDanger ? \'is-danger\' : \'\']">\
+        <div class="hitl-card-header">\
+          <span class="hitl-card-icon">{{ headerIcon }}</span>\
+          <span class="hitl-card-title">{{ headerTitle }}</span>\
+          <span v-if="isPending && headerBadge" class="hitl-card-badge">{{ headerBadge }}</span>\
+          <span v-else-if="isPending" class="hitl-card-pulse"></span>\
+        </div>\
+        <div class="hitl-card-body">\
+          <template v-if="isClarify">\
+            <div v-if="question" class="hitl-card-question">{{ question }}</div>\
+            <div v-if="isPending && choices.length" class="hitl-card-choices">\
+              <button v-for="c in choices" :key="c"\
+                      type="button"\
+                      class="hitl-card-choice-btn"\
+                      @click="onSelectChoice(c)">{{ c }}</button>\
+            </div>\
+            <div v-else-if="isPending && !choices.length" class="hitl-card-hint">\
+              请在下方输入框回复（回答后输入区将自动启用）\
+            </div>\
+            <div v-else-if="isResolved" class="hitl-card-resolved">\
+              <span class="hitl-card-resolved-label">已选择：</span>\
+              <span class="hitl-card-resolved-value">{{ resolvedAnswer }}</span>\
+            </div>\
+          </template>\
+          <template v-else>\
+            <div v-if="command" class="hitl-card-command">\
+              <span class="hitl-card-command-label">即将执行</span>\
+              <code class="hitl-card-command-code">{{ command }}</code>\
+            </div>\
+            <div v-if="description" class="hitl-card-desc">{{ description }}</div>\
+            <div v-if="isPending" class="hitl-card-actions">\
+              <button type="button" class="hitl-card-btn hitl-card-btn-allow"\
+                      @click="onResolve(\'allow\')">允许</button>\
+              <button v-if="allowPermanent"\
+                      type="button"\
+                      class="hitl-card-btn hitl-card-btn-allow-perm"\
+                      @click="onResolve(\'allow_permanent\')">允许并记住</button>\
+              <button type="button" class="hitl-card-btn hitl-card-btn-deny"\
+                      @click="onResolve(\'deny\')">拒绝</button>\
+            </div>\
+            <div v-else class="hitl-card-resolved"\
+                 :class="\'resolved-\' + data.choice">{{ resolvedChoiceLabel }}</div>\
+          </template>\
+        </div>\
+      </div>'
+  };
+
   window.ChatInteractive = {
     SubagentCard: SubagentCard,
+    HitlCard: HitlCard,
     ClarifyCard: ClarifyCard,
     ApprovalCard: ApprovalCard
   };

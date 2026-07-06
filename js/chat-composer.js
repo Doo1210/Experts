@@ -55,7 +55,7 @@
         return this.modelOverride || 'gpt-4o';
       },
       cwdDisplay: function () {
-        return this.sessionCwd || '—';
+        return this.sessionCwd || '工作空间';
       },
       tokenOverLimit: function () {
         return this.tokenEstimate > 4000;

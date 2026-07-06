@@ -14,13 +14,13 @@
       ChatTaskList: window.ChatTaskList,
       ChatWorkspace: window.ChatWorkspace,
       ChatComposer: window.ChatComposer,
-      ThoughtBlock: ChatBlocks.ThoughtBlock,
-      ToolCard: ChatBlocks.ToolCard,
+      ActivityItem: ChatBlocks.ActivityItem,
       ReplyBlock: ChatBlocks.ReplyBlock,
       UserMessage: ChatBlocks.UserMessage,
       StatusLine: ChatBlocks.StatusLine,
       ErrorRow: ChatBlocks.ErrorRow,
       SubagentCard: ChatInteractive.SubagentCard,
+      HitlCard: ChatInteractive.HitlCard,
       ClarifyCard: ChatInteractive.ClarifyCard,
       ApprovalCard: ChatInteractive.ApprovalCard
     },
@@ -64,6 +64,31 @@
       var expertStatusLabel = Vue.computed(function () {
         var map = { idle: '空闲', running: '执行中', hitl: '等待回应', error: '出错' };
         return map[expertStatus.value] || '空闲';
+      });
+      /**
+       * 当前任务的"等待回应"卡片
+       * 规则：
+       *  - 倒序找最近一个 pending HITL（clarify/approval 任一）
+       *  - 同时返回 pending 总数，用于"还有 N 个"提示
+       */
+      var activeHitl = Vue.computed(function () {
+        var list = messages.value || [];
+        var pending = [];
+        for (var i = 0; i < list.length; i++) {
+          var m = list[i];
+          if (m.type === 'clarify' && m.answer == null) {
+            pending.push({ kind: 'clarify', data: m });
+          } else if (m.type === 'approval' && m.choice == null) {
+            pending.push({ kind: 'approval', data: m });
+          }
+        }
+        if (!pending.length) return { current: null, count: 0, overflow: 0 };
+        var last = pending[pending.length - 1];
+        return {
+          current: { kind: last.kind, data: last.data },
+          count: pending.length,
+          overflow: pending.length - 1
+        };
       });
       var sessionModelOverride = Vue.ref('');
       var tokenEstimate = Vue.computed(function () {
@@ -141,9 +166,7 @@
           return '';
         },
         set: function (cwd) {
-          if (!cwd || !currentTaskId.value) return;
-          store.updateTask(currentTaskId.value, { cwd: cwd });
-          refreshTasks();
+          applyTaskCwd(cwd);
         }
       });
       var workspaceOpen = Vue.ref(false);
@@ -168,9 +191,9 @@
       }
 
       function handleSetCwd(cwd) {
-        if (!cwd) return;
+        if (cwd === undefined || cwd === null) return;
         sessionCwd.value = cwd;
-        ElementPlus.ElMessage.success('工作目录已切换为 ' + cwd);
+        ElementPlus.ElMessage.success('工作目录已切换为 ' + (cwd || '工作空间'));
       }
 
       function handlePreviewFile(file) {
@@ -223,6 +246,8 @@
         var msg = list.find(function (m) { return m.requestId === payload.requestId; });
         if (!msg) return;
         msg.answer = payload.choice;
+        // 触发 chatGroups / activeHitl 重算（数组项 property 变更不会自动触发 ref 重新计算）
+        messages.value = messages.value.slice();
         var cap = store.getExpertDemoCapabilities ? store.getExpertDemoCapabilities(expert.value.id) : { tool: '数据查询' };
         store.addMessage(currentTaskId.value, {
           role: 'expert', type: 'action', expertId: expert.value.id,
@@ -233,14 +258,13 @@
           content: '[' + cap.tool + '] 执行完成 (1.5s)'
         });
         store.addMessage(currentTaskId.value, {
-          role: 'expert', type: 'approval', expertId: expert.value.id,
-          requestId: 'approval-' + Date.now(),
-          command: 'export_report --format=xlsx',
-          description: '将分析结果导出为 Excel 并写入工作空间',
-          allowPermanent: true,
-          choice: null
+          role: 'expert', type: 'chat', expertId: expert.value.id,
+          content: '已按「' + payload.choice + '」维度完成分析。\n\n（模拟回复 · 对接引擎后将替换为真实推理结果）'
         });
+        store.mockTaskArtifact(expert.value, currentTaskId.value, payload.choice);
+        store.updateTask(currentTaskId.value, { status: 'pending' });
         loadMessages();
+        refreshTasks();
         scrollChatToBottom();
       }
 
@@ -250,6 +274,8 @@
         var msg = list.find(function (m) { return m.requestId === payload.requestId; });
         if (!msg) return;
         msg.choice = payload.choice;
+        // 触发 chatGroups / activeHitl 重算
+        messages.value = messages.value.slice();
         if (payload.choice === 'allow' || payload.choice === 'allow_permanent') {
           var reply = '已完成操作，结果已写入工作空间。\n\n（模拟回复 · 对接引擎后将替换为真实结果）';
           store.addMessage(currentTaskId.value, {
@@ -304,6 +330,13 @@
         return text;
       }
 
+      /** 对话流仅展示 process/goal 进度提示（PRD 7.2.3），model/cwd/委派说明等不在此展示 */
+      function shouldShowConversationStatus(item) {
+        if (!item || item.type !== 'status') return false;
+        var kind = item.statusKind || '';
+        return kind === 'process' || kind === 'goal';
+      }
+
       function upsertLiveStep(toolName, patch) {
         var key = String(toolName || 'tool');
         var list = liveSteps.value.slice();
@@ -352,6 +385,21 @@
         }
         if (idx >= 0) {
           list[idx] = Object.assign({}, list[idx], { title: title, titleSet: true });
+          tasks.value = list;
+        }
+      }
+
+      function applyTaskCwd(cwd) {
+        if (!currentTaskId.value) return;
+        if (cwd === undefined || cwd === null) return;
+        store.updateTask(currentTaskId.value, { cwd: cwd });
+        var list = tasks.value.slice();
+        var idx = -1;
+        for (var i = 0; i < list.length; i++) {
+          if (list[i].id === currentTaskId.value) { idx = i; break; }
+        }
+        if (idx >= 0) {
+          list[idx] = Object.assign({}, list[idx], { cwd: cwd });
           tasks.value = list;
         }
       }
@@ -588,6 +636,7 @@
         var expertBuffer = { id: '', items: [] };
         messages.value.forEach(function (m) {
           if (isExpertMessage(m)) {
+            if (m.type === 'status' && !shouldShowConversationStatus(m)) return;
             if (!expertBuffer.id) expertBuffer.id = m.id || ('expert-turn-' + groups.length);
             expertBuffer.items.push(m);
             return;
@@ -597,6 +646,14 @@
         });
         pushExpertTurn(groups, expertBuffer);
         return groups;
+      });
+
+      /** 流式进行中内容是否续接在最后一个专家回合内（避免重复头像/名称） */
+      var liveAppendsToLastExpertTurn = Vue.computed(function () {
+        if (!streaming.value) return false;
+        var groups = chatGroups.value;
+        if (!groups.length) return false;
+        return groups[groups.length - 1].kind === 'expert-turn';
       });
 
       var filteredTasks = Vue.computed(function () {
@@ -775,24 +832,130 @@
           if (!store.isDevMock || !store.isDevMock()) return;
         }
         setTimeout(function () {
-          var wfResult = store.mockExpertWorkflowSteps(expert.value, taskId, text);
-          var wfKind = (wfResult && wfResult.kind) || 'normal';
-          loadMessages();
-          if (wfKind === 'hitl') {
-            sending.value = false;
-            return;
-          }
-          setTimeout(function () {
-            var reply = store.mockExpertReply(expert.value, text);
-            store.addMessage(taskId, {
-              role: 'expert', type: 'chat', expertId: expert.value.id, content: reply
-            });
-            store.mockTaskArtifact(expert.value, taskId, text);
-            store.updateTask(taskId, { status: 'pending' });
-            loadMessages();
-            refreshTasks();
-            sending.value = false;
-          }, 700);
+          var pendingTimers = [];
+          var currentTextTarget = 'thought';
+          // 阶段化剧本：把每一步映射到 liveThought / liveSteps，最终落库
+          store.playMockScript(expert.value, taskId, text, function (step) {
+            if (step.type === 'thought.start') {
+              liveThought.value = '';
+              liveSteps.value = [];
+              streaming.value = true;
+              currentTextTarget = 'thought';
+            } else if (step.type === 'text.delta') {
+              // 流式文本：思考时写入 liveThought；其他阶段（工具进行中、最终回复）分别处理
+              if (currentTextTarget === 'thought') liveThought.value += step.text;
+              else if (currentTextTarget === 'reply') liveReply.value += step.text;
+            } else if (step.type === 'thought.commit') {
+              var tContent = liveThought.value;
+              var tDuration = step.duration || 0;
+              liveThought.value = '';
+              currentTextTarget = null;
+              store.addMessage(taskId, {
+                role: 'expert', type: 'thought', expertId: expert.value.id,
+                content: tContent, duration: tDuration
+              });
+              loadMessages();
+              scrollChatToBottom();
+            } else if (step.type === 'tool.start') {
+              var tname = step.toolName || 'tool';
+              var idx = liveSteps.value.findIndex(function (s) { return s.key === tname; });
+              var newStep = { id: 'live-' + tname, key: tname, type: 'action', toolName: tname, content: '准备调用 ' + tname, progress: '准备中' };
+              if (idx >= 0) liveSteps.value[idx] = newStep; else liveSteps.value.push(newStep);
+              Vue.nextTick(function () { scrollChatToBottom(); });
+            } else if (step.type === 'tool.running') {
+              var rname = step.toolName || 'tool';
+              var ridx = liveSteps.value.findIndex(function (s) { return s.key === rname; });
+              if (ridx >= 0) {
+                var list = liveSteps.value.slice();
+                list[ridx] = Object.assign({}, list[ridx], { content: step.progress || '执行中...', progress: step.progress || '执行中' });
+                liveSteps.value = list;
+              }
+              Vue.nextTick(function () { scrollChatToBottom(); });
+            } else if (step.type === 'tool.commit') {
+              var cname = step.toolName || 'tool';
+              var summary = step.summary || '';
+              var isErr = !!step.isError;
+              // 先把 liveSteps 里对应卡片清掉，再 addMessage 落库
+              liveSteps.value = liveSteps.value.filter(function (s) { return s.key !== cname; });
+              store.addMessage(taskId, {
+                role: 'expert', type: 'action', expertId: expert.value.id,
+                toolName: cname,
+                params: step.params || null,
+                summary: summary,
+                duration: step.duration || 0,
+                isError: isErr,
+                content: '[' + cname + '] ' + (isErr ? '执行失败' : '执行完成') + (step.duration ? ' (' + step.duration.toFixed(1) + 's)' : '')
+              });
+              loadMessages();
+              Vue.nextTick(function () { scrollChatToBottom(); });
+            } else if (step.type === 'subagent.commit') {
+              store.addMessage(taskId, {
+                role: 'expert', type: 'subagent', expertId: expert.value.id,
+                subagentName: step.subagentName,
+                goal: step.goal,
+                subagentStatus: 'success',
+                subagentDuration: step.duration,
+                subagentSummary: step.summary,
+                subagentEvents: step.events || []
+              });
+              loadMessages();
+              Vue.nextTick(function () { scrollChatToBottom(); });
+            } else if (step.type === 'clarify.commit') {
+              store.addMessage(taskId, {
+                role: 'expert', type: 'clarify', expertId: expert.value.id,
+                requestId: step.requestId,
+                question: step.question,
+                choices: step.choices,
+                answer: null
+              });
+              loadMessages();
+              Vue.nextTick(function () { scrollChatToBottom(); });
+            } else if (step.type === 'approval.commit') {
+              store.addMessage(taskId, {
+                role: 'expert', type: 'approval', expertId: expert.value.id,
+                requestId: step.requestId,
+                command: step.command,
+                description: step.description,
+                allowPermanent: !!step.allowPermanent,
+                choice: null
+              });
+              loadMessages();
+              Vue.nextTick(function () { scrollChatToBottom(); });
+            } else if (step.type === 'error.commit') {
+              store.addMessage(taskId, {
+                role: 'expert', type: 'error', expertId: expert.value.id,
+                content: step.content
+              });
+              loadMessages();
+              Vue.nextTick(function () { scrollChatToBottom(); });
+            } else if (step.type === 'reply.start') {
+              // 切到回复流式：之后的 text.delta 写入 liveReply
+              liveReply.value = '';
+              currentTextTarget = 'reply';
+            } else if (step.type === 'reply.commit') {
+              var replyContent = step.content;
+              store.addMessage(taskId, {
+                role: 'expert', type: 'chat', expertId: expert.value.id, content: replyContent
+              });
+              store.mockTaskArtifact(expert.value, taskId, text);
+              store.updateTask(taskId, { status: 'pending' });
+              liveReply.value = '';
+              currentTextTarget = null;
+              streaming.value = false;
+              loadMessages();
+              refreshTasks();
+            } else if (step.type === 'done') {
+              liveThought.value = '';
+              liveReply.value = '';
+              liveSteps.value = [];
+              currentTextTarget = null;
+              streaming.value = false;
+              sending.value = false;
+              scrollChatToBottom(true);
+              pendingTimers.forEach(function (t) { clearTimeout(t); });
+              pendingTimers = [];
+            }
+          });
         }, 500);
       }
 
@@ -835,9 +998,9 @@
           workspaceOpen.value = true;
           return;
         }
-        if (!cwd) return;
+        if (cwd === undefined || cwd === null) return;
         sessionCwd.value = cwd;
-        ElementPlus.ElMessage.success('工作目录已切换为 ' + cwd);
+        ElementPlus.ElMessage.success('工作目录已切换为 ' + (cwd || '工作空间'));
       }
 
       function editTask(task, ev) {
@@ -929,6 +1092,7 @@
         expert: expert, tasks: tasks,
         remoteError: remoteError,
         currentTaskId: currentTaskId, messages: messages, showExpertIntro: showExpertIntro, chatGroups: chatGroups,
+        liveAppendsToLastExpertTurn: liveAppendsToLastExpertTurn,
         expertTags: expertTags,
         tagColors: catalog.TAG_COLORS,
         showExpertPreviewDialog: showExpertPreviewDialog, previewStats: previewStats,
@@ -938,6 +1102,7 @@
         // 阶段2 输入区状态
         expertStatus: expertStatus,
         expertStatusLabel: expertStatusLabel,
+        activeHitl: activeHitl,
         sessionModelOverride: sessionModelOverride,
         sessionCwd: sessionCwd,
         tokenEstimate: tokenEstimate,
@@ -948,6 +1113,7 @@
         handleSelectCwd: handleSelectCwd,
         handleInterrupt: handleInterrupt,
         statusContent: statusContent,
+        shouldShowConversationStatus: shouldShowConversationStatus,
         chatBox: chatBox,
         userScrolledUp: userScrolledUp, hasNewMessage: hasNewMessage,
         onChatScroll: onChatScroll, backToLatest: backToLatest,
@@ -1002,7 +1168,7 @@
               <div class="chat-empty-tip">在下方输入任务指令并发送，将自动新建任务并开始对话</div>\
             </div>\
             <template v-else>\
-              <template v-for="group in chatGroups" :key="group.id">\
+              <template v-for="(group, groupIndex) in chatGroups" :key="group.id">\
                 <div v-if="group.kind === \'expert-turn\'" class="msg-row expert">\
                   <div class="msg-col">\
                     <div class="msg-header">\
@@ -1010,29 +1176,36 @@
                       <span class="msg-sender">{{ expert.name }}</span>\
                     </div>\
                     <template v-for="item in group.items" :key="item.id">\
-                      <thought-block v-if="item.type === \'thought\'" :content="item.content" />\
-                      <tool-card v-else-if="item.type === \'action\'" :tool-name="item.toolName" :content="item.content" :params="item.params" :summary="item.summary" :duration="item.duration" :progress="item.progress" :is-error="item.isError" />\
-                      <subagent-card v-else-if="item.type === \'subagent\'" :subagent-name="item.subagentName" :goal="item.goal" :events="item.subagentEvents" />\
-                      <clarify-card v-else-if="item.type === \'clarify\'" :request-id="item.requestId" :question="item.question" :choices="item.choices" :answer="item.answer" @answer="handleClarifyAnswer" />\
-                      <approval-card v-else-if="item.type === \'approval\'" :request-id="item.requestId" :command="item.command" :description="item.description" :allow-permanent="item.allowPermanent" :choice="item.choice" @resolve="handleApprovalResolve" />\
-                      <status-line v-else-if="item.type === \'status\'" :kind="item.statusKind" :content="item.content" />\
+                      <activity-item v-if="item.type === \'thought\'" kind="thought" :status="item.live ? \'thinking\' : \'success\'" :content="item.content" :duration="item.duration" :live="!!item.live" />\
+                      <activity-item v-else-if="item.type === \'action\'" kind="tool" :status="item.isError ? \'error\' : (item.progress != null && item.progress !== \'\' ? \'running\' : \'success\')" :title="item.toolName" :summary="item.summary" :result="item.result" :params="item.params" :content="item.content" :duration="item.duration" :live="!!item.live" />\
+                      <subagent-card v-else-if="item.type === \'subagent\'" :subagent-name="item.subagentName" :goal="item.goal" :status="item.subagentStatus || \'success\'" :duration="item.subagentDuration" :summary="item.subagentSummary" :events="item.subagentEvents" :render-markdown="renderMarkdown" />\
+                      <hitl-card v-else-if="item.type === \'clarify\' && item.answer != null" variant="clarify" :data="item" mode="resolved" />\
+                      <hitl-card v-else-if="item.type === \'approval\' && item.choice != null" variant="approval" :data="item" mode="resolved" />\
+                      <status-line v-else-if="shouldShowConversationStatus(item)" :kind="item.statusKind" :content="item.content" />\
                       <error-row v-else-if="item.type === \'error\'" :content="item.content" />\
                       <reply-block v-else :content="item.content" :render-markdown="renderMarkdown" :attachments="item.attachments" />\
+                    </template>\
+                    <template v-if="streaming && liveAppendsToLastExpertTurn && groupIndex === chatGroups.length - 1">\
+                      <activity-item v-if="liveThought" kind="thought" status="thinking" :content="liveThought" :live="true" :open="true" />\
+                      <template v-for="step in liveSteps" :key="step.id">\
+                        <activity-item kind="tool" status="running" :title="step.toolName" :summary="step.content" :live="true" />\
+                      </template>\
+                      <reply-block v-if="liveReply" :content="liveReply" :render-markdown="renderMarkdown" :live="true" />\
                     </template>\
                   </div>\
                 </div>\
                 <user-message v-else :message="group.message" />\
               </template>\
-              <div v-if="streaming" class="stream-live-block">\
+              <div v-if="streaming && !liveAppendsToLastExpertTurn" class="stream-live-block">\
                 <div v-if="liveThought || liveReply || liveSteps.length" class="msg-row expert">\
                   <div class="msg-col">\
                     <div class="msg-header">\
                       <img class="msg-avatar" :src="expert.avatar" :alt="expert.name" />\
                       <span class="msg-sender">{{ expert.name }}</span>\
                     </div>\
-                    <thought-block v-if="liveThought" :content="liveThought" :live="true" :open="true" />\
+                    <activity-item v-if="liveThought" kind="thought" status="thinking" :content="liveThought" :live="true" :open="true" />\
                     <template v-for="step in liveSteps" :key="step.id">\
-                      <tool-card :tool-name="step.toolName" :content="step.content" />\
+                      <activity-item kind="tool" status="running" :title="step.toolName" :summary="step.content" :live="true" />\
                     </template>\
                     <reply-block v-if="liveReply" :content="liveReply" :render-markdown="renderMarkdown" :live="true" />\
                   </div>\
@@ -1048,6 +1221,19 @@
               <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>\
               回到最新\
             </button>\
+          </div>\
+          <div v-if="activeHitl.current"\
+               class="hitl-pin-wrap"\
+               :class="{ \'is-danger\': activeHitl.current.kind === \'approval\' }">\
+            <hitl-card\
+              :variant="activeHitl.current.kind"\
+              :data="activeHitl.current.data"\
+              mode="pending"\
+              @answer="handleClarifyAnswer"\
+              @resolve="handleApprovalResolve" />\
+            <div v-if="activeHitl.overflow > 0" class="hitl-pin-overflow">\
+              还有 {{ activeHitl.overflow }} 个待回应请求已折叠到对话历史中\
+            </div>\
           </div>\
           <chat-composer\
             v-model:input-text="inputText"\

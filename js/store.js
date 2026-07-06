@@ -97,6 +97,82 @@
     };
   }
 
+  /** 给旧版 action 消息补全 summary/params，使其可在 ActivityItem 中展开 */
+  function normalizeLegacyActionMessage(m) {
+    if (!m || m.type !== 'action') return false;
+    if (m.summary || m.result) return false;
+    m.summary = '检索到 3 条相关记录并完成聚合';
+    m.params = m.params || { source: '内部知识库' };
+    m.duration = m.duration || 1.8;
+    return true;
+  }
+
+  /** 子智能体嵌套事件补全（思考项需有 duration 才显示用时） */
+  function normalizeSubagentEvents(events) {
+    if (!Array.isArray(events)) return events;
+    return events.map(function (ev) {
+      if (!ev || ev.type !== 'thought') return ev;
+      var item = Object.assign({}, ev);
+      var n = Number(item.duration);
+      item.duration = isFinite(n) ? n : 0.8;
+      return item;
+    });
+  }
+
+  function normalizeLegacySubagentMessage(m) {
+    if (!m || m.type !== 'subagent' || !Array.isArray(m.subagentEvents)) return false;
+    var changed = false;
+    m.subagentEvents = m.subagentEvents.map(function (ev) {
+      if (!ev || ev.type !== 'thought') return ev;
+      var n = Number(ev.duration);
+      if (isFinite(n)) return ev;
+      changed = true;
+      return Object.assign({}, ev, { duration: 0.8 });
+    });
+    return changed;
+  }
+
+  function normalizeLegacyActionMessages(messagesMap) {
+    if (!messagesMap) return false;
+    var updated = false;
+    Object.keys(messagesMap).forEach(function (key) {
+      var list = messagesMap[key];
+      if (!Array.isArray(list)) return;
+      for (var k = 0; k < list.length; k++) {
+        if (normalizeLegacyActionMessage(list[k])) updated = true;
+      }
+    });
+    return updated;
+  }
+
+  /** 对话流仅保留 process/goal 进度提示，过滤 model/cwd/委派说明等不应出现的 status */
+  function shouldKeepConversationMessage(m) {
+    if (!m) return false;
+    if (m.type === 'skill') return false;
+    if (m.type !== 'status') return true;
+    var kind = m.statusKind || '';
+    return kind === 'process' || kind === 'goal';
+  }
+
+  function sanitizeLegacyConversationMessages(messagesMap) {
+    if (!messagesMap) return false;
+    var updated = false;
+    Object.keys(messagesMap).forEach(function (key) {
+      var list = messagesMap[key];
+      if (!Array.isArray(list)) return;
+      var filtered = list.filter(shouldKeepConversationMessage);
+      if (filtered.length !== list.length) {
+        messagesMap[key] = filtered;
+        updated = true;
+      }
+      for (var k = 0; k < filtered.length; k++) {
+        if (normalizeLegacyActionMessage(filtered[k])) updated = true;
+        if (normalizeLegacySubagentMessage(filtered[k])) updated = true;
+      }
+    });
+    return updated;
+  }
+
   function enrichMessagesWithExpertFlow(messages, expertId) {
     var cap = getExpertDemoCapabilities(expertId);
     var out = [];
@@ -120,8 +196,7 @@
       if (inject) {
         out.push(
           { role: 'expert', type: 'thought', content: 'Thought: 明确问题边界，梳理所需数据来源与分析路径。' },
-          { role: 'expert', type: 'skill', skillName: cap.skill, content: '' },
-          { role: 'expert', type: 'action', toolName: cap.tool, content: '' }
+          { role: 'expert', type: 'action', toolName: cap.tool, params: { source: '内部知识库' }, summary: '检索到 3 条相关记录并完成聚合', duration: 1.8 }
         );
       }
     }
@@ -130,7 +205,7 @@
 
   function taskMessagesHaveRichTypes(msgs) {
     return (msgs || []).some(function (m) {
-      return m.type === 'thought' || m.type === 'skill' || m.type === 'action';
+      return m.type === 'thought' || m.type === 'action';
     });
   }
 
@@ -156,7 +231,10 @@
         isError: m.isError || false,
         subagentName: m.subagentName || null,
         goal: m.goal || null,
-        subagentEvents: m.subagentEvents || null,
+        subagentStatus: m.subagentStatus || null,
+        subagentDuration: m.subagentDuration != null ? m.subagentDuration : null,
+        subagentSummary: m.subagentSummary || null,
+        subagentEvents: normalizeSubagentEvents(m.subagentEvents) || null,
         requestId: m.requestId || null,
         question: m.question || null,
         choices: m.choices || null,
@@ -272,7 +350,9 @@
     return false;
   }
 
-  function migrateExpertDialogueMessages() {
+  function migrateExpertDialogueMessages(options) {
+    options = options || {};
+    var force = !!options.force;
     var updated = false;
     state.experts.forEach(function (e) {
       getDemoDialogueTaskBundle(e.id).forEach(function (def) {
@@ -284,7 +364,7 @@
         var expected = def.messages || [];
         var current = state.messages[task.id] || [];
         var baseIso = task.createdAt || resolveDemoTaskCreatedAt(def);
-        if (shouldSyncDemoMessages(task, def, current, expected)) {
+        if (force || shouldSyncDemoMessages(task, def, current, expected)) {
           var demoMessages = buildDemoMessages(def, baseIso, e.id);
           state.messages[task.id] = demoMessages;
           task.updatedAt = demoMessages[demoMessages.length - 1].createdAt;
@@ -331,7 +411,12 @@
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
       if (!raw) return defaultState();
-      return { ...defaultState(), ...JSON.parse(raw) };
+      var parsed = { ...defaultState(), ...JSON.parse(raw) };
+      // 迁移：清理不应出现在对话流中的 status/skill + 给空 action 补结果
+      if (parsed.messages) {
+        sanitizeLegacyConversationMessages(parsed.messages);
+      }
+      return parsed;
     } catch {
       return defaultState();
     }
@@ -1441,7 +1526,7 @@
     if (state.demoSyncVersion === DEMO_DATA_VERSION) return;
     migrateProjectDemoMessages();
     migrateExpertDialogueTasks();
-    migrateExpertDialogueMessages();
+    migrateExpertDialogueMessages({ force: true });
     state.demoSyncVersion = DEMO_DATA_VERSION;
     persist();
   }
@@ -1461,6 +1546,8 @@
         seedIfEmpty();
       }
       migrateExpertRoleNames();
+      if (sanitizeLegacyConversationMessages(state.messages)) persist();
+      else if (normalizeLegacyActionMessages(state.messages)) persist();
       if (DEV_MOCK) {
         migrateSeedExpertProfiles();
       }
@@ -2124,7 +2211,10 @@
     },
 
     getMessages: function (taskId) {
-      return state.messages[taskId] || [];
+      return (state.messages[taskId] || []).filter(function (m) {
+        // 迁移：过滤掉旧版本残留的 skill 类消息（PRD 2.5.6 不做技能卡片）
+        return m.type !== 'skill';
+      });
     },
     fetchTaskMessagesRemote: async function (expertId, taskId) {
       if (DEV_MOCK || !window.SidecarApi || !window.SidecarApi.listMessages) return null;
@@ -2144,7 +2234,7 @@
           duration: m.duration || null,
           progress: m.progress || null,
           isError: m.isError || false,
-          // 子代理相关
+          // 子智能体相关
           subagentName: m.subagentName || null,
           goal: m.goal || null,
           subagentEvents: m.subagentEvents || null,
@@ -2160,8 +2250,6 @@
           choice: m.choice || null,
           // 状态/进度行
           statusKind: m.statusKind || null,
-          // 兼容旧字段
-          skillName: m.skillName || null,
           createdAt: m.createdAt
         };
       });
@@ -2181,10 +2269,13 @@
         duration: msg.duration || null,
         progress: msg.progress || null,
         isError: msg.isError || false,
-        // 子代理相关（subagent.spawn_requested / start / complete）
+        // 子智能体相关（subagent.spawn_requested / start / complete）
         subagentName: msg.subagentName || null,
         goal: msg.goal || null,
-        subagentEvents: msg.subagentEvents || null,
+        subagentStatus: msg.subagentStatus || null,
+        subagentDuration: msg.subagentDuration != null ? msg.subagentDuration : null,
+        subagentSummary: msg.subagentSummary || null,
+        subagentEvents: normalizeSubagentEvents(msg.subagentEvents) || null,
         // 澄清提问相关（clarify.request / respond）
         requestId: msg.requestId || null,
         question: msg.question || null,
@@ -2197,8 +2288,6 @@
         choice: msg.choice || null,
         // 状态/进度行（status.update kind=process/goal）
         statusKind: msg.statusKind || null,
-        // 兼容旧字段（skill.* 将在阶段0 T0.2 移除使用）
-        skillName: msg.skillName || null,
         attachments: msg.attachments || null,
         createdAt: nowIso()
       };
@@ -3019,88 +3108,166 @@
       return a;
     },
 
-    mockExpertWorkflowSteps: function (expert, taskId, userText) {
-      var cap = getExpertDemoCapabilities(expert.id);
-      var text = String(userText || '');
-      var kind = 'normal';
-
-      if (/错误|失败|报错|异常/.test(text)) kind = 'error';
-      else if (/子代理|复杂|委派|subagent/i.test(text)) kind = 'subagent';
-      else if (/确认|审批|澄清|clarify|approval/i.test(text)) kind = 'hitl';
-
-      this.addMessage(taskId, {
-        role: 'expert', type: 'thought', expertId: expert.id,
-        content: 'Thought: 理解用户需求后，先确认关键假设与所需数据来源。'
-      });
-
-      if (kind === 'error') {
-        this.addMessage(taskId, {
-          role: 'expert', type: 'status', expertId: expert.id,
-          statusKind: 'model', content: '切换至 gpt-4o 重试'
-        });
-        this.addMessage(taskId, {
-          role: 'expert', type: 'action', expertId: expert.id,
-          toolName: cap.tool,
-          params: { query: text.slice(0, 30), source: '内部知识库' },
-          summary: '连接数据源超时（30s）',
-          duration: 30.0,
-          isError: true,
-          content: '[' + cap.tool + '] 执行失败 (30.0s)'
-        });
-        this.addMessage(taskId, {
-          role: 'expert', type: 'error', expertId: expert.id,
-          content: '工具执行失败：连接数据源超时，已重试 2 次。'
-        });
-      } else if (kind === 'subagent') {
-        this.addMessage(taskId, {
-          role: 'expert', type: 'status', expertId: expert.id,
-          statusKind: 'info', content: '委派子代理处理复杂子任务'
-        });
-        this.addMessage(taskId, {
-          role: 'expert', type: 'subagent', expertId: expert.id,
-          subagentName: 'research-sub-agent',
-          goal: '收集并整理「' + text.slice(0, 20) + '」相关资料',
-          subagentEvents: [
-            { id: 'sa-1', type: 'thought', content: '子代理：定位数据源并提取关键信息。' },
-            { id: 'sa-2', type: 'action', toolName: 'web_search', params: { q: text.slice(0, 20) }, summary: '检索到 5 条相关结果', duration: 2.3, content: '[web_search] 执行完成 (2.3s)' },
-            { id: 'sa-3', type: 'chat', content: '子代理已完成资料收集，共 5 条有效结果。' }
-          ]
-        });
-      } else if (kind === 'hitl') {
-        this.addMessage(taskId, {
-          role: 'expert', type: 'clarify', expertId: expert.id,
-          requestId: 'clarify-' + Date.now(),
-          question: '请确认您希望分析的维度：',
-          choices: ['按时间趋势', '按地域分布', '按产品类别'],
-          answer: null
-        });
-      } else {
-        this.addMessage(taskId, {
-          role: 'expert', type: 'status', expertId: expert.id,
-          statusKind: 'model', content: '使用 gpt-4o 模型推理'
-        });
-        this.addMessage(taskId, {
-          role: 'expert', type: 'action', expertId: expert.id,
-          toolName: cap.tool,
-          params: { query: text.slice(0, 30), source: '内部知识库' },
-          summary: '检索到 3 条相关记录并完成聚合',
-          duration: 1.8,
-          content: '[' + cap.tool + '] 执行完成 (1.8s)'
-        });
-      }
-
-      return { kind: kind };
+    resolveMockScript: function (text) {
+      var t = String(text || '');
+      if (/错误|失败|报错|异常/.test(t)) return 'error';
+      if (/思考|think|推理|思路/.test(t)) return 'thought';
+      if (/调用工具|工具|查询|检索|tool/.test(t)) return 'tool';
+      if (/子智能体|复杂|委派|subagent/i.test(t)) return 'subagent';
+      if (/澄清|clarify/.test(t)) return 'clarify';
+      if (/审批|确认|approval/.test(t)) return 'approval';
+      return 'normal';
     },
 
-    mockExpertReply: function (expert, userText) {
-      var snippets = [
-        '基于您描述的情况，我建议先从数据验证入手。',
-        '我已结合「' + (expert.expertise[0] || '专业') + '」经验梳理思路，请确认以下假设是否成立。',
-        '初步方案已整理，如需我可调用绑定工具进一步分析。',
-        '收到。我会整理相关资料，完成后同步给您。'
-      ];
-      var base = snippets[Math.floor(Math.random() * snippets.length)];
-      return base + '\n\n（模拟回复 · 对接引擎后将替换为真实推理结果）\n\n针对：「' + userText.slice(0, 50) + (userText.length > 50 ? '…' : '') + '」';
+    playMockScript: function (expert, taskId, userText, onStep) {
+      var cap = getExpertDemoCapabilities(expert.id);
+      var kind = this.resolveMockScript(userText);
+      var t = String(userText || '');
+      var shortT = t.slice(0, 20);
+      var steps = [];
+      var tool = cap.tool || 'kb_search';
+
+      function later(fn, ms) {
+        if (typeof window === 'undefined') return;
+        window.setTimeout(function () { try { fn(); } catch (e) {} }, ms);
+      }
+
+      function push(step) {
+        steps.push(step);
+        onStep && onStep(step, steps.length - 1);
+      }
+
+      if (kind === 'thought') {
+        push({ type: 'thought.start', title: '思考中' });
+        later(function () {
+          push({ type: 'text.delta', text: '理解用户需求：' + t.slice(0, 24) + '。\n' });
+        }, 600);
+        later(function () {
+          push({ type: 'text.delta', text: '拆解为 3 个子目标：①检索 ②聚合 ③生成结论。\n' });
+        }, 1200);
+        later(function () {
+          push({ type: 'text.delta', text: '预估总耗时 ~4 秒，准备进入执行阶段。' });
+        }, 1800);
+        later(function () {
+          push({ type: 'thought.commit', duration: 1.8 });
+          push({ type: 'reply.start' });
+          push({ type: 'text.delta', text: '已完成思考，准备开始执行。' });
+        }, 2400);
+        later(function () {
+          push({ type: 'reply.commit', content: '已完成思考，准备开始执行。' });
+          push({ type: 'done', script: 'thought' });
+        }, 3000);
+        return { kind: kind, scheduled: steps.length };
+      }
+
+      if (kind === 'tool') {
+        push({ type: 'thought.start', title: '思考中' });
+        later(function () {
+          push({ type: 'text.delta', text: '需要调用 ' + tool + ' 检索相关数据。' });
+          push({ type: 'thought.commit', duration: 0.6 });
+        }, 600);
+        later(function () {
+          push({ type: 'tool.start', toolName: tool, params: { query: shortT, source: '内部知识库' } });
+        }, 1200);
+        later(function () {
+          push({ type: 'tool.running', toolName: tool, progress: '检索中…' });
+        }, 1800);
+        later(function () {
+          push({ type: 'tool.commit', toolName: tool, params: { query: shortT, source: '内部知识库' }, summary: '检索到 3 条相关记录并完成聚合', duration: 1.8, isError: false });
+        }, 2400);
+        later(function () {
+          push({ type: 'reply.start' });
+          push({ type: 'text.delta', text: '已调用工具完成数据检索，共 3 条记录。' });
+        }, 3000);
+        later(function () {
+          push({ type: 'reply.commit', content: '已调用工具完成数据检索，共 3 条记录。' });
+          push({ type: 'done', script: 'tool' });
+        }, 3600);
+        return { kind: kind, scheduled: steps.length };
+      }
+
+      if (kind === 'subagent') {
+        push({ type: 'thought.start', title: '思考中' });
+        later(function () {
+          push({ type: 'text.delta', text: '该任务较复杂，委派子智能体并行处理。' });
+          push({ type: 'thought.commit', duration: 0.5 });
+        }, 600);
+        later(function () {
+          push({ type: 'subagent.commit', subagentName: 'research-sub-agent', goal: '收集并整理「' + shortT + '」相关资料', duration: 4.2, summary: '子智能体完成资料收集（5 条结果）', events: [
+            { id: 'sa-1', type: 'thought', content: '定位数据源并提取关键信息。', duration: 0.8 },
+            { id: 'sa-2', type: 'action', toolName: 'web_search', params: { q: shortT }, summary: '检索到 5 条相关结果', duration: 2.3, content: '[web_search] 执行完成 (2.3s)' },
+            { id: 'sa-3', type: 'chat', content: '子智能体已完成资料收集，共 5 条有效结果。' }
+          ] });
+        }, 1200);
+        later(function () {
+          push({ type: 'reply.start' });
+          push({ type: 'text.delta', text: '子智能体已完成资料收集，共 5 条有效结果。' });
+        }, 1800);
+        later(function () {
+          push({ type: 'reply.commit', content: '子智能体已完成资料收集，共 5 条有效结果。' });
+          push({ type: 'done', script: 'subagent' });
+        }, 2400);
+        return { kind: kind, scheduled: steps.length };
+      }
+
+      if (kind === 'error') {
+        push({ type: 'thought.start', title: '思考中' });
+        later(function () {
+          push({ type: 'text.delta', text: '准备调用 ' + tool + ' 检索数据。' });
+          push({ type: 'thought.commit', duration: 0.5 });
+        }, 600);
+        later(function () {
+          push({ type: 'tool.start', toolName: tool, params: { query: shortT, source: '内部知识库' } });
+        }, 1200);
+        later(function () {
+          push({ type: 'tool.running', toolName: tool, progress: '连接数据源…' });
+        }, 1800);
+        later(function () {
+          push({ type: 'tool.commit', toolName: tool, params: { query: shortT, source: '内部知识库' }, summary: '连接数据源超时（30s）', duration: 30.0, isError: true });
+          push({ type: 'error.commit', content: '工具执行失败：连接数据源超时，已重试 2 次。' });
+        }, 2400);
+        later(function () {
+          push({ type: 'reply.start' });
+          push({ type: 'text.delta', text: '抱歉，工具调用失败，建议稍后重试或切换数据源。' });
+        }, 3000);
+        later(function () {
+          push({ type: 'reply.commit', content: '抱歉，工具调用失败，建议稍后重试或切换数据源。' });
+          push({ type: 'done', script: 'error' });
+        }, 3600);
+        return { kind: kind, scheduled: steps.length };
+      }
+
+      if (kind === 'clarify') {
+        push({ type: 'clarify.commit', requestId: 'clarify-' + Date.now(), question: '请确认您希望分析的维度：', choices: ['按时间趋势', '按地域分布', '按产品类别'] });
+        later(function () {
+          push({ type: 'done', script: 'clarify' });
+        }, 800);
+        return { kind: kind, scheduled: steps.length };
+      }
+
+      if (kind === 'approval') {
+        push({ type: 'approval.commit', requestId: 'approval-' + Date.now(), command: tool, description: '将调用 ' + tool + ' 检索并返回结果，是否继续？', allowPermanent: true });
+        later(function () {
+          push({ type: 'done', script: 'approval' });
+        }, 800);
+        return { kind: kind, scheduled: steps.length };
+      }
+
+      // normal
+      push({ type: 'thought.start', title: '思考中' });
+      later(function () {
+        push({ type: 'text.delta', text: '理解用户输入并组织回复。' });
+        push({ type: 'thought.commit', duration: 0.4 });
+      }, 600);
+      later(function () {
+        push({ type: 'reply.start' });
+        push({ type: 'text.delta', text: '基于您描述的情况，我建议先从数据验证入手。\n\n（模拟回复 · 对接引擎后将替换为真实推理结果）' });
+      }, 1200);
+      later(function () {
+        push({ type: 'reply.commit', content: '基于您描述的情况，我建议先从数据验证入手。\n\n（模拟回复 · 对接引擎后将替换为真实推理结果）\n\n针对：「' + t.slice(0, 50) + (t.length > 50 ? '…' : '') + '」' });
+        push({ type: 'done', script: 'normal' });
+      }, 1800);
+      return { kind: kind, scheduled: steps.length };
     },
 
     mockTaskArtifact: function (expert, taskId, userText) {
@@ -3172,7 +3339,7 @@
     addFile('行业白皮书.pdf', fSrc, { type: 'document', size: 1024576, mime: 'application/pdf' });
     addFile('产品手册.md', fSrc, {
       type: 'document', size: 15820, mime: 'text/markdown',
-      content: '# 产品使用手册 v3.2\n\n## 1. 快速开始\n注册账号 → 创建工作空间 → 邀请成员\n\n## 2. 核心功能\n- 任务编排\n- 工具调用\n- 数据接入\n\n## 3. 进阶用法\n- 子代理委派\n- 多轮澄清\n- 审批流转'
+      content: '# 产品使用手册 v3.2\n\n## 1. 快速开始\n注册账号 → 创建工作空间 → 邀请成员\n\n## 2. 核心功能\n- 任务编排\n- 工具调用\n- 数据接入\n\n## 3. 进阶用法\n- 子智能体委派\n- 多轮澄清\n- 审批流转'
     });
 
     persist();

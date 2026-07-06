@@ -18,20 +18,18 @@
     computed: {
       statusLabel: function () {
         if (this.expertStatus) {
-          var map = { idle: '', running: '思考中…', hitl: '等待回应', error: '出错' };
+          var map = { idle: '', running: '', hitl: '等待回应', error: '出错' };
           return map[this.expertStatus] || '';
         }
         if (this.errorState) return '出错';
-        if (this.running) return '思考中…';
         return '';
       },
       statusClass: function () {
         if (this.expertStatus) {
-          var map = { idle: '', running: 'task-status-running', hitl: 'task-status-hitl', error: 'task-status-error' };
+          var map = { idle: '', running: '', hitl: 'task-status-hitl', error: 'task-status-error' };
           return map[this.expertStatus] || '';
         }
         if (this.errorState) return 'task-status-error';
-        if (this.running) return 'task-status-running';
         return '';
       }
     },
@@ -46,8 +44,7 @@
             </span>\
           </button>\
           <span v-if="statusLabel" class="task-top-bar-status" :class="statusClass">\
-            <span v-if="expertStatus === \'running\' || (running && !errorState && !expertStatus)" class="task-top-bar-status-spinner"></span>\
-            <span v-else-if="expertStatus === \'error\' || errorState" class="task-top-bar-status-dot"></span>\
+            <span v-if="expertStatus === \'error\' || errorState" class="task-top-bar-status-dot"></span>\
             <span v-else-if="expertStatus === \'hitl\'" class="task-top-bar-status-dot task-status-hitl-dot"></span>\
             {{ statusLabel }}\
           </span>\
