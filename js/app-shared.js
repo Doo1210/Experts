@@ -12,21 +12,47 @@
       if (fileInputRef.value) fileInputRef.value.click();
     }
 
+    function isImageFile(file) {
+      if (file.type && file.type.indexOf('image/') === 0) return true;
+      return /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(file.name || '');
+    }
+
     function handleFileSelect(ev) {
       var files = ev.target.files;
       if (!files) return;
       for (var i = 0; i < files.length; i++) {
         var f = files[i];
-        pendingFiles.value.push({
+        var item = {
           id: 'f_' + Date.now() + '_' + i,
           name: f.name,
-          size: f.size
-        });
+          size: f.size,
+          kind: isImageFile(f) ? 'image' : 'file',
+          mime: f.type || ''
+        };
+        if (item.kind === 'image') {
+          item.previewUrl = URL.createObjectURL(f);
+          (function (entry) {
+            var img = new Image();
+            img.onload = function () {
+              var idx = pendingFiles.value.findIndex(function (x) { return x.id === entry.id; });
+              if (idx < 0) return;
+              var next = pendingFiles.value.slice();
+              next[idx] = Object.assign({}, next[idx], { width: img.width, height: img.height });
+              pendingFiles.value = next;
+            };
+            img.src = entry.previewUrl;
+          })(item);
+        }
+        pendingFiles.value.push(item);
       }
       ev.target.value = '';
     }
 
     function removePendingFile(id) {
+      var removed = pendingFiles.value.find(function (f) { return f.id === id; });
+      if (removed && removed.previewUrl) {
+        try { URL.revokeObjectURL(removed.previewUrl); } catch (e) {}
+      }
       pendingFiles.value = pendingFiles.value.filter(function (f) { return f.id !== id; });
     }
 

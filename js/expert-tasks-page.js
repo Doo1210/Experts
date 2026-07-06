@@ -5,66 +5,26 @@
   var store = window.AppStore;
   var catalog = window;
   var createChatFileUpload = window.AppShared.createChatFileUpload;
-
-  var TaskListItem = {
-    props: ['task', 'active', 'artifactOpen', 'isRunning', 'statusTip', 'createdAtLabel', 'artifactCount'],
-    emits: ['select', 'toggle-artifacts', 'menu'],
-    template: '\
-      <div class="task-item" :class="{ active: active }" @click="$emit(\'select\')">\
-        <div class="task-item-accent"></div>\
-        <div class="task-item-row">\
-          <div class="task-status-indicator" :title="statusTip">\
-            <span v-if="isRunning" class="task-status-spinner-wrap">\
-              <span class="task-status-spinner"></span>\
-            </span>\
-            <span v-else class="task-status-dot-wrap">\
-              <span class="task-status-dot"></span>\
-            </span>\
-          </div>\
-          <div class="task-item-content">\
-            <div class="task-item-title">{{ task.title }}</div>\
-            <div class="task-item-meta">\
-              <svg class="task-item-meta-icon" viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2">\
-                <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>\
-              </svg>\
-              <span>{{ createdAtLabel }}</span>\
-            </div>\
-          </div>\
-          <div class="task-item-toolbar">\
-            <div class="task-item-toolbar-top">\
-              <el-dropdown trigger="click" @command="$emit(\'menu\', $event)">\
-                <button type="button" class="task-more-btn" title="更多" @click.stop>\
-                  <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor">\
-                    <circle cx="12" cy="5" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="12" cy="19" r="1.5"/>\
-                  </svg>\
-                </button>\
-                <template #dropdown>\
-                  <el-dropdown-menu>\
-                    <el-dropdown-item command="edit">编辑</el-dropdown-item>\
-                    <el-dropdown-item command="delete" divided>删除</el-dropdown-item>\
-                  </el-dropdown-menu>\
-                </template>\
-              </el-dropdown>\
-            </div>\
-            <div class="task-item-toolbar-bottom">\
-              <button type="button" class="task-artifact-link" :class="{ active: artifactOpen }" title="产物" @click.stop="$emit(\'toggle-artifacts\', $event)">\
-                <span class="task-artifact-link-icon">\
-                  <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2">\
-                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>\
-                    <polyline points="14 2 14 8 20 8"/>\
-                  </svg>\
-                </span>\
-                <span class="task-artifact-link-text">产物</span>\
-                <span v-if="artifactCount > 0" class="task-artifact-badge">{{ artifactCount }}</span>\
-              </button>\
-            </div>\
-          </div>\
-        </div>\
-      </div>'
-  };
+  var ChatBlocks = window.ChatBlocks;
+  var ChatInteractive = window.ChatInteractive;
 
   var ExpertTasksPage = {
-    components: { TaskListItem: TaskListItem },
+    components: {
+      ChatTopBar: window.ChatTopBar,
+      ChatTaskList: window.ChatTaskList,
+      ChatArtifactsPanel: window.ChatArtifactsPanel,
+      ChatWorkspace: window.ChatWorkspace,
+      ChatComposer: window.ChatComposer,
+      ThoughtBlock: ChatBlocks.ThoughtBlock,
+      ToolCard: ChatBlocks.ToolCard,
+      ReplyBlock: ChatBlocks.ReplyBlock,
+      UserMessage: ChatBlocks.UserMessage,
+      StatusLine: ChatBlocks.StatusLine,
+      ErrorRow: ChatBlocks.ErrorRow,
+      SubagentCard: ChatInteractive.SubagentCard,
+      ClarifyCard: ChatInteractive.ClarifyCard,
+      ApprovalCard: ChatInteractive.ApprovalCard
+    },
     props: ['expertId', 'taskId'],
     emits: ['nav'],
     setup: function (props, ctx) {
@@ -75,6 +35,9 @@
       var inputText = Vue.ref('');
       var sending = Vue.ref(false);
       var chatBox = Vue.ref(null);
+      // T4.3 对话流滚动控制
+      var userScrolledUp = Vue.ref(false);
+      var hasNewMessage = Vue.ref(false);
       var chatFiles = createChatFileUpload();
       var panelArtifacts = Vue.ref([]);
       var artifactPanelTaskId = Vue.ref(null);
@@ -87,23 +50,220 @@
       var liveThought = Vue.ref('');
       var liveReply = Vue.ref('');
       var liveSteps = Vue.ref([]);
+      // === 阶段2 输入区相关状态（占位，后续 task 实现） ===
+      var expertStatus = Vue.computed(function () {
+        // T2.2 统一状态机：error > hitl > running > idle
+        if (remoteError.value) return 'error';
+        // HITL：存在未回应的 clarify / approval
+        var list = messages.value || [];
+        for (var i = 0; i < list.length; i++) {
+          var m = list[i];
+          if (m.type === 'clarify' && !m.answer) return 'hitl';
+          if (m.type === 'approval' && !m.choice) return 'hitl';
+        }
+        if (streaming.value || sending.value) return 'running';
+        return 'idle';
+      });
+      var expertStatusLabel = Vue.computed(function () {
+        var map = { idle: '空闲', running: '执行中', hitl: '等待回应', error: '出错' };
+        return map[expertStatus.value] || '空闲';
+      });
+      var sessionModelOverride = Vue.ref('');
+      var tokenEstimate = Vue.computed(function () {
+        var t = inputText.value || '';
+        var n = Math.ceil(t.length / 4);
+        var files = chatFiles.pendingFiles.value || [];
+        for (var i = 0; i < files.length; i++) {
+          var f = files[i];
+          if (f.kind === 'image') {
+            if (f.width && f.height) {
+              n += Math.ceil(f.width / 512) * Math.ceil(f.height / 512) * 85;
+            } else {
+              n += 85;
+            }
+          } else {
+            n += Math.ceil((f.size || 0) / 4);
+          }
+        }
+        return n;
+      });
+      var workspaceFilesFlat = Vue.computed(function () {
+        if (!store.getWorkspaceFiles) return [];
+        var raw = store.getWorkspaceFiles(props.expertId) || [];
+        // 若工作空间无数据，尝试预加载 demo 数据（幂等）
+        if (!raw.length && store.ensureDemoWorkspace) {
+          store.ensureDemoWorkspace(props.expertId);
+          raw = store.getWorkspaceFiles(props.expertId) || [];
+        }
+        var idMap = {};
+        raw.forEach(function (f) { idMap[String(f.id)] = f; });
+        function buildPath(item) {
+          var parts = [item.name];
+          var cur = item;
+          var guard = 0;
+          while (cur && cur.parentId && guard < 20) {
+            var p = idMap[String(cur.parentId)];
+            if (!p) break;
+            parts.unshift(p.name);
+            cur = p;
+            guard++;
+          }
+          return parts.join('/');
+        }
+        return raw.filter(function (f) { return f.kind !== 'folder' && f.type !== 'folder'; }).map(function (f) {
+          return {
+            id: f.id,
+            name: f.name,
+            path: buildPath(f),
+            kind: f.kind
+          };
+        });
+      });
+      var modelList = Vue.ref([
+        { id: 'gpt-4o', name: 'gpt-4o', reasoning: true },
+        { id: 'gpt-4o-mini', name: 'gpt-4o-mini', reasoning: false },
+        { id: 'claude-sonnet-4', name: 'claude-sonnet-4', reasoning: true },
+        { id: 'qwen-max', name: 'qwen-max', reasoning: false }
+      ]);
+      var cwdOptions = Vue.ref(['工位8', '工位12', '产线A', '数据分析']);
       var showExpertPreviewDialog = Vue.ref(false);
       var previewStats = Vue.ref({ tasks: 0, projects: 0, skills: 0, tools: 0 });
+      // 顶部状态栏状态（阶段0先用默认值，阶段2接 session.info）
+      var sessionModel = Vue.ref('gpt-4o');
+      var sessionCwd = Vue.ref('工位8');
+      var workspaceOpen = Vue.ref(false);
+      var workspaceTree = Vue.ref([]);
+      var workspaceRootPath = Vue.ref('D:\\workspace');
+      var previewFile = Vue.ref(null);
 
-      function scrollChatToBottom() {
+      function toggleWorkspace() {
+        workspaceOpen.value = !workspaceOpen.value;
+        if (workspaceOpen.value && !workspaceTree.value.length) {
+          loadWorkspaceTree();
+        }
+      }
+
+      function loadWorkspaceTree() {
+        if (store.ensureDemoWorkspace) {
+          store.ensureDemoWorkspace(props.expertId);
+        }
+        if (store.getWorkspaceTree) {
+          workspaceTree.value = store.getWorkspaceTree(props.expertId) || [];
+        }
+      }
+
+      function handleSetCwd(cwd) {
+        if (!cwd) return;
+        sessionCwd.value = cwd;
+        ElementPlus.ElMessage.success('工作目录已切换为 ' + cwd);
+      }
+
+      function handlePreviewFile(file) {
+        if (!file) { previewFile.value = null; return; }
+        var enriched = file;
+        if (store.getFileContent) {
+          var content = store.getFileContent(props.expertId, file.id);
+          if (content) enriched = Object.assign({}, file, content);
+        }
+        previewFile.value = enriched;
+      }
+
+      function handleOpenWorkspaceFromTask(task) {
+        // 切换到该任务（如果尚未选中）
+        if (task && task.id !== currentTaskId.value) {
+          selectTask(task.id);
+        }
+        // 打开工作空间面板
+        if (!workspaceOpen.value) {
+          toggleWorkspace();
+        }
+      }
+
+      function handleClarifyAnswer(payload) {
+        if (!payload || !payload.requestId || !currentTaskId.value) return;
+        var list = messages.value;
+        var msg = list.find(function (m) { return m.requestId === payload.requestId; });
+        if (!msg) return;
+        msg.answer = payload.choice;
+        var cap = store.getExpertDemoCapabilities ? store.getExpertDemoCapabilities(expert.value.id) : { tool: '数据查询' };
+        store.addMessage(currentTaskId.value, {
+          role: 'expert', type: 'action', expertId: expert.value.id,
+          toolName: cap.tool,
+          params: { dimension: payload.choice },
+          summary: '按「' + payload.choice + '」维度完成分析',
+          duration: 1.5,
+          content: '[' + cap.tool + '] 执行完成 (1.5s)'
+        });
+        store.addMessage(currentTaskId.value, {
+          role: 'expert', type: 'approval', expertId: expert.value.id,
+          requestId: 'approval-' + Date.now(),
+          command: 'export_report --format=xlsx',
+          description: '将分析结果导出为 Excel 并写入工作空间',
+          allowPermanent: true,
+          choice: null
+        });
+        loadMessages();
+        scrollChatToBottom();
+      }
+
+      function handleApprovalResolve(payload) {
+        if (!payload || !payload.requestId || !currentTaskId.value) return;
+        var list = messages.value;
+        var msg = list.find(function (m) { return m.requestId === payload.requestId; });
+        if (!msg) return;
+        msg.choice = payload.choice;
+        if (payload.choice === 'allow' || payload.choice === 'allow_permanent') {
+          var reply = '已完成操作，结果已写入工作空间。\n\n（模拟回复 · 对接引擎后将替换为真实结果）';
+          store.addMessage(currentTaskId.value, {
+            role: 'expert', type: 'chat', expertId: expert.value.id, content: reply
+          });
+          store.mockTaskArtifact(expert.value, currentTaskId.value, '审批通过后的导出结果');
+          store.updateTask(currentTaskId.value, { status: 'pending' });
+          refreshTasks();
+          if (artifactPanelTaskId.value === currentTaskId.value) loadPanelArtifacts(currentTaskId.value);
+        } else {
+          store.addMessage(currentTaskId.value, {
+            role: 'expert', type: 'chat', expertId: expert.value.id,
+            content: '操作已取消。如需其他帮助请告知。'
+          });
+        }
+        loadMessages();
+        scrollChatToBottom();
+        sending.value = false;
+      }
+
+      function scrollChatToBottom(force) {
         Vue.nextTick(function () {
-          if (chatBox.value) chatBox.value.scrollTop = chatBox.value.scrollHeight;
+          if (!chatBox.value) return;
+          if (!force && userScrolledUp.value) {
+            hasNewMessage.value = true;
+            return;
+          }
+          chatBox.value.scrollTop = chatBox.value.scrollHeight;
+          hasNewMessage.value = false;
         });
       }
 
-      function isSkillTool(name) {
-        var n = String(name || '').toLowerCase();
-        return n.indexOf('skill') >= 0;
+      function onChatScroll() {
+        if (!chatBox.value) return;
+        var el = chatBox.value;
+        var nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+        if (nearBottom) {
+          userScrolledUp.value = false;
+          hasNewMessage.value = false;
+        } else {
+          userScrolledUp.value = true;
+        }
+      }
+
+      function backToLatest() {
+        userScrolledUp.value = false;
+        scrollChatToBottom(true);
       }
 
       function statusContent(content) {
         var text = String(content || '');
-        if (/^正在(运用|使用技能|调用|准备技能调用|生成工具调用)/.test(text)) return '';
+        if (/^正在(调用|准备工具调用|生成工具调用)/.test(text)) return '';
         return text;
       }
 
@@ -257,17 +417,14 @@
             },
             onToolGenerating: function (payload) {
               var name = payload.name || 'tool';
-              var skill = isSkillTool(name);
               upsertLiveStep(name, {
-                type: skill ? 'skill' : 'action',
-                toolName: skill ? null : name,
-                skillName: skill ? name : null,
+                type: 'action',
+                toolName: name,
                 content: ''
               });
             },
             onToolStarted: function (payload) {
               var name = payload.name || 'tool';
-              if (isSkillTool(name)) return;
               upsertLiveStep(name, {
                 type: 'action',
                 toolName: name,
@@ -276,30 +433,11 @@
             },
             onToolCompleted: function (payload) {
               var name = payload.name || 'tool';
-              if (isSkillTool(name)) return;
               var suffix = payload.duration ? (' (' + Number(payload.duration).toFixed(1) + 's)') : '';
               var status = payload.isError ? '执行失败' : '执行完成';
               upsertLiveStep(name, {
                 type: 'action',
                 toolName: name,
-                content: '[' + name + '] ' + status + suffix
-              });
-            },
-            onSkillStarted: function (payload) {
-              var name = payload.name || 'skill';
-              upsertLiveStep(name, {
-                type: 'skill',
-                skillName: name,
-                content: ''
-              });
-            },
-            onSkillCompleted: function (payload) {
-              var name = payload.name || 'skill';
-              var suffix = payload.duration ? (' (' + Number(payload.duration).toFixed(1) + 's)') : '';
-              var status = payload.isError ? '执行失败' : '执行完成';
-              upsertLiveStep(name, {
-                type: 'skill',
-                skillName: name,
                 content: '[' + name + '] ' + status + suffix
               });
             },
@@ -580,9 +718,12 @@
         options = options || {};
         if (!currentTaskId.value) { messages.value = []; return; }
         var local = store.getMessages(currentTaskId.value);
-        messages.value = local;
+        messages.value = local.slice();
+        // 切换任务时重置滚动状态，强制滚到底（PRD 11.4：每个 session 独立维护滚动）
+        userScrolledUp.value = false;
+        hasNewMessage.value = false;
         if (options.localOnly) {
-          scrollChatToBottom();
+          scrollChatToBottom(true);
           return;
         }
         if (store.fetchTaskMessagesRemote) {
@@ -672,8 +813,13 @@
           if (!store.isDevMock || !store.isDevMock()) return;
         }
         setTimeout(function () {
-          store.mockExpertWorkflowSteps(expert.value, taskId, text);
+          var wfResult = store.mockExpertWorkflowSteps(expert.value, taskId, text);
+          var wfKind = (wfResult && wfResult.kind) || 'normal';
           loadMessages();
+          if (wfKind === 'hitl') {
+            sending.value = false;
+            return;
+          }
           setTimeout(function () {
             var reply = store.mockExpertReply(expert.value, text);
             store.addMessage(taskId, {
@@ -706,6 +852,31 @@
           return;
         }
         sendToTask(currentTaskId.value, text, chatFiles.takePendingFiles());
+      }
+
+      // === 阶段2 输入区交互（占位，后续 task 实现） ===
+      function handleInterrupt() {
+        // T2.3 实现：中断当前流式回复
+        if (streamEs) { try { streamEs.close(); } catch (e) {} streamEs = null; }
+        streaming.value = false;
+        sending.value = false;
+      }
+
+      function handleSelectModel(modelId) {
+        if (!modelId) return;
+        sessionModelOverride.value = modelId;
+        sessionModel.value = modelId;
+        ElementPlus.ElMessage.success('模型已切换为 ' + modelId + '，下一回合生效');
+      }
+
+      function handleSelectCwd(cwd) {
+        if (cwd === '__workspace__') {
+          workspaceOpen.value = true;
+          return;
+        }
+        if (!cwd) return;
+        sessionCwd.value = cwd;
+        ElementPlus.ElMessage.success('工作目录已切换为 ' + cwd);
       }
 
       function editTask(task, ev) {
@@ -804,8 +975,22 @@
         openExpertPreview: openExpertPreview,
         inputText: inputText, sending: sending, streaming: streaming,
         liveThought: liveThought, liveReply: liveReply, liveSteps: liveSteps,
+        // 阶段2 输入区状态
+        expertStatus: expertStatus,
+        expertStatusLabel: expertStatusLabel,
+        sessionModelOverride: sessionModelOverride,
+        sessionCwd: sessionCwd,
+        tokenEstimate: tokenEstimate,
+        modelList: modelList,
+        cwdOptions: cwdOptions,
+        workspaceFilesFlat: workspaceFilesFlat,
+        handleSelectModel: handleSelectModel,
+        handleSelectCwd: handleSelectCwd,
+        handleInterrupt: handleInterrupt,
         statusContent: statusContent,
         chatBox: chatBox,
+        userScrolledUp: userScrolledUp, hasNewMessage: hasNewMessage,
+        onChatScroll: onChatScroll, backToLatest: backToLatest,
         panelArtifacts: panelArtifacts, artifactPanelTaskId: artifactPanelTaskId,
         pendingFiles: chatFiles.pendingFiles, fileInputRef: chatFiles.fileInputRef,
         triggerFileUpload: chatFiles.triggerFileUpload, handleFileSelect: chatFiles.handleFileSelect,
@@ -821,38 +1006,35 @@
         // 产物面板增强
         artifactPreviewVisible: artifactPreviewVisible, artifactPreviewItem: artifactPreviewItem,
         openArtifactPreview: openArtifactPreview, downloadArtifact: downloadArtifact, goToArtifactTask: goToArtifactTask,
+        // 顶部状态栏
+        sessionModel: sessionModel, sessionCwd: sessionCwd, workspaceOpen: workspaceOpen,
+        workspaceTree: workspaceTree, workspaceRootPath: workspaceRootPath, previewFile: previewFile,
+        loadWorkspaceTree: loadWorkspaceTree, handleSetCwd: handleSetCwd, handlePreviewFile: handlePreviewFile,
+        handleOpenWorkspaceFromTask: handleOpenWorkspaceFromTask,
+        toggleWorkspace: toggleWorkspace,
+        handleClarifyAnswer: handleClarifyAnswer,
+        handleApprovalResolve: handleApprovalResolve,
         renderMarkdown: window.renderMarkdown
       };
     },
-    template: '\
-      <template v-if="expert">\
+    template: '<template v-if="expert">\
       <div class="task-layout">\
-        <div class="task-top-bar">\
-          <div class="task-top-bar-left">\
-            <back-link label="返回专家" inline @click="$emit(\'nav\', \'/experts\')" />\
-            <button type="button" class="task-top-bar-expert-trigger" title="查看专家信息" @click="openExpertPreview">\
-              <img class="task-top-bar-avatar" :src="expert.avatar" :alt="expert.name">\
-              <span class="task-top-bar-info">\
-                <span class="task-top-bar-name">{{ expert.name }}</span>\
-              </span>\
-            </button>\
-          </div>\
-          <div class="project-header-actions">\
-            <button\
-              type="button"\
-              class="project-header-action-btn"\
-              title="发起任务"\
-              @click="newTask">\
-              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">\
-                <path d="M12 5v14M5 12h14"/>\
-              </svg>\
-              <span>发起任务</span>\
-            </button>\
-          </div>\
-        </div>\
+        <chat-top-bar\
+          :expert="expert"\
+          :model="sessionModel"\
+          :cwd="sessionCwd"\
+          :running="sending || streaming"\
+          :error-state="remoteError"\
+          :expert-status="expertStatus"\
+          :workspace-open="workspaceOpen"\
+          @back="$emit(\'nav\', \'/experts\')"\
+          @open-expert="openExpertPreview"\
+          @new-task="newTask"\
+          @toggle-workspace="toggleWorkspace" />\
         <div class="task-body">\
         <div class="chat-main">\
-          <div class="chat-messages" ref="chatBox">\
+          <div class="chat-messages-wrap">\
+            <div class="chat-messages" ref="chatBox" @scroll="onChatScroll">\
             <div v-if="showExpertIntro" class="chat-empty-expert-card">\
               <div class="chat-empty-expert-avatar-wrap">\
                 <img class="chat-empty-expert-avatar" :src="expert.avatar" :alt="expert.name">\
@@ -876,55 +1058,18 @@
                       <span class="msg-sender">{{ expert.name }}</span>\
                     </div>\
                     <template v-for="item in group.items" :key="item.id">\
-                      <details v-if="item.type === \'thought\'" class="log-thought-block">\
-                        <summary>思考过程</summary>\
-                        <div class="log-thought-content">{{ item.content }}</div>\
-                      </details>\
-                      <details v-else-if="item.type === \'skill\'" class="log-skill-card">\
-                        <summary class="log-skill-summary">\
-                          <span class="log-skill-icon">🧩</span>\
-                          <span class="log-skill-body">\
-                            <span class="log-skill-title">使用技能</span>\
-                            <span class="log-skill-name" v-if="item.skillName">{{ item.skillName }}</span>\
-                            <span class="log-skill-desc" v-if="statusContent(item.content)">{{ statusContent(item.content) }}</span>\
-                          </span>\
-                        </summary>\
-                        <div class="log-skill-result" v-if="statusContent(item.content)">{{ statusContent(item.content) }}</div>\
-                      </details>\
-                      <details v-else-if="item.type === \'action\'" class="log-action-card">\
-                        <summary class="log-action-summary">\
-                          <span class="log-action-icon">⚡</span>\
-                          <span class="log-action-body">\
-                            <span class="log-action-title">调用工具</span>\
-                            <span class="log-action-tool" v-if="item.toolName">[{{ item.toolName }}]</span>\
-                            <span class="log-action-desc" v-if="statusContent(item.content)">{{ statusContent(item.content) }}</span>\
-                          </span>\
-                        </summary>\
-                        <div class="log-action-result" v-if="statusContent(item.content)">{{ statusContent(item.content) }}</div>\
-                      </details>\
-                      <div v-else class="msg-bubble">\
-                        <div v-if="item.content" class="msg-text markdown-body" v-html="renderMarkdown(item.content)"></div>\
-                        <div v-if="item.attachments && item.attachments.length" class="msg-attachments">\
-                          <div v-for="att in item.attachments" :key="att.id" class="msg-attachment-chip">\
-                            <span class="msg-attachment-icon">📎</span>\
-                            <span class="msg-attachment-name">{{ att.name }}</span>\
-                          </div>\
-                        </div>\
-                      </div>\
+                      <thought-block v-if="item.type === \'thought\'" :content="item.content" />\
+                      <tool-card v-else-if="item.type === \'action\'" :tool-name="item.toolName" :content="item.content" :params="item.params" :summary="item.summary" :duration="item.duration" :progress="item.progress" :is-error="item.isError" />\
+                      <subagent-card v-else-if="item.type === \'subagent\'" :subagent-name="item.subagentName" :goal="item.goal" :events="item.subagentEvents" />\
+                      <clarify-card v-else-if="item.type === \'clarify\'" :request-id="item.requestId" :question="item.question" :choices="item.choices" :answer="item.answer" @answer="handleClarifyAnswer" />\
+                      <approval-card v-else-if="item.type === \'approval\'" :request-id="item.requestId" :command="item.command" :description="item.description" :allow-permanent="item.allowPermanent" :choice="item.choice" @resolve="handleApprovalResolve" />\
+                      <status-line v-else-if="item.type === \'status\'" :kind="item.statusKind" :content="item.content" />\
+                      <error-row v-else-if="item.type === \'error\'" :content="item.content" />\
+                      <reply-block v-else :content="item.content" :render-markdown="renderMarkdown" :attachments="item.attachments" />\
                     </template>\
                   </div>\
                 </div>\
-                <div v-else class="msg-row" :class="group.message.role">\
-                  <div class="msg-bubble">\
-                    <div v-if="group.message.content" class="msg-text">{{ group.message.content }}</div>\
-                    <div v-if="group.message.attachments && group.message.attachments.length" class="msg-attachments">\
-                      <div v-for="att in group.message.attachments" :key="att.id" class="msg-attachment-chip">\
-                        <span class="msg-attachment-icon">📎</span>\
-                        <span class="msg-attachment-name">{{ att.name }}</span>\
-                      </div>\
-                    </div>\
-                  </div>\
-                </div>\
+                <user-message v-else :message="group.message" />\
               </template>\
               <div v-if="streaming" class="stream-live-block">\
                 <div v-if="liveThought || liveReply || liveSteps.length" class="msg-row expert">\
@@ -933,39 +1078,11 @@
                       <img class="msg-avatar" :src="expert.avatar" :alt="expert.name" />\
                       <span class="msg-sender">{{ expert.name }}</span>\
                     </div>\
-                    <details v-if="liveThought" class="log-thought-block stream-thought-live" open>\
-                      <summary>思考过程</summary>\
-                      <div class="log-thought-content">{{ liveThought }}<span class="stream-cursor">▍</span></div>\
-                    </details>\
+                    <thought-block v-if="liveThought" :content="liveThought" :live="true" :open="true" />\
                     <template v-for="step in liveSteps" :key="step.id">\
-                      <details v-if="step.type === \'skill\'" class="log-skill-card">\
-                        <summary class="log-skill-summary">\
-                          <span class="log-skill-icon">🧩</span>\
-                          <span class="log-skill-body">\
-                            <span class="log-skill-title">使用技能</span>\
-                            <span class="log-skill-name" v-if="step.skillName">{{ step.skillName }}</span>\
-                            <span class="log-skill-desc" v-if="statusContent(step.content)">{{ statusContent(step.content) }}</span>\
-                          </span>\
-                        </summary>\
-                        <div class="log-skill-result" v-if="statusContent(step.content)">{{ statusContent(step.content) }}</div>\
-                      </details>\
-                      <details v-else class="log-action-card">\
-                        <summary class="log-action-summary">\
-                          <span class="log-action-icon">⚡</span>\
-                          <span class="log-action-body">\
-                            <span class="log-action-title">调用工具</span>\
-                            <span class="log-action-tool" v-if="step.toolName">[{{ step.toolName }}]</span>\
-                            <span class="log-action-desc" v-if="statusContent(step.content)">{{ statusContent(step.content) }}</span>\
-                          </span>\
-                        </summary>\
-                        <div class="log-action-result" v-if="statusContent(step.content)">{{ statusContent(step.content) }}</div>\
-                      </details>\
+                      <tool-card :tool-name="step.toolName" :content="step.content" />\
                     </template>\
-                    <div v-if="liveReply" class="msg-bubble">\
-                      <div class="msg-text markdown-body">\
-                        <span v-html="renderMarkdown(liveReply)"></span><span class="stream-cursor">▍</span>\
-                      </div>\
-                    </div>\
+                    <reply-block v-if="liveReply" :content="liveReply" :render-markdown="renderMarkdown" :live="true" />\
                   </div>\
                 </div>\
                 <div v-if="!liveThought && !liveReply && !liveSteps.length" class="stream-waiting">\
@@ -975,167 +1092,63 @@
               </div>\
             </template>\
           </div>\
-          <div class="chat-input">\
-            <div class="chat-composer">\
-              <div v-if="pendingFiles.length" class="chat-pending-files">\
-                <div v-for="f in pendingFiles" :key="f.id" class="chat-pending-file">\
-                  <span class="chat-pending-file-icon">📄</span>\
-                  <span class="chat-pending-file-name">{{ f.name }}</span>\
-                  <span class="chat-pending-file-size">{{ formatFileSize(f.size) }}</span>\
-                  <button type="button" class="chat-pending-file-remove" @click="removePendingFile(f.id)" title="移除">×</button>\
-                </div>\
-              </div>\
-              <div class="chat-composer-main">\
-                <el-input\
-                  v-model="inputText"\
-                  type="textarea"\
-                  :rows="2"\
-                  :autosize="{ minRows: 2, maxRows: 5 }"\
-                  placeholder="向专家发起任务指令…"\
-                  class="chat-composer-textarea"\
-                  @keydown.ctrl.enter="send" />\
-                <div class="chat-composer-actions">\
-                  <input ref="fileInputRef" type="file" multiple class="chat-file-input-hidden" @change="handleFileSelect" />\
-                  <button type="button" class="chat-upload-btn" :disabled="sending" @click="triggerFileUpload" title="上传文件">\
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>\
-                  </button>\
-                  <button type="button" class="chat-send-btn" :class="{ loading: sending }" :disabled="sending" @click="send" title="发送 (Ctrl+Enter)">\
-                    <svg v-if="!sending" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>\
-                    <span v-else class="chat-send-spinner"></span>\
-                  </button>\
-                </div>\
-              </div>\
-              <div class="chat-composer-hint">Ctrl + Enter 发送</div>\
-              <div v-if="remoteError" class="task-remote-error">{{ remoteError }}</div>\
-            </div>\
+            <button v-if="hasNewMessage" type="button" class="chat-back-to-latest" @click="backToLatest">\
+              <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>\
+              回到最新\
+            </button>\
           </div>\
+          <chat-composer\
+            v-model:input-text="inputText"\
+            :pending-files="pendingFiles"\
+            :sending="sending"\
+            :expert-status="expertStatus"\
+            :remote-error="remoteError"\
+            :format-file-size-fn="formatFileSize"\
+            :model-override="sessionModelOverride"\
+            :model-list="modelList"\
+            :session-cwd="sessionCwd"\
+            :cwd-list="cwdOptions"\
+            :token-estimate="tokenEstimate"\
+            :workspace-files="workspaceFilesFlat"\
+            @submit="send"\
+            @file-select="handleFileSelect"\
+            @remove-file="removePendingFile"\
+            @interrupt="handleInterrupt"\
+            @select-model="handleSelectModel"\
+            @select-cwd="handleSelectCwd"\
+            @open-workspace="toggleWorkspace" />\
         </div>\
-        <aside class="task-right-panel">\
-          <div class="task-right-panel-inner">\
-            <div class="task-right-panel-head">\
-              <h4 class="task-right-panel-title">\
-                <span class="task-panel-title-icon">\
-                  <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">\
-                    <line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/>\
-                    <line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/>\
-                  </svg>\
-                </span>\
-                任务列表\
-              </h4>\
-            </div>\
-            <div class="task-list-stats">\
-              <span class="task-stat-item" title="任务总数">\
-                <span class="task-stat-total-icon">\
-                  <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 6h13M8 12h13M8 18h13"/><path d="M3 6h.01M3 12h.01M3 18h.01"/></svg>\
-                </span>\
-                {{ taskStats.total }}\
-              </span>\
-              <span class="task-stat-item" title="运行中">\
-                <span class="task-stat-running-icon"></span>\
-                {{ taskStats.running }}\
-              </span>\
-              <span class="task-stat-item" title="已就绪">\
-                <span class="task-status-dot-wrap task-stat-status-icon"><span class="task-status-dot"></span></span>\
-                {{ taskStats.ready }}\
-              </span>\
-            </div>\
-            <div class="task-list-scroll">\
-              <div class="task-list">\
-              <task-list-item\
-                v-for="t in filteredTasks"\
-                :key="t.id"\
-                :task="t"\
-                :active="currentTaskId === t.id"\
-                :artifact-open="artifactPanelTaskId === t.id"\
-                :is-running="isTaskRunning(t)"\
-                :status-tip="taskStatusTip(t)"\
-                :created-at-label="formatTaskCreatedAt(t.createdAt)"\
-                :artifact-count="getTaskArtifactCount(t.id)"\
-                @select="selectTask(t.id)"\
-                @toggle-artifacts="toggleTaskArtifacts(t, $event)"\
-                @menu="handleTaskMenu($event, t)" />\
-              <div v-if="filteredTasks.length === 0" class="task-list-empty">\
-                <div class="task-list-empty-icon">📋</div>\
-                <p>暂无任务</p>\
-                <span>点击上方「发起任务」开始</span>\
-              </div>\
-              </div>\
-            </div>\
-          </div>\
-        </aside>\
-        <aside v-show="artifactPanelTaskId" class="task-artifacts-panel">\
-          <div class="task-artifacts-panel-inner">\
-            <div class="task-artifacts-panel-head task-right-panel-head task-artifacts-panel-head--stacked">\
-              <div class="task-artifacts-panel-head-inner">\
-                <span class="task-panel-title-icon">\
-                  <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">\
-                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>\
-                    <polyline points="14 2 14 8 20 8"/>\
-                  </svg>\
-                </span>\
-                <div class="task-artifacts-panel-head-body">\
-                  <div class="task-artifacts-panel-title-line">任务产物</div>\
-                  <div class="task-artifacts-panel-subline">\
-                    <span class="task-artifacts-panel-subtitle">{{ artifactPanelTaskTitle() }}</span>\
-                    <span class="task-artifacts-panel-meta-item">共 {{ panelArtifacts.length }} 项</span>\
-                  </div>\
-                </div>\
-                <button type="button" class="task-artifacts-panel-close" title="关闭" @click="closeArtifactPanel">\
-                  <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">\
-                    <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>\
-                  </svg>\
-                </button>\
-              </div>\
-            </div>\
-            <div class="task-artifacts-panel-scroll">\
-              <div v-for="a in panelArtifacts" :key="a.id" class="artifact-item" :class="artifactTypeClass(a.type)">\
-                <div class="artifact-item-top">\
-                  <span class="artifact-type-icon">\
-                    <svg v-if="a.type === \'report\'" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">\
-                      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/>\
-                    </svg>\
-                    <svg v-else-if="a.type === \'data\'" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">\
-                      <line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/>\
-                    </svg>\
-                    <svg v-else viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">\
-                      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/>\
-                    </svg>\
-                  </span>\
-                  <div class="artifact-item-head">\
-                    <span class="artifact-title">{{ a.title }}</span>\
-                    <el-tag size="small" type="info" effect="plain">{{ artifactTypeLabel[a.type] || a.type }}</el-tag>\
-                  </div>\
-                </div>\
-                <p class="artifact-content">{{ a.content }}</p>\
-                <div class="artifact-time">\
-                  <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2">\
-                    <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>\
-                  </svg>\
-                  {{ formatTaskCreatedAt(a.createdAt) }}\
-                </div>\
-                <div class="artifact-actions">\
-                  <button type="button" class="artifact-action-btn" title="预览" @click="openArtifactPreview(a)">\
-                    <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>\
-                    预览\
-                  </button>\
-                  <button type="button" class="artifact-action-btn" title="下载" @click="downloadArtifact(a)">\
-                    <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>\
-                    下载\
-                  </button>\
-                  <button type="button" class="artifact-action-btn" title="跳转到任务" @click="goToArtifactTask(artifactPanelTaskId)">\
-                    <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>\
-                    跳转\
-                  </button>\
-                </div>\
-              </div>\
-              <div v-if="panelArtifacts.length === 0" class="task-artifacts-empty">\
-                <div class="task-artifacts-empty-icon">📄</div>\
-                <p>暂无任务产物</p>\
-                <span>完成任务对话后将自动生成</span>\
-              </div>\
-            </div>\
-          </div>\
-        </aside>\
+        <chat-task-list\
+          :tasks="filteredTasks"\
+          :current-task-id="currentTaskId"\
+          :artifact-panel-task-id="artifactPanelTaskId"\
+          :task-stats="taskStats"\
+          :is-running-fn="isTaskRunning"\
+          :task-status-tip-fn="taskStatusTip"\
+          :created-at-label-fn="formatTaskCreatedAt"\
+          :artifact-count-fn="getTaskArtifactCount"\
+          @select="selectTask"\
+          @toggle-artifacts="toggleTaskArtifacts"\
+          @menu="handleTaskMenu"\
+          @open-workspace="handleOpenWorkspaceFromTask" />\
+        <chat-workspace\
+          :open="workspaceOpen"\
+          :root-path="workspaceRootPath"\
+          :tree="workspaceTree"\
+          :session-cwd="sessionCwd"\
+          :preview-file="previewFile"\
+          @close="toggleWorkspace"\
+          @select-cwd="handleSetCwd"\
+          @preview-file="handlePreviewFile" />\
+        <chat-artifacts-panel\
+          :panel-artifacts="panelArtifacts"\
+          :panel-task-title="artifactPanelTaskTitle()"\
+          :artifact-type-label="artifactTypeLabel"\
+          :created-at-label-fn="formatTaskCreatedAt"\
+          @close="closeArtifactPanel"\
+          @preview="openArtifactPreview"\
+          @download="downloadArtifact"\
+          @goto-task="goToArtifactTask(artifactPanelTaskId)" />\
         </div>\
       </div>\
       <el-dialog v-model="showExpertPreviewDialog" width="460px" class="expert-preview-dialog expert-preview-dialog--task" append-to-body>\
@@ -1203,6 +1216,6 @@
       <div v-else class="main-scroll"><el-empty description="专家不存在"><back-link label="返回专家" @click="$emit(\'nav\', \'/experts\')" /></el-empty></div>'
   };
 
-  window.TaskListItem = TaskListItem;
   window.ExpertTasksPage = ExpertTasksPage;
 })();
+

@@ -145,7 +145,7 @@
       var projects = Vue.ref([]);
       var showCreateDialog = Vue.ref(false);
       var showEditDialog = Vue.ref(false);
-      var form = Vue.ref({ name: '', description: '', expertIds: [], icon: '📁' });
+      var form = Vue.ref({ name: '', description: '', workdir: '', expertIds: [], icon: '📁' });
       var editForm = Vue.ref({ name: '', description: '', icon: '📁' });
       var editingProject = Vue.ref(null);
       var allExperts = Vue.ref(store.getExperts());
@@ -161,7 +161,7 @@
       }
 
       function resetForm() {
-        form.value = { name: '', description: '', expertIds: [], icon: '📁' };
+        form.value = { name: '', description: '', workdir: '', expertIds: [], icon: '📁' };
         createStep.value = 0;
         memberSearchQuery.value = '';
       }
@@ -308,6 +308,7 @@
           name: form.value.name.trim(),
           description: form.value.description.trim(),
           icon: form.value.icon,
+          defaultWorkdir: form.value.workdir.trim(),
           expertIds: form.value.expertIds
         });
         ElementPlus.ElMessage.success('项目创建成功');
@@ -414,7 +415,7 @@
               <p class="card-desc">{{ p.description }}</p>\
               <div v-if="getProjectStats(p.id).total" class="project-card-progress">\
                 <div class="project-progress-row">\
-                  <span class="project-progress-label">待办进度</span>\
+                  <span class="project-progress-label">看板进度</span>\
                   <span class="project-progress-count">{{ getProjectStats(p.id).done }}/{{ getProjectStats(p.id).total }}</span>\
                 </div>\
                 <div class="project-progress-track">\
@@ -502,6 +503,9 @@
                     </el-form-item>\
                     <el-form-item label="项目描述" required>\
                       <el-input v-model="form.description" type="textarea" :rows="4" placeholder="简要描述项目目标与背景" />\
+                    </el-form-item>\
+                    <el-form-item label="默认工作目录">\
+                      <el-input v-model="form.workdir" placeholder="如：D:\\projects\\yield-improvement" size="large" clearable />\
                     </el-form-item>\
                   </el-form>\
                 </div>\

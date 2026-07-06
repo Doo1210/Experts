@@ -13,6 +13,28 @@
     return 'id_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 8);
   }
 
+  function projectSlugFromName(name) {
+    var raw = String(name || '').trim().toLowerCase();
+    var slug = raw
+      .replace(/[^a-z0-9\u4e00-\u9fa5]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 48);
+    return slug || ('project-' + Date.now().toString(36));
+  }
+
+  function uniqueProjectSlug(name, currentProjectId) {
+    var base = projectSlugFromName(name);
+    var slug = base;
+    var i = 2;
+    while ((state.projects || []).some(function (p) {
+      return String(p.slug || '') === slug && !sameId(p.id, currentProjectId);
+    })) {
+      slug = base + '-' + i;
+      i += 1;
+    }
+    return slug;
+  }
+
   function sameId(a, b) {
     return String(a) === String(b);
   }
@@ -121,10 +143,27 @@
         type: m.type || 'chat',
         content: m.content,
         toolName: m.toolName || null,
-        skillName: m.skillName || null,
         expertId: m.role === 'expert' ? String(expertId) : null,
         attachments: m.attachments || null,
-        createdAt: addMinutesIso(baseIso, offset)
+        createdAt: addMinutesIso(baseIso, offset),
+        // 阶段1扩展字段
+        params: m.params || null,
+        summary: m.summary || null,
+        duration: m.duration || null,
+        progress: m.progress || null,
+        isError: m.isError || false,
+        subagentName: m.subagentName || null,
+        goal: m.goal || null,
+        subagentEvents: m.subagentEvents || null,
+        requestId: m.requestId || null,
+        question: m.question || null,
+        choices: m.choices || null,
+        answer: m.answer || null,
+        command: m.command || null,
+        description: m.description || null,
+        allowPermanent: m.allowPermanent || false,
+        choice: m.choice || null,
+        statusKind: m.statusKind || null
       };
     });
   }
@@ -274,6 +313,7 @@
       projectMessages: {},
       projectOutputs: [],
       projectTasks: [],
+      projectEvents: [],
       projectFiles: [],
       imChannels: {},
       permissions: {},
@@ -872,6 +912,9 @@
       description: '针对近期良率波动，组织工艺、质量、设备专家联合攻关。',
       visibility: 'public',
       status: 'active',
+      orchestratorProfileId: null,
+      defaultAssignee: null,
+      autoDecomposeEnabled: true,
       updatedAt: nowIso()
     };
     var p2 = {
@@ -881,6 +924,9 @@
       description: '构建多工厂物料计划数字孪生模型，提升交付准时率。',
       visibility: 'public',
       status: 'active',
+      orchestratorProfileId: null,
+      defaultAssignee: null,
+      autoDecomposeEnabled: true,
       updatedAt: nowIso()
     };
     state.projects = [p1, p2];
@@ -893,6 +939,8 @@
         { id: uid(), projectId: p2.id, expertId: seedExperts[3].id, role: 'lead', progress: 55, progressSummary: '需求预测模型已初版', joinedAt: nowIso() },
         { id: uid(), projectId: p2.id, expertId: seedExperts[5].id, role: 'member', progress: 30, progressSummary: '数据治理规范起草中', joinedAt: nowIso() }
       ];
+      p1.orchestratorProfileId = seedExperts[0].id;
+      p2.orchestratorProfileId = seedExperts[3].id;
       state.projectOutputs = [
         { id: uid(), projectId: p1.id, expertId: seedExperts[0].id, title: '良率波动根因分析报告 v1', content: '主要根因：etch 区 3 号 chamber 压力偏差 +12%。建议参数回标并加严 SPC 监控。', createdAt: nowIso() }
       ];
@@ -953,6 +1001,9 @@
       description: '针对近期良率波动，组织工艺、质量、设备专家联合攻关。',
       visibility: 'public',
       status: 'active',
+      orchestratorProfileId: null,
+      defaultAssignee: null,
+      autoDecomposeEnabled: true,
       updatedAt: nowIso()
     };
     var p2 = {
@@ -962,6 +1013,9 @@
       description: '构建多工厂物料计划数字孪生模型，提升交付准时率。',
       visibility: 'public',
       status: 'active',
+      orchestratorProfileId: null,
+      defaultAssignee: null,
+      autoDecomposeEnabled: true,
       updatedAt: nowIso()
     };
     state.projects = [p1, p2];
@@ -973,6 +1027,8 @@
         { id: uid(), projectId: p2.id, expertId: seedExperts[3].id, role: 'lead', progress: 55, progressSummary: '需求预测模型已初版', joinedAt: nowIso() },
         { id: uid(), projectId: p2.id, expertId: seedExperts[5].id, role: 'member', progress: 30, progressSummary: '数据治理规范起草中', joinedAt: nowIso() }
       ];
+      p1.orchestratorProfileId = seedExperts[0].id;
+      p2.orchestratorProfileId = seedExperts[3].id;
       state.projectOutputs = [
         { id: uid(), projectId: p1.id, expertId: seedExperts[0].id, title: '良率波动根因分析报告 v1', content: '主要根因：etch 区 3 号 chamber 压力偏差 +12%。建议参数回标并加严 SPC 监控。', createdAt: nowIso() }
       ];
@@ -1023,6 +1079,36 @@
 
   var YIELD_TASK_TITLES = ['SPC 数据分析', '良率根因分析', '设备关联分析'];
   var SUPPLY_TASK_TITLES = ['需求预测建模', '数据治理规范', '多工厂仿真验证'];
+
+  var DECOMPOSE_PLAN_TEMPLATES = [
+    { match: /良率|缺陷|异常|工艺/, children: [
+      { title: '现场数据采集与清洗', body: '收集近 4 周相关工序的原始数据，完成清洗与对齐。', priority: 'high' },
+      { title: '根因分析与假设验证', body: '基于数据建立假设树，逐项验证关键影响因素。', priority: 'high' },
+      { title: '整改方案与验证计划', body: '输出整改建议清单及验证计划，跟踪闭环。', priority: 'medium' }
+    ]},
+    { match: /供应链|需求|库存|预测/, children: [
+      { title: '历史数据梳理与特征工程', body: '整理历史销售与库存数据，构建特征集。', priority: 'high' },
+      { title: '预测建模与回测', body: '训练多 SKU 预测模型，完成回测与误差分析。', priority: 'high' },
+      { title: '落地建议与监控指标', body: '输出落地建议，定义监控指标与告警阈值。', priority: 'medium' }
+    ]},
+    { match: /设备|故障|运维|产线/, children: [
+      { title: '设备关联数据采集', body: '采集设备运行参数、PM 记录与告警事件。', priority: 'high' },
+      { title: '故障模式分析', body: '识别关键故障模式及影响因素。', priority: 'high' },
+      { title: '运维优化建议', body: '输出运维策略与备件优化建议。', priority: 'medium' }
+    ]}
+  ];
+
+  function defaultDecomposePlan(rootTitle) {
+    var text = String(rootTitle || '');
+    for (var i = 0; i < DECOMPOSE_PLAN_TEMPLATES.length; i++) {
+      if (DECOMPOSE_PLAN_TEMPLATES[i].match.test(text)) return DECOMPOSE_PLAN_TEMPLATES[i].children;
+    }
+    return [
+      { title: '信息收集与现状梳理', body: '梳理目标范围、现状与关键约束。', priority: 'high' },
+      { title: '方案制定与执行', body: '制定方案并组织专家推进执行。', priority: 'medium' },
+      { title: '结果汇总与复盘', body: '汇总执行结果，输出复盘报告。', priority: 'medium' }
+    ];
+  }
 
   var PROJECT_TASK_TITLE_RENAMES = {
     '排查 etch 区近 4 周 SPC 异常点': 'SPC 数据分析',
@@ -1088,16 +1174,18 @@
   }
 
   function normalizeProjectTaskStatus(status) {
-    if (status === 'done' || status === 'queued' || status === 'running') return status;
-    if (status === 'thinking' || status === 'tool' || status === 'waiting' || status === 'error') return 'running';
-    return 'queued';
+    var s = String(status || '').toLowerCase();
+    if (s === 'triage' || s === 'todo' || s === 'scheduled' || s === 'ready' || s === 'running' || s === 'blocked' || s === 'review' || s === 'done' || s === 'archived') return s;
+    if (s === 'queued') return 'ready';
+    if (s === 'completed' || s === 'complete') return 'done';
+    if (s === 'thinking' || s === 'tool' || s === 'waiting' || s === 'error') return 'running';
+    return 'todo';
   }
 
   function projectTaskStatusRank(status) {
     var s = normalizeProjectTaskStatus(status);
-    if (s === 'done') return 0;
-    if (s === 'running') return 1;
-    return 2;
+    var ranks = { triage: 0, todo: 1, scheduled: 2, ready: 3, running: 4, blocked: 5, review: 6, done: 7, archived: 8 };
+    return ranks[s] == null ? 99 : ranks[s];
   }
 
   var DEMO_PROJECT_TASK_STATUSES = {
@@ -1117,34 +1205,63 @@
     thinking: true, tool: true, waiting: true, error: true
   };
 
-  function migrateProjectTaskStatus() {
-    var SCHEMA = 2;
-    if ((state.projectTaskSchemaVersion || 0) >= SCHEMA) {
-      var touched = false;
-      (state.projectTasks || []).forEach(function (t) {
-        var next = normalizeProjectTaskStatus(t.status);
-        if (next !== t.status) {
-          t.status = next;
-          touched = true;
-        }
-      });
-      if (touched) persist();
-      return;
-    }
+  function normalizeProjectTaskRecord(t) {
+    if (!t) return t;
+    var changed = false;
+    var status = normalizeProjectTaskStatus(t.status);
+    if (t.status !== status) { t.status = status; changed = true; }
+    if (!t.body && t.description) { t.body = t.description; changed = true; }
+    if (!t.assignee && t.expertId) { t.assignee = t.expertId; changed = true; }
+    if (!t.expertId && t.assignee) { t.expertId = t.assignee; changed = true; }
+    if (!t.priority) { t.priority = 'medium'; changed = true; }
+    if (t.commentCount == null) { t.commentCount = 0; changed = true; }
+    if (t.parentTaskId === undefined) { t.parentTaskId = null; changed = true; }
+    if (t.isTriage === undefined) { t.isTriage = false; changed = true; }
+    if (!t.latestSummary) { t.latestSummary = t.result || t.blockedReason || t.body || ''; changed = true; }
+    if (!t.createdAt) { t.createdAt = t.updatedAt || nowIso(); changed = true; }
+    if (!t.updatedAt) { t.updatedAt = t.createdAt || nowIso(); changed = true; }
+    return changed;
+  }
 
+  function migrateProjectsKanbanFields() {
+    var updated = false;
+    (state.projects || []).forEach(function (p) {
+      if (!p.slug) {
+        p.slug = uniqueProjectSlug(p.name, p.id);
+        updated = true;
+      }
+      if (p.defaultWorkdir == null) {
+        p.defaultWorkdir = p.workdir || '';
+        updated = true;
+      }
+      if (p.orchestratorProfileId === undefined) { p.orchestratorProfileId = null; updated = true; }
+      if (p.defaultAssignee === undefined) { p.defaultAssignee = null; updated = true; }
+      if (p.autoDecomposeEnabled === undefined) { p.autoDecomposeEnabled = true; updated = true; }
+    });
+    if (!Array.isArray(state.projectEvents)) {
+      state.projectEvents = [];
+      updated = true;
+    }
+    if (updated) persist();
+  }
+
+  function migrateProjectTaskStatus() {
+    var SCHEMA = 3;
     var updated = false;
     (state.projectTasks || []).forEach(function (t) {
       var legacyStatus = t.status;
       var canonical = DEMO_PROJECT_TASK_STATUSES[t.title];
-      var next = canonical || normalizeProjectTaskStatus(legacyStatus);
-      if (LEGACY_PROJECT_TASK_STATUSES[legacyStatus] && canonical) next = canonical;
-      if (next !== t.status) {
-        t.status = next;
+      if ((state.projectTaskSchemaVersion || 0) < SCHEMA && LEGACY_PROJECT_TASK_STATUSES[legacyStatus] && canonical) {
+        t.status = canonical;
         updated = true;
       }
+      if (normalizeProjectTaskRecord(t)) updated = true;
     });
-    state.projectTaskSchemaVersion = SCHEMA;
-    persist();
+    if ((state.projectTaskSchemaVersion || 0) < SCHEMA) {
+      state.projectTaskSchemaVersion = SCHEMA;
+      updated = true;
+    }
+    if (updated) persist();
   }
 
   function migrateProjectTasks() {
@@ -1346,6 +1463,7 @@
       migrateProjectIds();
       seedDemoProjectsIfEmpty();
       migrateProjectsVisibility();
+      migrateProjectsKanbanFields();
       migrateProjectTasks();
       migrateProjectTaskTitles();
       migrateProjectTaskStatus();
@@ -2003,7 +2121,30 @@
           type: m.type || m.msgType || 'chat',
           content: m.content,
           expertId: String(expertId),
+          // 工具调用相关
           toolName: m.toolName || null,
+          params: m.params || null,
+          summary: m.summary || null,
+          duration: m.duration || null,
+          progress: m.progress || null,
+          isError: m.isError || false,
+          // 子代理相关
+          subagentName: m.subagentName || null,
+          goal: m.goal || null,
+          subagentEvents: m.subagentEvents || null,
+          // 澄清提问相关
+          requestId: m.requestId || null,
+          question: m.question || null,
+          choices: m.choices || null,
+          answer: m.answer || null,
+          // 危险操作审批相关
+          command: m.command || null,
+          description: m.description || null,
+          allowPermanent: m.allowPermanent || false,
+          choice: m.choice || null,
+          // 状态/进度行
+          statusKind: m.statusKind || null,
+          // 兼容旧字段
           skillName: m.skillName || null,
           createdAt: m.createdAt
         };
@@ -2017,7 +2158,30 @@
         type: msg.type || 'chat',
         content: msg.content,
         expertId: msg.expertId || null,
+        // 工具调用相关（tool.start / tool.progress / tool.complete）
         toolName: msg.toolName || null,
+        params: msg.params || null,
+        summary: msg.summary || null,
+        duration: msg.duration || null,
+        progress: msg.progress || null,
+        isError: msg.isError || false,
+        // 子代理相关（subagent.spawn_requested / start / complete）
+        subagentName: msg.subagentName || null,
+        goal: msg.goal || null,
+        subagentEvents: msg.subagentEvents || null,
+        // 澄清提问相关（clarify.request / respond）
+        requestId: msg.requestId || null,
+        question: msg.question || null,
+        choices: msg.choices || null,
+        answer: msg.answer || null,
+        // 危险操作审批相关（approval.request / respond）
+        command: msg.command || null,
+        description: msg.description || null,
+        allowPermanent: msg.allowPermanent || false,
+        choice: msg.choice || null,
+        // 状态/进度行（status.update kind=process/goal）
+        statusKind: msg.statusKind || null,
+        // 兼容旧字段（skill.* 将在阶段0 T0.2 移除使用）
         skillName: msg.skillName || null,
         attachments: msg.attachments || null,
         createdAt: nowIso()
@@ -2056,13 +2220,19 @@
       return state.projects.find(function (p) { return sameId(p.id, id); }) || null;
     },
     createProject: function (payload) {
+      payload = payload || {};
       var project = {
         id: uid(),
+        slug: uniqueProjectSlug(payload.name),
         name: payload.name,
         icon: payload.icon || '📁',
         description: payload.description,
+        defaultWorkdir: payload.defaultWorkdir || payload.workdir || '',
         visibility: payload.visibility || 'public',
         status: 'active',
+        orchestratorProfileId: payload.orchestratorProfileId || null,
+        defaultAssignee: payload.defaultAssignee || null,
+        autoDecomposeEnabled: payload.autoDecomposeEnabled !== false,
         updatedAt: nowIso()
       };
       state.projects.unshift(project);
@@ -2072,12 +2242,23 @@
       (payload.expertIds || []).forEach(function (eid) {
         AppStore.addProjectMember(project.id, eid);
       });
+      AppStore.addProjectEvent(project.id, {
+        type: 'project_created',
+        category: 'project',
+        title: '项目创建',
+        content: '项目「' + project.name + '」已创建并初始化为 Kanban Board。'
+      }, { skipPersist: true });
       persist();
       return project;
     },
     saveProject: function (project) {
       var idx = state.projects.findIndex(function (p) { return sameId(p.id, project.id); });
       project.updatedAt = nowIso();
+      project.slug = project.slug || uniqueProjectSlug(project.name, project.id);
+      project.defaultWorkdir = project.defaultWorkdir || project.workdir || '';
+      if (project.orchestratorProfileId === undefined) project.orchestratorProfileId = null;
+      if (project.defaultAssignee === undefined) project.defaultAssignee = null;
+      if (project.autoDecomposeEnabled === undefined) project.autoDecomposeEnabled = true;
       if (idx >= 0) state.projects[idx] = project;
       persist();
       return project;
@@ -2089,6 +2270,7 @@
       delete state.projectMessages[id];
       state.projectOutputs = state.projectOutputs.filter(function (o) { return !sameId(o.projectId, id); });
       state.projectTasks = state.projectTasks.filter(function (t) { return !sameId(t.projectId, id); });
+      state.projectEvents = (state.projectEvents || []).filter(function (e) { return !sameId(e.projectId, id); });
       state.projectFiles = state.projectFiles.filter(function (f) { return !sameId(f.projectId, id); });
       state.tasks = state.tasks.filter(function (t) { return !sameId(t.projectId, id); });
       removedTaskIds.forEach(function (tid) { delete state.messages[tid]; });
@@ -2169,24 +2351,398 @@
     getProjectOutputs: function (projectId) {
       return state.projectOutputs.filter(function (o) { return sameId(o.projectId, projectId); });
     },
+    addProjectEvent: function (projectId, payload, opts) {
+      opts = opts || {};
+      if (!state.projectEvents) state.projectEvents = [];
+      var event = {
+        id: uid(),
+        projectId: projectId,
+        taskId: payload.taskId || null,
+        expertId: payload.expertId || null,
+        type: payload.type || 'project_event',
+        category: payload.category || 'project',
+        title: payload.title || '项目动态',
+        content: payload.content || '',
+        meta: payload.meta || null,
+        createdAt: payload.createdAt || nowIso()
+      };
+      state.projectEvents.unshift(event);
+      if (!opts.skipPersist) persist();
+      return event;
+    },
+    getProjectEvents: function (projectId, filter) {
+      var category = filter && filter !== 'all' ? filter : null;
+      return (state.projectEvents || [])
+        .filter(function (e) {
+          if (!sameId(e.projectId, projectId)) return false;
+          if (!category) return true;
+          return e.category === category;
+        })
+        .sort(function (a, b) { return (b.createdAt || '').localeCompare(a.createdAt || ''); });
+    },
+    saveProjectWorkdir: function (projectId, workdir) {
+      var p = state.projects.find(function (x) { return sameId(x.id, projectId); });
+      if (!p) return null;
+      p.defaultWorkdir = String(workdir || '').trim();
+      p.updatedAt = nowIso();
+      AppStore.addProjectEvent(projectId, {
+        type: 'workdir_updated',
+        category: 'project',
+        title: p.defaultWorkdir ? '工作目录已更新' : '工作目录已清空',
+        content: p.defaultWorkdir ? ('默认工作目录：' + p.defaultWorkdir) : '已清空项目默认工作目录。'
+      }, { skipPersist: true });
+      persist();
+      return p;
+    },
     getProjectTasks: function (projectId) {
       return (state.projectTasks || [])
         .filter(function (t) { return sameId(t.projectId, projectId); })
         .map(function (t) {
+          normalizeProjectTaskRecord(t);
           var expert = t.expertId ? AppStore.getExpert(t.expertId) : null;
           var status = normalizeProjectTaskStatus(t.status);
           return Object.assign({}, t, {
             status: status,
+            assignee: t.assignee || t.expertId || null,
             expert: expert,
-            assigneeLabel: expert ? expert.name : '待分配'
+            assigneeLabel: expert ? expert.name : '未指派'
           });
         })
         .sort(function (a, b) {
           var ra = projectTaskStatusRank(a.status);
           var rb = projectTaskStatusRank(b.status);
           if (ra !== rb) return ra - rb;
-          return (a.sortOrder || 0) - (b.sortOrder || 0);
+          return (b.updatedAt || '').localeCompare(a.updatedAt || '') || ((a.sortOrder || 0) - (b.sortOrder || 0));
         });
+    },
+    createProjectTask: function (projectId, payload) {
+      payload = payload || {};
+      var title = String(payload.title || '').trim();
+      var task = {
+        id: uid(),
+        projectId: projectId,
+        title: title,
+        body: String(payload.body || '').trim(),
+        status: normalizeProjectTaskStatus(payload.status || 'todo'),
+        expertId: payload.assignee || payload.expertId || null,
+        assignee: payload.assignee || payload.expertId || null,
+        priority: payload.priority || 'medium',
+        parentTaskId: payload.parentTaskId || null,
+        isTriage: !!payload.isTriage,
+        commentCount: 0,
+        latestSummary: String(payload.body || '').trim(),
+        result: '',
+        blockedReason: '',
+        sortOrder: Date.now(),
+        createdAt: nowIso(),
+        updatedAt: nowIso()
+      };
+      if (!state.projectTasks) state.projectTasks = [];
+      state.projectTasks.unshift(task);
+      var p = state.projects.find(function (x) { return sameId(x.id, projectId); });
+      if (p) p.updatedAt = nowIso();
+      AppStore.addProjectEvent(projectId, {
+        type: 'task_created',
+        category: 'task',
+        taskId: task.id,
+        expertId: task.expertId,
+        title: '任务创建',
+        content: '创建任务「' + task.title + '」' + (task.expertId ? ('，负责人：' + ((AppStore.getExpert(task.expertId) || {}).name || '未知专家')) : '，暂未指派负责人。')
+      }, { skipPersist: true });
+      persist();
+      return task;
+    },
+    decomposeProjectTask: function (projectId, rootTaskId, plan) {
+      var root = (state.projectTasks || []).find(function (t) { return sameId(t.projectId, projectId) && sameId(t.id, rootTaskId); });
+      if (!root) return { children: [] };
+      plan = plan || {};
+      root.status = normalizeProjectTaskStatus('running');
+      root.latestSummary = '协调专家正在拆解目标并派发子任务';
+      root.updatedAt = nowIso();
+      AppStore.addProjectEvent(projectId, {
+        type: 'task_decompose_started',
+        category: 'execution',
+        taskId: root.id,
+        expertId: root.expertId,
+        title: '自动拆解启动',
+        content: '协调专家开始拆解目标「' + root.title + '」并派发子任务。'
+      }, { skipPersist: true });
+      var members = (state.projectMembers || [])
+        .filter(function (m) { return sameId(m.projectId, projectId) && !sameId(m.expertId, root.expertId); })
+        .map(function (m) { return m.expertId; });
+      var children = [];
+      var definitions = (plan.children && plan.children.length) ? plan.children : defaultDecomposePlan(root.title);
+      definitions.forEach(function (def, idx) {
+        var assignee = def.assignee || (members.length ? members[idx % members.length] : null);
+        var child = AppStore.createProjectTask(projectId, {
+          title: def.title,
+          body: def.body || '',
+          assignee: assignee,
+          priority: def.priority || 'medium',
+          status: assignee ? 'ready' : 'todo',
+          parentTaskId: root.id
+        });
+        children.push(child);
+        AppStore.addProjectEvent(projectId, {
+          type: 'task_dispatched',
+          category: 'task',
+          taskId: child.id,
+          expertId: assignee,
+          title: '子任务派发',
+          content: '协调专家派发子任务「' + child.title + '」' + (assignee ? ('给 ' + ((AppStore.getExpert(assignee) || {}).name || '专家')) : '，暂未指派。')
+        }, { skipPersist: true });
+      });
+      root.status = normalizeProjectTaskStatus('review');
+      root.latestSummary = '已拆解为 ' + children.length + ' 个子任务并完成派发';
+      root.updatedAt = nowIso();
+      AppStore.addProjectEvent(projectId, {
+        type: 'task_decompose_completed',
+        category: 'execution',
+        taskId: root.id,
+        expertId: root.expertId,
+        title: '拆解完成',
+        content: '目标「' + root.title + '」已拆解为 ' + children.length + ' 个子任务并完成派发。'
+      }, { skipPersist: true });
+      persist();
+      return { root: root, children: children };
+    },
+    commentProjectTask: function (projectId, taskId, comment) {
+      var task = (state.projectTasks || []).find(function (t) { return sameId(t.projectId, projectId) && sameId(t.id, taskId); });
+      if (!task) return null;
+      var text = String(comment || '').trim();
+      task.commentCount = (task.commentCount || 0) + 1;
+      task.latestSummary = text;
+      task.updatedAt = nowIso();
+      AppStore.addProjectEvent(projectId, {
+        type: 'task_commented',
+        category: 'comment',
+        taskId: task.id,
+        expertId: task.expertId,
+        title: '任务评论',
+        content: '在任务「' + task.title + '」下添加评论：' + text
+      }, { skipPersist: true });
+      persist();
+      return task;
+    },
+    assignProjectTask: function (projectId, taskId, expertId) {
+      var task = (state.projectTasks || []).find(function (t) { return sameId(t.projectId, projectId) && sameId(t.id, taskId); });
+      if (!task) return null;
+      task.expertId = expertId || null;
+      task.assignee = expertId || null;
+      if (task.status === 'todo' && expertId) task.status = 'ready';
+      task.updatedAt = nowIso();
+      var expert = expertId ? AppStore.getExpert(expertId) : null;
+      task.latestSummary = expert ? ('已指派给 ' + expert.name) : '已取消负责人';
+      AppStore.addProjectEvent(projectId, {
+        type: 'task_assigned',
+        category: 'task',
+        taskId: task.id,
+        expertId: expertId || null,
+        title: '任务指派',
+        content: '任务「' + task.title + '」' + (expert ? ('已指派给 ' + expert.name + '。') : '已取消负责人。')
+      }, { skipPersist: true });
+      persist();
+      return task;
+    },
+    completeProjectTask: function (projectId, taskId, result) {
+      var task = (state.projectTasks || []).find(function (t) { return sameId(t.projectId, projectId) && sameId(t.id, taskId); });
+      if (!task) return null;
+      var text = String(result || '').trim();
+      task.status = 'done';
+      task.result = text;
+      task.latestSummary = text || '任务已完成';
+      task.completedAt = nowIso();
+      task.updatedAt = task.completedAt;
+      AppStore.addProjectEvent(projectId, {
+        type: 'task_completed',
+        category: 'task',
+        taskId: task.id,
+        expertId: task.expertId,
+        title: '任务完成',
+        content: '任务「' + task.title + '」已完成。' + (text ? ('结果：' + text) : '')
+      }, { skipPersist: true });
+      persist();
+      return task;
+    },
+    blockProjectTask: function (projectId, taskId, reason) {
+      var task = (state.projectTasks || []).find(function (t) { return sameId(t.projectId, projectId) && sameId(t.id, taskId); });
+      if (!task) return null;
+      var text = String(reason || '').trim();
+      task.status = 'blocked';
+      task.blockedReason = text;
+      task.latestSummary = text || '任务被阻塞';
+      task.updatedAt = nowIso();
+      AppStore.addProjectEvent(projectId, {
+        type: 'task_blocked',
+        category: 'exception',
+        taskId: task.id,
+        expertId: task.expertId,
+        title: '任务阻塞',
+        content: '任务「' + task.title + '」被标记为阻塞。原因：' + text
+      }, { skipPersist: true });
+      persist();
+      return task;
+    },
+    unblockProjectTask: function (projectId, taskId, reason) {
+      var task = (state.projectTasks || []).find(function (t) { return sameId(t.projectId, projectId) && sameId(t.id, taskId); });
+      if (!task) return null;
+      var text = String(reason || '').trim();
+      task.status = normalizeProjectTaskStatus('ready');
+      task.blockedReason = '';
+      task.latestSummary = text ? ('已重启：' + text) : '任务已重启';
+      task.updatedAt = nowIso();
+      AppStore.addProjectEvent(projectId, {
+        type: 'task_unblocked',
+        category: 'task',
+        taskId: task.id,
+        expertId: task.expertId,
+        title: '任务重启',
+        content: '任务「' + task.title + '」已解除阻塞并重启。' + (text ? ('说明：' + text) : '')
+      }, { skipPersist: true });
+      persist();
+      return task;
+    },
+    archiveProjectTask: function (projectId, taskId) {
+      var task = (state.projectTasks || []).find(function (t) { return sameId(t.projectId, projectId) && sameId(t.id, taskId); });
+      if (!task) return null;
+      task.status = normalizeProjectTaskStatus('archived');
+      task.latestSummary = '任务已归档';
+      task.updatedAt = nowIso();
+      AppStore.addProjectEvent(projectId, {
+        type: 'task_archived',
+        category: 'task',
+        taskId: task.id,
+        expertId: task.expertId,
+        title: '任务归档',
+        content: '任务「' + task.title + '」已归档。'
+      }, { skipPersist: true });
+      persist();
+      return task;
+    },
+    deleteProjectTaskPermanently: function (projectId, taskId) {
+      var task = (state.projectTasks || []).find(function (t) { return sameId(t.projectId, projectId) && sameId(t.id, taskId); });
+      if (!task) return false;
+      state.projectTasks = state.projectTasks.filter(function (t) { return !(sameId(t.projectId, projectId) && sameId(t.id, taskId)); });
+      AppStore.addProjectEvent(projectId, {
+        type: 'task_deleted',
+        category: 'task',
+        taskId: null,
+        expertId: task.expertId,
+        title: '任务永久删除',
+        content: '任务「' + task.title + '」已被永久删除。'
+      });
+      return true;
+    },
+    promoteProjectTask: function (projectId, taskId) {
+      var task = (state.projectTasks || []).find(function (t) { return sameId(t.projectId, projectId) && sameId(t.id, taskId); });
+      if (!task) return null;
+      task.status = normalizeProjectTaskStatus('ready');
+      task.latestSummary = '任务已晋升为排队中';
+      task.updatedAt = nowIso();
+      AppStore.addProjectEvent(projectId, {
+        type: 'task_promoted',
+        category: 'task',
+        taskId: task.id,
+        expertId: task.expertId,
+        title: '任务晋升',
+        content: '任务「' + task.title + '」已晋升为排队中。'
+      }, { skipPersist: true });
+      persist();
+      return task;
+    },
+    reassignProjectTask: function (projectId, taskId, expertId, reason) {
+      var task = (state.projectTasks || []).find(function (t) { return sameId(t.projectId, projectId) && sameId(t.id, taskId); });
+      if (!task) return null;
+      var text = String(reason || '').trim();
+      var prevAssignee = task.expertId;
+      task.expertId = expertId || null;
+      task.assignee = expertId || null;
+      task.latestSummary = '已转交给 ' + ((AppStore.getExpert(expertId) || {}).name || '专家');
+      task.updatedAt = nowIso();
+      var expert = expertId ? AppStore.getExpert(expertId) : null;
+      AppStore.addProjectEvent(projectId, {
+        type: 'task_reassigned',
+        category: 'task',
+        taskId: task.id,
+        expertId: expertId || null,
+        title: '任务转交',
+        content: '任务「' + task.title + '」' + (expert ? ('已转交给 ' + expert.name + '。') : '已取消负责人。') + (text ? ('原因：' + text) : '')
+      }, { skipPersist: true });
+      persist();
+      return task;
+    },
+    editProjectTask: function (projectId, taskId, patch) {
+      var task = (state.projectTasks || []).find(function (t) { return sameId(t.projectId, projectId) && sameId(t.id, taskId); });
+      if (!task) return null;
+      patch = patch || {};
+      var changed = [];
+      if (patch.title !== undefined && String(patch.title).trim() && patch.title !== task.title) {
+        task.title = String(patch.title).trim();
+        changed.push('标题');
+      }
+      if (patch.body !== undefined && patch.body !== task.body) {
+        task.body = String(patch.body).trim();
+        changed.push('说明');
+      }
+      if (patch.priority !== undefined && patch.priority !== task.priority) {
+        task.priority = patch.priority;
+        changed.push('优先级');
+      }
+      if (patch.result !== undefined && patch.result !== task.result) {
+        task.result = String(patch.result).trim();
+        changed.push('结果');
+      }
+      if (patch.blockedReason !== undefined && patch.blockedReason !== task.blockedReason) {
+        task.blockedReason = String(patch.blockedReason).trim();
+        changed.push('阻塞说明');
+      }
+      if (!changed.length) return task;
+      task.updatedAt = nowIso();
+      AppStore.addProjectEvent(projectId, {
+        type: 'task_edited',
+        category: 'task',
+        taskId: task.id,
+        expertId: task.expertId,
+        title: '任务编辑',
+        content: '任务「' + task.title + '」更新了：' + changed.join('、')
+      }, { skipPersist: true });
+      persist();
+      return task;
+    },
+    moveProjectTaskStatus: function (projectId, taskId, targetStatus) {
+      var task = (state.projectTasks || []).find(function (t) { return sameId(t.projectId, projectId) && sameId(t.id, taskId); });
+      if (!task) return null;
+      var next = normalizeProjectTaskStatus(targetStatus);
+      if (!next || next === task.status) return task;
+      var prev = task.status;
+      task.status = next;
+      if (next === 'done') task.completedAt = nowIso();
+      if (next !== 'blocked') task.blockedReason = '';
+      task.latestSummary = '状态从「' + prev + '」变更为「' + next + '」';
+      task.updatedAt = nowIso();
+      AppStore.addProjectEvent(projectId, {
+        type: 'task_status_moved',
+        category: 'task',
+        taskId: task.id,
+        expertId: task.expertId,
+        title: '任务状态变更',
+        content: '任务「' + task.title + '」状态从「' + prev + '」变更为「' + next + '」。'
+      }, { skipPersist: true });
+      persist();
+      return task;
+    },
+    getChildProjectTasks: function (projectId, parentTaskId) {
+      return (state.projectTasks || []).filter(function (t) {
+        return sameId(t.projectId, projectId) && sameId(t.parentTaskId, parentTaskId);
+      });
+    },
+    getRootProjectTasks: function (projectId) {
+      return (state.projectTasks || [])
+        .filter(function (t) {
+          if (!sameId(t.projectId, projectId)) return false;
+          return t.isTriage || normalizeProjectTaskStatus(t.status) === 'triage';
+        })
+        .sort(function (a, b) { return (b.createdAt || '').localeCompare(a.createdAt || ''); });
     },
     normalizeProjectTaskStatus: normalizeProjectTaskStatus,
     getProjectFiles: function (projectId) {
@@ -2277,6 +2833,48 @@
         if (a.kind === 'folder') return (a.name || '').localeCompare(b.name || '', 'zh-Hans-CN');
         return (b.createdAt || '').localeCompare(a.createdAt || '');
       });
+    },
+    // 阶段3：组装树形结构
+    getWorkspaceTree: function (expertId) {
+      var list = state.workspaceFiles[expertId] || [];
+      function build(parentId) {
+        var nodes = list.filter(function (x) {
+          var pid = x.parentId ? String(x.parentId) : null;
+          return (pid || null) === (parentId || null);
+        }).map(function (x) {
+          var node = {
+            id: x.id,
+            name: x.name,
+            type: x.kind === 'folder' ? 'folder' : 'file',
+            kind: x.kind === 'folder' ? 'folder' : (x.kind || 'file'),
+            size: x.size || 0,
+            mime: x.mime || '',
+            content: x.content || '',
+            previewUrl: x.previewUrl || ''
+          };
+          if (node.type === 'folder') {
+            node.children = build(x.id);
+          }
+          return node;
+        });
+        nodes.sort(function (a, b) {
+          if (a.type !== b.type) return a.type === 'folder' ? -1 : 1;
+          return (a.name || '').localeCompare(b.name || '', 'zh-Hans-CN');
+        });
+        return nodes;
+      }
+      return build(null);
+    },
+    getFileContent: function (expertId, fileId) {
+      var list = state.workspaceFiles[expertId] || [];
+      var item = list.find(function (f) { return String(f.id) === String(fileId); });
+      if (!item) return null;
+      return {
+        content: item.content || '',
+        previewUrl: item.previewUrl || '',
+        mime: item.mime || '',
+        size: item.size || 0
+      };
     },
     addWorkspaceFolder: function (expertId, payload) {
       if (!state.workspaceFiles[expertId]) state.workspaceFiles[expertId] = [];
@@ -2407,19 +3005,75 @@
 
     mockExpertWorkflowSteps: function (expert, taskId, userText) {
       var cap = getExpertDemoCapabilities(expert.id);
-      var snippet = (userText || '').slice(0, 40) + ((userText || '').length > 40 ? '…' : '');
+      var text = String(userText || '');
+      var kind = 'normal';
+
+      if (/错误|失败|报错|异常/.test(text)) kind = 'error';
+      else if (/子代理|复杂|委派|subagent/i.test(text)) kind = 'subagent';
+      else if (/确认|审批|澄清|clarify|approval/i.test(text)) kind = 'hitl';
+
       this.addMessage(taskId, {
         role: 'expert', type: 'thought', expertId: expert.id,
         content: 'Thought: 理解用户需求后，先确认关键假设与所需数据来源。'
       });
-      this.addMessage(taskId, {
-        role: 'expert', type: 'skill', expertId: expert.id, skillName: cap.skill,
-        content: ''
-      });
-      this.addMessage(taskId, {
-        role: 'expert', type: 'action', expertId: expert.id, toolName: cap.tool,
-        content: ''
-      });
+
+      if (kind === 'error') {
+        this.addMessage(taskId, {
+          role: 'expert', type: 'status', expertId: expert.id,
+          statusKind: 'model', content: '切换至 gpt-4o 重试'
+        });
+        this.addMessage(taskId, {
+          role: 'expert', type: 'action', expertId: expert.id,
+          toolName: cap.tool,
+          params: { query: text.slice(0, 30), source: '内部知识库' },
+          summary: '连接数据源超时（30s）',
+          duration: 30.0,
+          isError: true,
+          content: '[' + cap.tool + '] 执行失败 (30.0s)'
+        });
+        this.addMessage(taskId, {
+          role: 'expert', type: 'error', expertId: expert.id,
+          content: '工具执行失败：连接数据源超时，已重试 2 次。'
+        });
+      } else if (kind === 'subagent') {
+        this.addMessage(taskId, {
+          role: 'expert', type: 'status', expertId: expert.id,
+          statusKind: 'info', content: '委派子代理处理复杂子任务'
+        });
+        this.addMessage(taskId, {
+          role: 'expert', type: 'subagent', expertId: expert.id,
+          subagentName: 'research-sub-agent',
+          goal: '收集并整理「' + text.slice(0, 20) + '」相关资料',
+          subagentEvents: [
+            { id: 'sa-1', type: 'thought', content: '子代理：定位数据源并提取关键信息。' },
+            { id: 'sa-2', type: 'action', toolName: 'web_search', params: { q: text.slice(0, 20) }, summary: '检索到 5 条相关结果', duration: 2.3, content: '[web_search] 执行完成 (2.3s)' },
+            { id: 'sa-3', type: 'chat', content: '子代理已完成资料收集，共 5 条有效结果。' }
+          ]
+        });
+      } else if (kind === 'hitl') {
+        this.addMessage(taskId, {
+          role: 'expert', type: 'clarify', expertId: expert.id,
+          requestId: 'clarify-' + Date.now(),
+          question: '请确认您希望分析的维度：',
+          choices: ['按时间趋势', '按地域分布', '按产品类别'],
+          answer: null
+        });
+      } else {
+        this.addMessage(taskId, {
+          role: 'expert', type: 'status', expertId: expert.id,
+          statusKind: 'model', content: '使用 gpt-4o 模型推理'
+        });
+        this.addMessage(taskId, {
+          role: 'expert', type: 'action', expertId: expert.id,
+          toolName: cap.tool,
+          params: { query: text.slice(0, 30), source: '内部知识库' },
+          summary: '检索到 3 条相关记录并完成聚合',
+          duration: 1.8,
+          content: '[' + cap.tool + '] 执行完成 (1.8s)'
+        });
+      }
+
+      return { kind: kind };
     },
 
     mockExpertReply: function (expert, userText) {
@@ -2445,6 +3099,69 @@
       return this.addTaskArtifact(taskId, { title: title, content: content, type: pick.type });
     }
   };
+
+  // 阶段3：工作空间 demo 数据
+  function ensureDemoWorkspace(expertId) {
+    state.workspaceFiles[expertId] = state.workspaceFiles[expertId] || [];
+    var list = state.workspaceFiles[expertId];
+    // 已有 demo 数据则跳过
+    var hasDemo = list.some(function (x) { return String(x.id || '').indexOf('ws-' + expertId + '-') === 0; });
+    if (hasDemo) return;
+
+    function addFolder(name, parentId) {
+      var f = {
+        id: 'ws-' + expertId + '-f-' + list.length,
+        name: name, type: 'folder', kind: 'folder',
+        parentId: parentId || null,
+        createdAt: '2026-06-01T09:00:00+08:00', updatedAt: '2026-06-01T09:00:00+08:00'
+      };
+      list.push(f);
+      return f.id;
+    }
+    function addFile(name, parentId, payload) {
+      var f = Object.assign({
+        id: 'ws-' + expertId + '-d-' + list.length,
+        name: name, type: 'document', kind: 'material',
+        size: 0, content: '', mime: '', previewUrl: '',
+        parentId: parentId || null,
+        createdAt: '2026-06-15T10:30:00+08:00', updatedAt: '2026-06-15T10:30:00+08:00'
+      }, payload || {});
+      list.push(f);
+    }
+
+    var rootReports = addFolder('工位8', null);
+    var fReports = addFolder('报告', rootReports);
+    var fData = addFolder('数据', rootReports);
+    var fSrc = addFolder('参考资料', rootReports);
+
+    addFile('Q2-运营分析报告.md', fReports, {
+      type: 'document', size: 8420, mime: 'text/markdown',
+      content: '# Q2 运营分析报告\n\n## 概要\n- 总访问量 12.4万（环比 +18%）\n- 转化率 3.2%（环比 +0.4pt）\n- 重点品类增长稳定\n\n## 关键发现\n1. 华东区域贡献最大增量\n2. 移动端占比首超 70%\n3. 复购用户ARPU提升 12%\n\n## 建议\n- 加大华东物流投入\n- 优化移动端首屏加载\n- 启动会员复购激励计划'
+    });
+    addFile('竞品对比.xlsx', fReports, { type: 'data', size: 24576, mime: 'application/vnd.ms-excel' });
+    addFile('周会纪要-0701.md', fReports, {
+      type: 'document', size: 3120, mime: 'text/markdown',
+      content: '# 周会纪要 2026-07-01\n\n## 参会\n- 产品、运营、数据\n\n## 议题\n1. Q2 复盘\n2. Q3 OKR 对齐\n3. 资源调配\n\n## 决议\n- 7月底前完成移动端首屏优化\n- 数据看板新增复购维度'
+    });
+
+    addFile('订单明细.csv', fData, {
+      type: 'data', size: 154320, mime: 'text/csv',
+      content: 'order_id,user_id,amount,region,channel,created_at\n1001,u_001,128.50,华东,mobile,2026-06-01 09:12\n1002,u_002,89.00,华南,pc,2026-06-01 10:05\n1003,u_003,256.80,华东,mobile,2026-06-01 11:48\n1004,u_004,42.10,华北,mobile,2026-06-02 08:30\n1005,u_005,310.00,华东,pc,2026-06-02 14:22'
+    });
+    addFile('用户画像.json', fData, {
+      type: 'data', size: 5210, mime: 'application/json',
+      content: '{\n  "total": 12453,\n  "segments": [\n    { "name": "高价值用户", "count": 823, "ratio": 0.066 },\n    { "name": "潜力用户", "count": 2156, "ratio": 0.173 },\n    { "name": "新用户", "count": 4210, "ratio": 0.338 },\n    { "name": "沉睡用户", "count": 5264, "ratio": 0.423 }\n  ]\n}'
+    });
+
+    addFile('行业白皮书.pdf', fSrc, { type: 'document', size: 1024576, mime: 'application/pdf' });
+    addFile('产品手册.md', fSrc, {
+      type: 'document', size: 15820, mime: 'text/markdown',
+      content: '# 产品使用手册 v3.2\n\n## 1. 快速开始\n注册账号 → 创建工作空间 → 邀请成员\n\n## 2. 核心功能\n- 任务编排\n- 工具调用\n- 数据接入\n\n## 3. 进阶用法\n- 子代理委派\n- 多轮澄清\n- 审批流转'
+    });
+
+    persist();
+  }
+  window.AppStore.ensureDemoWorkspace = ensureDemoWorkspace;
 
   window.AppStore.init();
 })();

@@ -2,7 +2,7 @@
  * 演示数据 — 专家对话任务剧本（按专家 id 索引）。
  * 修改剧本后请同步递增 DEMO_DATA_VERSION，触发一次性重新同步。
  */
-window.DEMO_DATA_VERSION = 1;
+window.DEMO_DATA_VERSION = 3;
 
 window.DEMO_DIALOGUE_TASK_BUNDLES = {
       '1': [
@@ -410,6 +410,42 @@ window.DEMO_DIALOGUE_TASK_BUNDLES = {
         }
       ],
       '9': [
+        {
+          title: '阶段功能演示 · 内容块全景',
+          status: 'pending',
+          daysAgo: 0, hour: 10, minute: 0,
+          messages: [
+            { role: 'user', content: '请演示所有对话内容块类型', offsetMin: 0 },
+            { role: 'expert', type: 'thought', content: '收到，我将依次展示思考过程、工具调用、状态变更、子代理委派、澄清提问、操作审批等全部内容块。', offsetMin: 1 },
+            { role: 'expert', type: 'status', statusKind: 'model', content: '使用 gpt-4o 模型推理', offsetMin: 2 },
+            { role: 'expert', type: 'action', toolName: 'MES 数据查询', params: { query: '工位8产能', source: 'MES 实时库' }, summary: '检索到 3 条记录并完成聚合', duration: 1.8, content: '[MES 数据查询] 执行完成 (1.8s)', offsetMin: 3 },
+            { role: 'expert', type: 'chat', content: '以上是**正常工具调用流程**：包含思考过程、状态行、工具卡片（含参数/摘要/时长）。\n\n下面演示错误流程。', offsetMin: 4 },
+            { role: 'user', content: '继续演示错误流程', offsetMin: 6 },
+            { role: 'expert', type: 'thought', content: '模拟工具调用失败的场景，展示错误态工具卡片与错误行。', offsetMin: 7 },
+            { role: 'expert', type: 'status', statusKind: 'model', content: '切换至 gpt-4o 重试', offsetMin: 8 },
+            { role: 'expert', type: 'action', toolName: 'MES 数据查询', params: { query: '历史归档数据', source: '归档库' }, summary: '连接数据源超时（30s）', duration: 30.0, isError: true, content: '[MES 数据查询] 执行失败 (30.0s)', offsetMin: 9 },
+            { role: 'expert', type: 'error', content: '工具执行失败：连接数据源超时，已重试 2 次。', offsetMin: 10 },
+            { role: 'expert', type: 'chat', content: '以上是**错误流程**：工具卡片显示红色错误态（⚠ 执行失败），下方紧跟错误行。\n\n下面演示子代理委派。', offsetMin: 11 },
+            { role: 'user', content: '继续演示子代理委派', offsetMin: 13 },
+            { role: 'expert', type: 'thought', content: '将复杂子任务委派给子代理处理，子代理内部也会产生思考、工具调用和回复。', offsetMin: 14 },
+            { role: 'expert', type: 'status', statusKind: 'info', content: '委派子代理处理复杂子任务', offsetMin: 15 },
+            { role: 'expert', type: 'subagent', subagentName: 'research-sub-agent', goal: '收集工位8近30天产能数据并分析趋势', subagentEvents: [
+              { id: 'sa-1', type: 'thought', content: '子代理：定位数据源并提取关键信息。' },
+              { id: 'sa-2', type: 'action', toolName: 'web_search', params: { q: '工位8产能趋势' }, summary: '检索到 5 条相关结果', duration: 2.3, content: '[web_search] 执行完成 (2.3s)' },
+              { id: 'sa-3', type: 'chat', content: '子代理已完成资料收集，工位8产能近30天呈上升趋势，日均提升 3.2%。' }
+            ], offsetMin: 16 },
+            { role: 'expert', type: 'chat', content: '以上是**子代理流程**：子代理卡片内嵌套了思考、工具调用和回复。\n\n下面演示人机交互（HITL）流程。', offsetMin: 17 },
+            { role: 'user', content: '继续演示 HITL 交互', offsetMin: 19 },
+            { role: 'expert', type: 'thought', content: '需要用户澄清分析维度，并在执行危险操作前请求审批。', offsetMin: 20 },
+            { role: 'expert', type: 'clarify', requestId: 'demo-clarify-1', question: '请确认您希望分析的维度：', choices: ['按时间趋势', '按地域分布', '按产品类别'], answer: '按时间趋势', offsetMin: 21 },
+            { role: 'expert', type: 'action', toolName: '数据查询', params: { dimension: '按时间趋势' }, summary: '按时间趋势完成分析', duration: 1.5, content: '[数据查询] 执行完成 (1.5s)', offsetMin: 22 },
+            { role: 'expert', type: 'approval', requestId: 'demo-approval-1', command: 'export_report --format=xlsx', description: '将分析结果导出为 Excel 并写入工作空间', allowPermanent: true, choice: 'allow', offsetMin: 23 },
+            { role: 'expert', type: 'chat', content: '已完成全部内容块演示。\n\n**阶段0**：思考过程 / 工具卡片 / 用户消息 / 专家回复\n**阶段1**：状态行 / 错误行 / 子代理卡片 / 澄清卡片 / 审批卡片\n\n点击各卡片可展开查看详情。', offsetMin: 24 }
+          ],
+          artifacts: [
+            { title: '内容块演示报告', content: '本任务演示了阶段0与阶段1的全部对话内容块类型，包括工具参数、执行时长、错误状态、子代理嵌套事件、HITL 交互闭环。', type: 'report' }
+          ]
+        },
         {
           title: '工位 8 视觉检测工站部署',
           status: 'running',

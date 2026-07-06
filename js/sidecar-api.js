@@ -207,8 +207,6 @@
         bind("tool.generating", handlers.onToolGenerating);
         bind("tool.started", handlers.onToolStarted);
         bind("tool.completed", handlers.onToolCompleted);
-        bind("skill.started", handlers.onSkillStarted);
-        bind("skill.completed", handlers.onSkillCompleted);
         bind("task.title", handlers.onTaskTitle);
         bind("turn.complete", handlers.onTurnComplete);
         bind("turn.error", handlers.onTurnError);
