@@ -72,8 +72,11 @@
           </span>\
           <span v-else class="ws-tree-arrow-placeholder"></span>\
           <span class="ws-tree-icon">\
-            <svg v-if="isCwd" class="ws-tree-cwd-star" viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26"/></svg>\
-            <span v-else>{{ isFolder ? (expanded ? \'📂\' : \'📁\') : fileIcon(node.name) }}</span>\
+            <svg v-if="isFolder && isCwd" class="ws-tree-folder-icon is-cwd" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">\
+              <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>\
+            </svg>\
+            <span v-else-if="isFolder">{{ expanded ? \'📂\' : \'📁\' }}</span>\
+            <span v-else>{{ fileIcon(node.name) }}</span>\
           </span>\
           <span class="ws-tree-name" :title="node.name">{{ node.name }}</span>\
           <button v-if="isFolder" type="button" class="ws-tree-setcwd-btn" title="设为当前工作目录" @click="onSetCwd">\
@@ -342,8 +345,7 @@
           <div class="chat-workspace-head">\
             <div class="chat-workspace-head-body" :class="{ \'is-selected\': isRootSelected, \'is-cwd\': isRootCwd }">\
               <span class="task-panel-title-icon">\
-                <svg v-if="isRootCwd" class="ws-tree-cwd-star" viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26"/></svg>\
-                <svg v-else viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>\
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>\
               </span>\
               <div class="chat-workspace-title-line" role="button" tabindex="0" @click="selectRoot" @keydown.enter="selectRoot">工作空间</div>\
               <button v-if="!isRootCwd" type="button" class="ws-head-setcwd-btn" title="设定为当前工作目录" @click="onSetRootCwd">\
