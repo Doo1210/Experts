@@ -12,7 +12,6 @@
     components: {
       ChatTopBar: window.ChatTopBar,
       ChatTaskList: window.ChatTaskList,
-      ChatArtifactsPanel: window.ChatArtifactsPanel,
       ChatWorkspace: window.ChatWorkspace,
       ChatComposer: window.ChatComposer,
       ThoughtBlock: ChatBlocks.ThoughtBlock,
@@ -39,8 +38,6 @@
       var userScrolledUp = Vue.ref(false);
       var hasNewMessage = Vue.ref(false);
       var chatFiles = createChatFileUpload();
-      var panelArtifacts = Vue.ref([]);
-      var artifactPanelTaskId = Vue.ref(null);
       var remoteError = Vue.ref('');
       var messagePollTimer = null;
       var titlePollTimer = null;
@@ -130,7 +127,25 @@
       var previewStats = Vue.ref({ tasks: 0, projects: 0, skills: 0, tools: 0 });
       // 顶部状态栏状态（阶段0先用默认值，阶段2接 session.info）
       var sessionModel = Vue.ref('gpt-4o');
-      var sessionCwd = Vue.ref('工位8');
+      // 工作目录按任务隔离：每个对话任务独立绑定 cwd（PRD 2.2 一任务一 session / 10.7）
+      // 读取当前任务的 cwd；写入时更新该任务的 cwd 并刷新任务列表以触发响应式更新
+      var DEFAULT_CWD = store.DEFAULT_TASK_CWD || '工位8';
+      var sessionCwd = Vue.computed({
+        get: function () {
+          var tid = currentTaskId.value;
+          if (!tid) return '';
+          var list = tasks.value || [];
+          for (var i = 0; i < list.length; i++) {
+            if (list[i].id === tid) return list[i].cwd || '';
+          }
+          return '';
+        },
+        set: function (cwd) {
+          if (!cwd || !currentTaskId.value) return;
+          store.updateTask(currentTaskId.value, { cwd: cwd });
+          refreshTasks();
+        }
+      });
       var workspaceOpen = Vue.ref(false);
       var workspaceTree = Vue.ref([]);
       var workspaceRootPath = Vue.ref('D:\\workspace');
@@ -166,6 +181,29 @@
           if (content) enriched = Object.assign({}, file, content);
         }
         previewFile.value = enriched;
+      }
+
+      function handleCreateFolder(payload) {
+        if (!payload || !payload.name) return;
+        if (!store.addWorkspaceFolder) return;
+        store.addWorkspaceFolder(props.expertId, { name: payload.name, parentId: payload.parentId });
+        loadWorkspaceTree();
+        ElementPlus.ElMessage.success('已创建文件夹「' + payload.name + '」');
+      }
+
+      function handleUploadFile(payload) {
+        if (!payload || !payload.files || !payload.files.length) return;
+        if (!store.addWorkspaceFile) return;
+        for (var i = 0; i < payload.files.length; i++) {
+          var f = payload.files[i];
+          store.addWorkspaceFile(props.expertId, {
+            name: f.name,
+            parentId: payload.parentId,
+            size: f.size || 0
+          });
+        }
+        loadWorkspaceTree();
+        ElementPlus.ElMessage.success('已上传 ' + payload.files.length + ' 个文件');
       }
 
       function handleOpenWorkspaceFromTask(task) {
@@ -220,7 +258,6 @@
           store.mockTaskArtifact(expert.value, currentTaskId.value, '审批通过后的导出结果');
           store.updateTask(currentTaskId.value, { status: 'pending' });
           refreshTasks();
-          if (artifactPanelTaskId.value === currentTaskId.value) loadPanelArtifacts(currentTaskId.value);
         } else {
           store.addMessage(currentTaskId.value, {
             role: 'expert', type: 'chat', expertId: expert.value.id,
@@ -380,9 +417,6 @@
         }
         loadMessages();
         refreshTasks();
-        if (artifactPanelTaskId.value === currentTaskId.value) {
-          loadPanelArtifacts(currentTaskId.value);
-        }
         sending.value = false;
         if (options.waitForTitle) {
           startTitlePoll(currentTaskId.value);
@@ -490,53 +524,6 @@
         }, 900);
       }
 
-      function loadPanelArtifacts(taskId) {
-        panelArtifacts.value = taskId ? store.getTaskArtifacts(taskId) : [];
-        if (taskId && store.fetchTaskArtifactsRemote) {
-          store.fetchTaskArtifactsRemote(props.expertId, taskId).then(function (remote) {
-            if (!remote) {
-              if (!store.isDevMock || !store.isDevMock()) {
-                var e = window.SidecarApi && window.SidecarApi.getLastError && window.SidecarApi.getLastError();
-                remoteError.value = (e && e.message) || '产物加载失败';
-              }
-              return;
-            }
-            remoteError.value = '';
-            panelArtifacts.value = remote;
-          });
-        }
-      }
-
-      function toggleTaskArtifacts(task, ev) {
-        ev.stopPropagation();
-        if (artifactPanelTaskId.value === task.id) {
-          artifactPanelTaskId.value = null;
-          panelArtifacts.value = [];
-        } else {
-          artifactPanelTaskId.value = task.id;
-          loadPanelArtifacts(task.id);
-        }
-      }
-
-      function closeArtifactPanel() {
-        artifactPanelTaskId.value = null;
-        panelArtifacts.value = [];
-      }
-
-      function artifactPanelTaskTitle() {
-        if (!artifactPanelTaskId.value) return '';
-        var t = tasks.value.find(function (x) { return x.id === artifactPanelTaskId.value; });
-        return t ? t.title : '任务产物';
-      }
-
-      function getTaskArtifactCount(taskId) {
-        return store.getTaskArtifacts(taskId).length;
-      }
-
-      function artifactTypeClass(type) {
-        return 'artifact-type-' + (type || 'file');
-      }
-
       function refreshTasks() {
         var all = store.getTasksByExpert(props.expertId, 'dialogue', true);
         tasks.value = all.filter(function (t) { return !t.archived; });
@@ -642,30 +629,6 @@
         if (!expert.value) return;
         previewStats.value = getExpertStats(expert.value.id);
         showExpertPreviewDialog.value = true;
-      }
-
-      // ---- 产物面板增强 ----
-      var artifactPreviewVisible = Vue.ref(false);
-      var artifactPreviewItem = Vue.ref(null);
-
-      function openArtifactPreview(item) {
-        artifactPreviewItem.value = item;
-        artifactPreviewVisible.value = true;
-      }
-
-      function downloadArtifact(item) {
-        var blob = new Blob([item.content || item.title], { type: 'text/plain;charset=utf-8' });
-        var url = URL.createObjectURL(blob);
-        var a = document.createElement('a');
-        a.href = url;
-        a.download = (item.title || '产物') + '.txt';
-        a.click();
-        URL.revokeObjectURL(url);
-      }
-
-      function goToArtifactTask(taskId) {
-        if (!taskId) return;
-        selectTask(taskId);
       }
 
       function handleTaskMenu(command, task) {
@@ -802,7 +765,6 @@
               startMessagePoll();
             } else {
               loadMessages();
-              if (artifactPanelTaskId.value === currentTaskId.value) loadPanelArtifacts(currentTaskId.value);
               refreshTasks();
               sending.value = false;
             }
@@ -829,7 +791,6 @@
             store.updateTask(taskId, { status: 'pending' });
             loadMessages();
             refreshTasks();
-            if (artifactPanelTaskId.value === taskId) loadPanelArtifacts(taskId);
             sending.value = false;
           }, 700);
         }, 500);
@@ -920,7 +881,6 @@
         ).then(function () {
           var wasCurrent = currentTaskId.value === task.id;
           function afterDeleted() {
-            if (artifactPanelTaskId.value === task.id) closeArtifactPanel();
             refreshTasks();
             if (wasCurrent) {
               if (tasks.value.length) selectTask(tasks.value[0].id);
@@ -991,25 +951,19 @@
         chatBox: chatBox,
         userScrolledUp: userScrolledUp, hasNewMessage: hasNewMessage,
         onChatScroll: onChatScroll, backToLatest: backToLatest,
-        panelArtifacts: panelArtifacts, artifactPanelTaskId: artifactPanelTaskId,
         pendingFiles: chatFiles.pendingFiles, fileInputRef: chatFiles.fileInputRef,
         triggerFileUpload: chatFiles.triggerFileUpload, handleFileSelect: chatFiles.handleFileSelect,
         removePendingFile: chatFiles.removePendingFile, formatFileSize: chatFiles.formatFileSize,
-        statusLabel: catalog.TASK_STATUS_LABEL, artifactTypeLabel: catalog.ARTIFACT_TYPE_LABEL,
         formatTaskCreatedAt: formatTaskCreatedAt, isTaskRunning: isTaskRunning, taskStatusTip: taskStatusTip,
-        getTaskArtifactCount: getTaskArtifactCount, artifactTypeClass: artifactTypeClass,
-        artifactPanelTaskTitle: artifactPanelTaskTitle,
         selectTask: selectTask, newTask: newTask, send: send,
         editTask: editTask, deleteTaskItem: deleteTaskItem,
-        toggleTaskArtifacts: toggleTaskArtifacts, closeArtifactPanel: closeArtifactPanel, handleTaskMenu: handleTaskMenu,
+        handleTaskMenu: handleTaskMenu,
         filteredTasks: filteredTasks, taskStats: taskStats,
-        // 产物面板增强
-        artifactPreviewVisible: artifactPreviewVisible, artifactPreviewItem: artifactPreviewItem,
-        openArtifactPreview: openArtifactPreview, downloadArtifact: downloadArtifact, goToArtifactTask: goToArtifactTask,
         // 顶部状态栏
         sessionModel: sessionModel, sessionCwd: sessionCwd, workspaceOpen: workspaceOpen,
         workspaceTree: workspaceTree, workspaceRootPath: workspaceRootPath, previewFile: previewFile,
         loadWorkspaceTree: loadWorkspaceTree, handleSetCwd: handleSetCwd, handlePreviewFile: handlePreviewFile,
+        handleCreateFolder: handleCreateFolder, handleUploadFile: handleUploadFile,
         handleOpenWorkspaceFromTask: handleOpenWorkspaceFromTask,
         toggleWorkspace: toggleWorkspace,
         handleClarifyAnswer: handleClarifyAnswer,
@@ -1021,8 +975,6 @@
       <div class="task-layout">\
         <chat-top-bar\
           :expert="expert"\
-          :model="sessionModel"\
-          :cwd="sessionCwd"\
           :running="sending || streaming"\
           :error-state="remoteError"\
           :expert-status="expertStatus"\
@@ -1121,34 +1073,23 @@
         <chat-task-list\
           :tasks="filteredTasks"\
           :current-task-id="currentTaskId"\
-          :artifact-panel-task-id="artifactPanelTaskId"\
           :task-stats="taskStats"\
           :is-running-fn="isTaskRunning"\
           :task-status-tip-fn="taskStatusTip"\
           :created-at-label-fn="formatTaskCreatedAt"\
-          :artifact-count-fn="getTaskArtifactCount"\
           @select="selectTask"\
-          @toggle-artifacts="toggleTaskArtifacts"\
           @menu="handleTaskMenu"\
           @open-workspace="handleOpenWorkspaceFromTask" />\
         <chat-workspace\
           :open="workspaceOpen"\
-          :root-path="workspaceRootPath"\
           :tree="workspaceTree"\
           :session-cwd="sessionCwd"\
           :preview-file="previewFile"\
           @close="toggleWorkspace"\
           @select-cwd="handleSetCwd"\
-          @preview-file="handlePreviewFile" />\
-        <chat-artifacts-panel\
-          :panel-artifacts="panelArtifacts"\
-          :panel-task-title="artifactPanelTaskTitle()"\
-          :artifact-type-label="artifactTypeLabel"\
-          :created-at-label-fn="formatTaskCreatedAt"\
-          @close="closeArtifactPanel"\
-          @preview="openArtifactPreview"\
-          @download="downloadArtifact"\
-          @goto-task="goToArtifactTask(artifactPanelTaskId)" />\
+          @preview-file="handlePreviewFile"\
+          @create-folder="handleCreateFolder"\
+          @upload-file="handleUploadFile" />\
         </div>\
       </div>\
       <el-dialog v-model="showExpertPreviewDialog" width="460px" class="expert-preview-dialog expert-preview-dialog--task" append-to-body>\
@@ -1197,20 +1138,6 @@
             </div>\
           </div>\
         </div>\
-      </el-dialog>\
-      <el-dialog v-model="artifactPreviewVisible" title="产物预览" width="600px" :close-on-click-modal="true">\
-        <div v-if="artifactPreviewItem" class="artifact-preview-body">\
-          <div class="artifact-preview-meta">\
-            <el-tag size="small" type="info" effect="plain">{{ artifactTypeLabel[artifactPreviewItem.type] || artifactPreviewItem.type }}</el-tag>\
-            <span class="artifact-preview-time">{{ formatTaskCreatedAt(artifactPreviewItem.createdAt) }}</span>\
-          </div>\
-          <h3 class="artifact-preview-title">{{ artifactPreviewItem.title }}</h3>\
-          <div class="artifact-preview-content">{{ artifactPreviewItem.content }}</div>\
-        </div>\
-        <template #footer>\
-          <el-button @click="artifactPreviewVisible = false">关闭</el-button>\
-          <el-button type="primary" @click="downloadArtifact(artifactPreviewItem); artifactPreviewVisible = false">下载</el-button>\
-        </template>\
       </el-dialog>\
       </template>\
       <div v-else class="main-scroll"><el-empty description="专家不存在"><back-link label="返回专家" @click="$emit(\'nav\', \'/experts\')" /></el-empty></div>'

@@ -92,6 +92,7 @@
       var allExperts = Vue.ref(store.getExperts());
       var activeTab = Vue.ref(props.initialTab === 'workspace' ? 'workspace' : props.initialTab === 'timeline' ? 'timeline' : 'kanban');
       var kanbanView = Vue.ref('status');
+      var highlightExpertId = Vue.ref(null);
       var drawerMode = Vue.ref('taskDetail');
       var drawerVisible = Vue.ref(false);
       var membersSidebarVisible = Vue.ref(false);
@@ -111,10 +112,8 @@
       var orchestrationDraft = Vue.ref({ orchestratorProfileId: null, defaultAssignee: null, autoDecomposeEnabled: true });
       var goalForm = Vue.ref({ title: '', description: '', priority: 'medium' });
       var goalSubmitting = Vue.ref(false);
-      var showHistoryPanel = Vue.ref(false);
       var historyItems = Vue.ref([]);
       var historyExpandedId = Vue.ref(null);
-      var historyDetailMap = Vue.ref({});
       var showHistoryCommentDialog = Vue.ref(false);
       var historyCommentDraft = Vue.ref({ taskId: null, text: '' });
       var showManualCreateDialog = Vue.ref(false);
@@ -758,16 +757,6 @@
         openTaskAction(action.key, task);
       }
 
-      function openHistoryPanel() {
-        loadHistory();
-        showHistoryPanel.value = true;
-      }
-
-      function closeHistoryPanel() {
-        showHistoryPanel.value = false;
-        historyExpandedId.value = null;
-      }
-
       function toggleHistoryExpand(item) {
         historyExpandedId.value = historyExpandedId.value === item.id ? null : item.id;
       }
@@ -969,6 +958,13 @@
       function createTaskForMember(member) {
         openManualCreateDialog({ assignee: member.expertId });
       }
+      function highlightExpertTasks(expertId) {
+        if (!membersSidebarVisible.value) membersSidebarVisible.value = true;
+        highlightExpertId.value = expertId;
+      }
+      function clearHighlightExpertTasks() {
+        highlightExpertId.value = null;
+      }
       function handleStoreUpdated() { load(); }
 
       Vue.watch(function () { return props.projectId; }, function () {
@@ -995,6 +991,7 @@
         events: events,
         activeTab: activeTab,
         kanbanView: kanbanView,
+        highlightExpertId: highlightExpertId,
         drawerMode: drawerMode,
         drawerVisible: drawerVisible,
         membersSidebarVisible: membersSidebarVisible,
@@ -1007,7 +1004,6 @@
         manualForm: manualForm,
         manualAdvancedVisible: manualAdvancedVisible,
         showManualCreateDialog: showManualCreateDialog,
-        showHistoryPanel: showHistoryPanel,
         historyItems: historyItems,
         historyExpandedId: historyExpandedId,
         showHistoryCommentDialog: showHistoryCommentDialog,
@@ -1070,8 +1066,6 @@
         openTaskAction: openTaskAction,
         closeTaskAction: closeTaskAction,
         submitTaskAction: submitTaskAction,
-        openHistoryPanel: openHistoryPanel,
-        closeHistoryPanel: closeHistoryPanel,
         toggleHistoryExpand: toggleHistoryExpand,
         openHistoryComment: openHistoryComment,
         submitHistoryComment: submitHistoryComment,
@@ -1103,7 +1097,9 @@
         submitAddMembers: submitAddMembers,
         removeMember: removeMember,
         getMemberTaskStats: getMemberTaskStats,
-        createTaskForMember: createTaskForMember
+        createTaskForMember: createTaskForMember,
+        highlightExpertTasks: highlightExpertTasks,
+        clearHighlightExpertTasks: clearHighlightExpertTasks
       };
     },
     template: getProjectDetailTemplate()
@@ -1124,7 +1120,6 @@
       drawerTemplate(),
       manualCreateDialogTemplate(),
       taskActionDialogTemplate(),
-      historyPanelTemplate(),
       historyCommentDialogTemplate(),
       orchestrationDialogTemplate(),
       workspaceFolderDialogTemplate(),
@@ -1154,13 +1149,6 @@
         '</div>',
         '<div class="project-header-summary project-header-summary-compact">',
           '<span class="project-progress-pill">{{ todoStats.done }}/{{ todoStats.total }} 已完成</span>',
-          '<button type="button" class="project-header-action-btn" @click="openOrchestrationDialog" title="项目设置">',
-            '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">',
-              '<circle cx="12" cy="12" r="3"/>',
-              '<path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>',
-            '</svg>',
-            '<span>设置</span>',
-          '</button>',
           '<button type="button" class="project-header-action-btn" :class="{ active: membersSidebarVisible }" @click="openMemberDrawer">',
             '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">',
               '<path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>',
@@ -1197,18 +1185,9 @@
 
   function kanbanTabTemplate() {
     return [
-      '<section v-show="activeTab === \'kanban\'" class="project-tab-panel project-kanban-tab project-tab-with-rail">',
-        '<aside class="project-secondary-rail">',
-          '<button type="button" :class="{ active: kanbanView === \'status\' }" @click="kanbanView = \'status\'">任务状态</button>',
-          '<button type="button" :class="{ active: kanbanView === \'expert\' }" @click="kanbanView = \'expert\'">分配专家</button>',
-        '</aside>',
-        '<div class="project-tab-content">',
-          '<div class="project-kanban-toolbar">',
-            '<span class="project-kanban-toolbar-label">视图：{{ kanbanView === \'status\' ? \'任务状态\' : \'分配专家\' }}</span>',
-            '<button type="button" class="project-kanban-add-btn" @click="openManualCreateDialog()">+ 手动创建任务</button>',
-          '</div>',
+      '<section v-show="activeTab === \'kanban\'" class="project-tab-panel project-kanban-tab">',
+        '<div class="project-tab-content project-tab-content-full">',
           kanbanStatusViewTemplate(),
-          kanbanExpertViewTemplate(),
         '</div>',
       '</section>'
     ].join('');
@@ -1216,7 +1195,7 @@
 
   function kanbanStatusViewTemplate() {
     return [
-      '<div v-if="kanbanView === \'status\'" class="project-kanban-board">',
+      '<div class="project-kanban-board" :class="{ \'has-highlight\': highlightExpertId }">',
         '<section v-for="col in statusColumns" :key="col.key" class="project-kanban-column" :class="\'column-\' + col.key">',
           '<header>',
             '<span>{{ col.title }}</span><em>{{ col.tasks.length }}</em>',
@@ -1231,27 +1210,11 @@
     ].join('');
   }
 
-  function kanbanExpertViewTemplate() {
-    return [
-      '<div v-else class="project-expert-board">',
-        '<section v-for="group in expertGroups" :key="group.id" class="project-expert-column">',
-          '<header>',
-            '<img v-if="group.expert" :src="group.expert.avatar" :alt="group.title">',
-            '<span v-else class="project-expert-placeholder">未</span>',
-            '<div><strong>{{ group.title }}</strong><small>{{ group.tasks.length }} 个任务</small></div>',
-          '</header>',
-          taskCardTemplate(false, 'group.tasks'),
-          '<div v-if="!group.tasks.length" class="project-kanban-empty">暂无任务</div>',
-        '</section>',
-      '</div>'
-    ].join('');
-  }
-
   function taskCardTemplate(showMeta, vForSource) {
     var source = vForSource || 'col.tasks';
     var meta = showMeta ? '<div class="project-task-card-meta"><span>{{ task.assigneeLabel || expertName(task.expertId) }}</span><span>{{ task.commentCount || 0 }} 条评论</span></div>' : '';
     return [
-      '<article v-for="task in ' + source + '" :key="task.id" class="project-task-card" :class="[{ active: selectedProjectTaskId === task.id }, taskStatusClass(task)]" @click="openTaskDetail(task)">',
+      '<article v-for="task in ' + source + '" :key="task.id" class="project-task-card" :class="[{ active: selectedProjectTaskId === task.id, \'highlight-by-expert\': highlightExpertId && (task.expertId === highlightExpertId || task.assignee === highlightExpertId) }, taskStatusClass(task)]" :data-assignee="task.expertId || task.assignee || \'\'" @click="openTaskDetail(task)">',
         '<div class="project-task-card-head"><h3 @click.stop>{{ taskDisplayTitle(task) }}</h3><el-tag size="small" :type="taskStatusType(task.status)" effect="plain">{{ taskStatusLabel(task.status) }}</el-tag></div>',
         '<p>{{ taskBody(task) }}</p>',
         meta,
@@ -1369,22 +1332,60 @@
   function bottomGoalFormTemplate() {
     return [
       '<section class="project-bottom-goal-form" v-if="project">',
-        '<div class="project-goal-form-head">',
-          '<div class="project-goal-form-tip">💡 描述你的项目目标，系统会自动拆解为具体任务并分配给相关专家。</div>',
-          '<button type="button" class="project-goal-history-btn" @click="openHistoryPanel">历史记录 ▾</button>',
-        '</div>',
-        '<div class="project-goal-form-body">',
-          '<div class="project-goal-form-row">',
-            '<el-input v-model="goalForm.title" placeholder="目标标题" class="project-goal-title-input" />',
-            '<el-select v-model="goalForm.priority" class="project-goal-priority-select">',
-              '<el-option v-for="p in priorityOptions" :key="p.key" :label="p.label" :value="p.key" />',
-            '</el-select>',
-            '<el-button type="primary" :loading="goalSubmitting" @click="submitGoal">发起</el-button>',
+        '<div class="project-bottom-goal-layout">',
+          '<div class="project-bottom-goal-left">',
+            '<div class="project-goal-form-head">',
+              '<div class="project-goal-form-tip">💡 描述你的项目目标，系统会自动拆解为具体任务并分配给相关专家。</div>',
+              '<div class="project-goal-form-head-right">',
+                '<span v-if="orchestratorExpert" class="project-goal-orchestrator-hint">协调专家：<strong>{{ orchestratorExpert.name }}</strong></span>',
+                '<span v-else class="project-goal-orchestrator-hint project-goal-orchestrator-warn">未配置协调专家</span>',
+                '<button type="button" class="project-goal-history-btn" @click="openOrchestrationDialog" title="项目设置">',
+                  '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">',
+                    '<circle cx="12" cy="12" r="3"/>',
+                    '<path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>',
+                  '</svg>',
+                  '<span>设置</span>',
+                '</button>',
+                '<el-button type="primary" :loading="goalSubmitting" @click="submitGoal">发起</el-button>',
+              '</div>',
+            '</div>',
+            '<div class="project-goal-form-body">',
+              '<div class="project-goal-form-row">',
+                '<el-input v-model="goalForm.title" placeholder="目标标题" class="project-goal-title-input" />',
+                '<el-select v-model="goalForm.priority" class="project-goal-priority-select">',
+                  '<el-option v-for="p in priorityOptions" :key="p.key" :label="p.label" :value="p.key" />',
+                '</el-select>',
+              '</div>',
+              '<el-input v-model="goalForm.description" type="textarea" :rows="5" placeholder="目标描述（必填）：描述项目目标的背景、范围和期望结果" />',
+            '</div>',
           '</div>',
-          '<el-input v-model="goalForm.description" type="textarea" :rows="2" placeholder="目标描述（必填）：描述项目目标的背景、范围和期望结果" />',
+          '<div class="project-bottom-goal-right">',
+            '<div class="project-history-inline-head">',
+              '<span class="project-history-inline-title">历史记录</span>',
+            '</div>',
+            '<div class="project-history-inline-list">',
+              '<div v-if="historyItems.length === 0" class="project-history-inline-empty">暂无已发起的目标</div>',
+              '<article v-for="item in historyItems" :key="item.id" class="project-history-inline-card" :class="{ expanded: historyExpandedId === item.id }">',
+                '<div class="project-history-inline-card-head" @click="toggleHistoryExpand(item)">',
+                  '<strong>{{ item.title }}</strong>',
+                  '<span class="project-history-inline-card-meta">{{ item.statusLabel }} · {{ item.doneCount }}/{{ item.childCount }} 子任务</span>',
+                '</div>',
+                '<div v-if="historyExpandedId === item.id" class="project-history-inline-card-body">',
+                  '<p class="project-history-inline-card-desc">{{ item.body || \'暂无描述\' }}</p>',
+                  '<div v-if="item.children.length" class="project-history-inline-children">',
+                    '<div v-for="child in item.children" :key="child.id" class="project-history-inline-child">',
+                      '<span class="project-history-inline-child-title">{{ child.title }}</span>',
+                      '<el-tag size="small" :type="taskStatusType(child.status)" effect="plain">{{ taskStatusLabel(child.status) }}</el-tag>',
+                    '</div>',
+                  '</div>',
+                  '<div class="project-history-inline-card-actions">',
+                    '<el-button size="small" @click="openHistoryComment(item.id)">补充说明</el-button>',
+                  '</div>',
+                '</div>',
+              '</article>',
+            '</div>',
+          '</div>',
         '</div>',
-        '<div v-if="orchestratorExpert" class="project-goal-orchestrator-hint">协调专家：<strong>{{ orchestratorExpert.name }}</strong><span v-if="!project.orchestratorProfileId">（默认取项目首位成员，可在设置中指定）</span></div>',
-        '<div v-else class="project-goal-orchestrator-hint project-goal-orchestrator-warn">未配置协调专家，请先在设置中选择。</div>',
       '</section>'
     ].join('');
   }
@@ -1415,7 +1416,8 @@
         '<div class="project-members-sidebar-summary"><strong>{{ members.length }}</strong><span>位专家参与 · {{ todoStats.total }} 个任务</span></div>',
         '<button type="button" class="sidebar-add-member-btn" @click="openAddMemberDialog">+ 添加成员</button>',
         '<div class="project-members-sidebar-list">',
-          '<article v-for="row in members" :key="row.id" class="project-drawer-member-card">',
+          '<article v-for="row in members" :key="row.id" class="project-drawer-member-card" :class="{ \'highlighting-expert\': highlightExpertId === row.expertId }">',
+            '<span class="project-member-task-counter" :class="{ active: highlightExpertId === row.expertId }" @click.stop="highlightExpertId === row.expertId ? clearHighlightExpertTasks() : highlightExpertTasks(row.expertId)" @mouseenter="highlightExpertTasks(row.expertId)" @mouseleave="clearHighlightExpertTasks" :title="\'点击或悬停高亮 \' + row.expert.name + \' 的任务\'">{{ getMemberTaskStats(row.expertId).done }}/{{ getMemberTaskStats(row.expertId).total }}</span>',
             '<img :src="row.expert.avatar" :alt="row.expert.name">',
             '<div class="project-drawer-member-main">',
               '<div class="project-drawer-member-head"><strong>{{ row.expert.name }}</strong></div>',
@@ -1638,34 +1640,6 @@
   }
   function decomposeActionTemplate() {
     return '<div v-if="taskAction.type === \'decompose\'" class="project-task-action-tip">提交后协调专家将自动拆解目标任务为子任务并派发给项目成员。</div>';
-  }
-
-  function historyPanelTemplate() {
-    return [
-      '<el-drawer v-model="showHistoryPanel" title="历史记录" direction="rtl" size="440px" class="project-history-drawer" @close="closeHistoryPanel">',
-        '<div class="project-history-list">',
-          '<div v-if="historyItems.length === 0" class="project-empty-panel">暂无已发起的目标</div>',
-          '<article v-for="item in historyItems" :key="item.id" class="project-history-item" :class="{ expanded: historyExpandedId === item.id }">',
-            '<div class="project-history-item-head" @click="toggleHistoryExpand(item)">',
-              '<strong>{{ item.title }}</strong>',
-              '<span class="project-history-item-meta">{{ item.createdAt }} · {{ item.statusLabel }} · {{ item.doneCount }}/{{ item.childCount }} 子任务</span>',
-            '</div>',
-            '<div v-if="historyExpandedId === item.id" class="project-history-item-body">',
-              '<p class="project-history-item-desc">{{ item.body || \'暂无描述\' }}</p>',
-              '<div v-if="item.children.length" class="project-history-children">',
-                '<div v-for="child in item.children" :key="child.id" class="project-history-child">',
-                  '<span class="project-history-child-title">{{ child.title }}</span>',
-                  '<el-tag size="small" :type="taskStatusType(child.status)" effect="plain">{{ taskStatusLabel(child.status) }}</el-tag>',
-                '</div>',
-              '</div>',
-              '<div class="project-history-item-actions">',
-                '<el-button size="small" @click="openHistoryComment(item.id)">补充说明</el-button>',
-              '</div>',
-            '</div>',
-          '</article>',
-        '</div>',
-      '</el-drawer>'
-    ].join('');
   }
 
   function historyCommentDialogTemplate() {

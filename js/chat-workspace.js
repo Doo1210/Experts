@@ -11,9 +11,9 @@
       depth: { type: Number, default: 0 },
       expandedKeys: { type: Object, default: function () { return {}; } },
       cwdFolderId: { type: String, default: '' },
-      selectedFileId: { type: String, default: '' }
+      selectedNodeId: { type: String, default: '' }
     },
-    emits: ['toggle', 'select-cwd', 'preview-file'],
+    emits: ['toggle', 'select', 'select-cwd', 'preview-file'],
     computed: {
       isFolder: function () { return this.node.type === 'folder'; },
       isFile: function () { return this.node.type === 'file'; },
@@ -24,7 +24,7 @@
         return this.isFolder && this.node.id === this.cwdFolderId;
       },
       isSelected: function () {
-        return this.isFile && this.node.id === this.selectedFileId;
+        return this.node.id === this.selectedNodeId;
       },
       indent: function () {
         return { paddingLeft: (this.depth * 14 + 8) + 'px' };
@@ -44,6 +44,7 @@
         return '📄';
       },
       onClick: function () {
+        this.$emit('select', this.node);
         if (this.isFolder) {
           this.$emit('toggle', this.node);
         } else if (this.isFile) {
@@ -71,7 +72,7 @@
           </span>\
           <span v-else class="ws-tree-arrow-placeholder"></span>\
           <span class="ws-tree-icon">\
-            <span v-if="isCwd" class="ws-tree-cwd-star">★</span>\
+            <svg v-if="isCwd" class="ws-tree-cwd-star" viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26"/></svg>\
             <span v-else>{{ isFolder ? (expanded ? \'📂\' : \'📁\') : fileIcon(node.name) }}</span>\
           </span>\
           <span class="ws-tree-name" :title="node.name">{{ node.name }}</span>\
@@ -87,8 +88,9 @@
             :depth="depth + 1"\
             :expanded-keys="expandedKeys"\
             :cwd-folder-id="cwdFolderId"\
-            :selected-file-id="selectedFileId"\
+            :selected-node-id="selectedNodeId"\
             @toggle="$emit(\'toggle\', $event)"\
+            @select="$emit(\'select\', $event)"\
             @select-cwd="$emit(\'select-cwd\', $event)"\
             @preview-file="$emit(\'preview-file\', $event)" />\
         </div>\
@@ -106,11 +108,12 @@
       sessionCwd: { type: String, default: '' },
       previewFile: { type: Object, default: null }
     },
-    emits: ['close', 'select-cwd', 'preview-file'],
+    emits: ['close', 'select-cwd', 'preview-file', 'create-folder', 'upload-file'],
     data: function () {
       return {
         expandedKeys: {},
-        selectedFileId: ''
+        selectedNodeId: '',
+        fileInputRef: null
       };
     },
     computed: {
@@ -129,6 +132,32 @@
         }
         walk(this.tree);
         return found;
+      },
+      // 上传文件 / 新建文件夹的目标目录：
+      // 1) 选中了文件夹 → 在该文件夹下
+      // 2) 选中了文件 → 在该文件所在目录（父文件夹）下
+      // 3) 选中了根目录 → 工作空间根目录
+      // 4) 未选中 → 当前任务工作目录（cwd）文件夹
+      // 5) 都没有 → 工作空间根目录
+      targetFolderId: function () {
+        var sel = this.selectedNodeId;
+        if (sel) {
+          if (sel === '__root__') return null;
+          var node = this.findNode(this.tree, sel);
+          if (node) {
+            if (node.type === 'folder') return node.id;
+            var parent = this.findParentFolder(this.tree, sel);
+            if (parent) return parent.id;
+          }
+        }
+        if (this.cwdFolderId) return this.cwdFolderId;
+        return null;
+      },
+      targetFolderName: function () {
+        var tid = this.targetFolderId;
+        if (!tid) return '工作空间';
+        var node = this.findNode(this.tree, tid);
+        return node ? node.name : '工作空间';
       }
     },
     watch: {
@@ -159,11 +188,46 @@
           this.expandedKeys = Object.assign({}, this.expandedKeys, patch);
         }
       },
+      onSelectNode: function (node) {
+        if (node && node.id) this.selectedNodeId = node.id;
+        if (node && node.type === 'folder') {
+          this.$emit('preview-file', null);
+        }
+      },
+      selectRoot: function () {
+        this.selectedNodeId = '__root__';
+        this.$emit('preview-file', null);
+      },
       isExpanded: function (folder) {
         return !!this.expandedKeys[folder.id] || folder.id === this.cwdFolderId;
       },
       isCwd: function (folder) {
         return folder.id === this.cwdFolderId;
+      },
+      findNode: function (nodes, id) {
+        if (!nodes || !id) return null;
+        for (var i = 0; i < nodes.length; i++) {
+          if (nodes[i].id === id) return nodes[i];
+          if (nodes[i].children) {
+            var found = this.findNode(nodes[i].children, id);
+            if (found) return found;
+          }
+        }
+        return null;
+      },
+      findParentFolder: function (nodes, id) {
+        if (!nodes || !id) return null;
+        for (var i = 0; i < nodes.length; i++) {
+          if (nodes[i].id === id) return null;
+          if (nodes[i].children) {
+            for (var j = 0; j < nodes[i].children.length; j++) {
+              if (nodes[i].children[j].id === id) return nodes[i];
+            }
+            var found = this.findParentFolder(nodes[i].children, id);
+            if (found) return found;
+          }
+        }
+        return null;
       },
       expandCwdAncestors: function () {
         var targetId = this.cwdFolderId;
@@ -196,8 +260,52 @@
         this.$emit('select-cwd', folder.name);
       },
       onPreviewFile: function (file) {
-        this.selectedFileId = file.id;
+        if (file && file.id) this.selectedNodeId = file.id;
         this.$emit('preview-file', file);
+      },
+      handleCreateFolder: function () {
+        var self = this;
+        var parentId = this.targetFolderId;
+        var inName = this.targetFolderName;
+        ElementPlus.ElMessageBox.prompt('将在「' + inName + '」下创建新文件夹', '新建文件夹', {
+          confirmButtonText: '创建',
+          cancelButtonText: '取消',
+          inputPlaceholder: '文件夹名称',
+          inputPattern: /\S+/,
+          inputErrorMessage: '名称不能为空',
+          appendTo: document.body
+        }).then(function (result) {
+          var name = (result && result.value ? result.value : '').trim();
+          if (!name) return;
+          if (parentId) self.expandedKeys = Object.assign({}, self.expandedKeys, (function () { var p = {}; p[parentId] = true; return p; })());
+          self.$emit('create-folder', { name: name, parentId: parentId });
+        }).catch(function () {});
+      },
+      handleUploadFile: function () {
+        if (!this.fileInputRef) {
+          this.fileInputRef = document.createElement('input');
+          this.fileInputRef.type = 'file';
+          this.fileInputRef.multiple = true;
+          this.fileInputRef.style.display = 'none';
+          var self = this;
+          this.fileInputRef.addEventListener('change', function () {
+            self.onFileInputChange();
+          });
+          document.body.appendChild(this.fileInputRef);
+        }
+        this.fileInputRef.value = '';
+        this.fileInputRef.click();
+      },
+      onFileInputChange: function () {
+        if (!this.fileInputRef || !this.fileInputRef.files || !this.fileInputRef.files.length) return;
+        var parentId = this.targetFolderId;
+        if (parentId) this.expandedKeys = Object.assign({}, this.expandedKeys, (function () { var p = {}; p[parentId] = true; return p; })());
+        var files = [];
+        for (var i = 0; i < this.fileInputRef.files.length; i++) {
+          var f = this.fileInputRef.files[i];
+          files.push({ name: f.name, size: f.size });
+        }
+        this.$emit('upload-file', { files: files, parentId: parentId });
       },
       fileIcon: function (name) {
         if (!name) return '📄';
@@ -222,20 +330,25 @@
       <aside v-show="open" class="chat-workspace-panel">\
         <div class="chat-workspace-inner">\
           <div class="chat-workspace-head">\
-            <div class="chat-workspace-head-body">\
+            <div class="chat-workspace-head-body" title="选中工作空间根目录" @click="selectRoot">\
               <span class="task-panel-title-icon">\
                 <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>\
               </span>\
               <div class="chat-workspace-title-line">工作空间</div>\
-              <div class="chat-workspace-subline">\
-                <span class="chat-workspace-rootpath" :title="rootPath">{{ rootPath || \'未设置\' }}</span>\
-              </div>\
             </div>\
-            <button type="button" class="chat-workspace-close" title="关闭" @click="close">\
-              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>\
-            </button>\
+            <div class="chat-workspace-head-actions">\
+              <button type="button" class="ws-head-btn" :title="\'上传文件到「\'+targetFolderName+\'』\'" @click="handleUploadFile">\
+                <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>\
+              </button>\
+              <button type="button" class="ws-head-btn" :title="\'在「\'+targetFolderName+\'」下新建文件夹\'" @click="handleCreateFolder">\
+                <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/><line x1="12" y1="11" x2="12" y2="17"/><line x1="9" y1="14" x2="15" y2="14"/></svg>\
+              </button>\
+              <button type="button" class="chat-workspace-close" title="关闭" @click="close">\
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>\
+              </button>\
+            </div>\
           </div>\
-          <div class="chat-workspace-tree">\
+          <div class="chat-workspace-tree" @click.self="selectRoot">\
             <workspace-tree-node\
               v-for="node in tree"\
               :key="node.id"\
@@ -243,8 +356,9 @@
               :depth="0"\
               :expanded-keys="expandedKeys"\
               :cwd-folder-id="cwdFolderId"\
-              :selected-file-id="selectedFileId"\
+              :selected-node-id="selectedNodeId"\
               @toggle="toggleFolder"\
+              @select="onSelectNode"\
               @select-cwd="onSetCwd"\
               @preview-file="onPreviewFile" />\
             <div v-if="tree.length === 0" class="chat-workspace-empty">\

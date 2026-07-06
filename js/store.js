@@ -6,6 +6,8 @@
   const DEFAULT_EXPERT_AVATAR = 'data:image/svg+xml,' + encodeURIComponent(
     '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 80 80"><rect width="80" height="80" fill="#e8eef8"/><circle cx="40" cy="29" r="13" fill="#b8c5dc"/><ellipse cx="40" cy="63" rx="21" ry="15" fill="#b8c5dc"/></svg>'
   );
+  // 任务级默认工作目录：每个对话任务独立绑定 cwd（PRD 10.7 / 2.2 一任务一 session）
+  const DEFAULT_TASK_CWD = '工位8';
   var DEV_MOCK = window.DEV_MOCK === true || String(window.DEV_MOCK).toLowerCase() === 'true';
   var sidecarAvailable = false;
 
@@ -635,6 +637,7 @@
           expertId: expertId,
           ownerId: 'admin',
           archived: false,
+          cwd: t.cwd || DEFAULT_TASK_CWD,
           titleSet: !!t.titleSet,
           artifactCount: t.artifactCount || 0,
           createdAt: t.createdAt || nowIso(),
@@ -1452,6 +1455,7 @@
     },
     uid: uid,
     nowIso: nowIso,
+    DEFAULT_TASK_CWD: DEFAULT_TASK_CWD,
     init: function () {
       if (DEV_MOCK) {
         seedIfEmpty();
@@ -1992,6 +1996,12 @@
       if (DEV_MOCK || !window.SidecarApi || !window.SidecarApi.listTasks) return null;
       var remote = await window.SidecarApi.listTasks(String(expertId));
       if (!remote) return null;
+      var expertKey = String(expertId);
+      // 保留本地已设置的 cwd（任务级工作目录），避免远程同步覆盖
+      var prevByExpert = {};
+      state.tasks.forEach(function (t) {
+        if (String(t.expertId) === expertKey && t.cwd) prevByExpert[t.id] = t.cwd;
+      });
       var mapped = remote.map(function (t) {
         return {
           id: t.id,
@@ -2001,6 +2011,7 @@
           expertId: String(expertId),
           ownerId: 'admin',
           archived: false,
+          cwd: t.cwd || prevByExpert[t.id] || DEFAULT_TASK_CWD,
           titleSet: !!t.titleSet,
           createdAt: t.createdAt || nowIso(),
           updatedAt: t.createdAt || nowIso()
@@ -2025,6 +2036,7 @@
         projectId: payload.projectId || null,
         ownerId: 'admin',
         archived: false,
+        cwd: payload.cwd || DEFAULT_TASK_CWD,
         createdAt: nowIso(),
         updatedAt: nowIso()
       };
@@ -2045,6 +2057,7 @@
         expertId: String(expertId),
         ownerId: 'admin',
         archived: false,
+        cwd: remote.cwd || DEFAULT_TASK_CWD,
         titleSet: !!remote.titleSet,
         createdAt: remote.createdAt || nowIso(),
         updatedAt: remote.createdAt || nowIso()
@@ -2057,9 +2070,12 @@
     updateTask: function (taskId, patch) {
       var t = state.tasks.find(function (x) { return x.id === taskId; });
       if (!t) return null;
-      Object.assign(t, patch, { updatedAt: nowIso() });
+      Object.assign(t, patch);
+      // 仅状态/标题变更视为任务活动，更新 updatedAt 以反映「最近活跃」排序；
+      // cwd 等会话级配置变更不应触发任务卡片重排
       if (patch.status !== undefined || patch.title !== undefined) {
         t.userTouched = true;
+        t.updatedAt = nowIso();
       }
       if (patch.title !== undefined) {
         t.titleSet = true;

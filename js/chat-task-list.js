@@ -6,12 +6,36 @@
 (function () {
   /**
    * 任务列表项
-   * props: { task, active, artifactOpen, isRunning, statusTip, createdAtLabel, artifactCount }
-   * emits: { select, toggle-artifacts, menu }
+   * props: { task, active, isRunning, statusTip, createdAtLabel }
+   * emits: { select, menu, open-workspace }
    */
   var TaskListItem = {
-    props: ['task', 'active', 'artifactOpen', 'isRunning', 'statusTip', 'createdAtLabel', 'artifactCount'],
-    emits: ['select', 'toggle-artifacts', 'menu', 'open-workspace'],
+    props: ['task', 'active', 'isRunning', 'statusTip', 'createdAtLabel'],
+    emits: ['select', 'menu', 'open-workspace'],
+    computed: {
+      // 是否为根目录（cwd 为空）
+      isCwdRoot: function () {
+        var cwd = (this.task && this.task.cwd) || '';
+        if (!cwd) return true;
+        var parts = String(cwd).replace(/\\/g, '/').split('/').filter(Boolean);
+        return parts.length === 0;
+      },
+      // 任务卡片工作目录按钮文案：显示实际 cwd 文件夹名
+      // 根目录（空/根路径）显示「工作空间」；超过 8 个字符截断为 8 字 + 省略号
+      cwdLabel: function () {
+        var cwd = (this.task && this.task.cwd) || '';
+        if (!cwd) return '工作空间';
+        var parts = String(cwd).replace(/\\/g, '/').split('/').filter(Boolean);
+        var name = parts.length ? parts[parts.length - 1] : '';
+        if (!name) return '工作空间';
+        if (name.length > 8) return name.slice(0, 8) + '…';
+        return name;
+      },
+      cwdTitle: function () {
+        var cwd = (this.task && this.task.cwd) || '';
+        return '工作目录：' + (cwd || '工作空间（根目录）');
+      }
+    },
     template: '\
       <div class="task-item" :class="{ active: active }" @click="$emit(\'select\')">\
         <div class="task-item-accent"></div>\
@@ -50,23 +74,16 @@
               </el-dropdown>\
             </div>\
             <div class="task-item-toolbar-bottom">\
-              <button type="button" class="task-artifact-link" :class="{ active: artifactOpen }" title="产物" @click.stop="$emit(\'toggle-artifacts\', $event)">\
-                <span class="task-artifact-link-icon">\
-                  <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2">\
-                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>\
-                    <polyline points="14 2 14 8 20 8"/>\
-                  </svg>\
-                </span>\
-                <span class="task-artifact-link-text">产物</span>\
-                <span v-if="artifactCount > 0" class="task-artifact-badge">{{ artifactCount }}</span>\
-              </button>\
-              <button type="button" class="task-workspace-link" title="工作目录" @click.stop="$emit(\'open-workspace\', $event)">\
+              <button type="button" class="task-workspace-link" :title="cwdTitle" @click.stop="$emit(\'open-workspace\', $event)">\
                 <span class="task-workspace-link-icon">\
-                  <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2">\
+                  <svg v-if="isCwdRoot" viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">\
+                    <path d="M3 9.5L12 3l9 6.5"/><path d="M5 10v10h14V10"/>\
+                  </svg>\
+                  <svg v-else viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2">\
                     <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>\
                   </svg>\
                 </span>\
-                <span class="task-workspace-link-text">工作目录</span>\
+                <span class="task-workspace-link-text">{{ cwdLabel }}</span>\
               </button>\
             </div>\
           </div>\
@@ -76,22 +93,20 @@
 
   /**
    * 任务列表容器
-   * props: { tasks, currentTaskId, artifactPanelTaskId, taskStats, isRunning, taskStatusTip, createdAtLabel, artifactCount }
-   * emits: { select, toggle-artifacts, menu }
+   * props: { tasks, currentTaskId, taskStats, isRunning, taskStatusTip, createdAtLabel }
+   * emits: { select, menu, open-workspace }
    */
   var ChatTaskList = {
     components: { TaskListItem: TaskListItem },
     props: {
       tasks: { type: Array, default: function () { return []; } },
       currentTaskId: { type: [String, Number], default: null },
-      artifactPanelTaskId: { type: [String, Number], default: null },
       taskStats: { type: Object, default: function () { return { total: 0, running: 0, ready: 0 }; } },
       isRunningFn: { type: Function, required: true },
       taskStatusTipFn: { type: Function, required: true },
-      createdAtLabelFn: { type: Function, required: true },
-      artifactCountFn: { type: Function, required: true }
+      createdAtLabelFn: { type: Function, required: true }
     },
-    emits: ['select', 'toggle-artifacts', 'menu', 'open-workspace'],
+    emits: ['select', 'menu', 'open-workspace'],
     template: '\
       <aside class="task-right-panel">\
         <div class="task-right-panel-inner">\
@@ -129,13 +144,10 @@
                 :key="t.id"\
                 :task="t"\
                 :active="currentTaskId === t.id"\
-                :artifact-open="artifactPanelTaskId === t.id"\
                 :is-running="isRunningFn(t)"\
                 :status-tip="taskStatusTipFn(t)"\
                 :created-at-label="createdAtLabelFn(t.createdAt)"\
-                :artifact-count="artifactCountFn(t.id)"\
                 @select="$emit(\'select\', t.id)"\
-                @toggle-artifacts="$emit(\'toggle-artifacts\', t, $event)"\
                 @menu="$emit(\'menu\', $event, t)"\
                 @open-workspace="$emit(\'open-workspace\', t)" />\
               <div v-if="tasks.length === 0" class="task-list-empty">\
