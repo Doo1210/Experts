@@ -14,7 +14,6 @@
       modelList: { type: Array, default: function () { return []; } },
       modelOverride: { type: String, default: '' },
       sessionCwd: { type: String, default: '' },
-      cwdList: { type: Array, default: function () { return []; } },
       tokenEstimate: { type: Number, default: 0 },
       workspaceFiles: { type: Array, default: function () { return []; } }
     },
@@ -104,6 +103,10 @@
       onSelectCwd: function (cwd) {
         if (cwd === '__workspace__') {
           this.$emit('openWorkspace');
+          return;
+        }
+        if (cwd === '__root__') {
+          this.$emit('selectCwd', '');
           return;
         }
         this.$emit('selectCwd', cwd);
@@ -291,11 +294,9 @@
               <template #dropdown>\
                 <el-dropdown-menu>\
                   <el-dropdown-item\
-                    v-for="c in cwdList"\
-                    :key="c"\
-                    :command="c"\
-                    :class="{ \'is-active\': c === sessionCwd }">\
-                    {{ c }}\
+                    command="__root__"\
+                    :class="{ \'is-active\': !sessionCwd }">\
+                    工作空间\
                   </el-dropdown-item>\
                   <el-dropdown-item divided command="__workspace__">在工作空间中选择…</el-dropdown-item>\
                 </el-dropdown-menu>\

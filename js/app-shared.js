@@ -216,6 +216,46 @@
       </button>'
   };
 
+  function downloadWorkspaceFile(file) {
+    var f = file;
+    if (!f) return;
+    var name = f.name || 'download';
+    function triggerDownload(blob, filename) {
+      var url = URL.createObjectURL(blob);
+      var a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(function () {
+        try { URL.revokeObjectURL(url); } catch (e) {}
+      }, 1500);
+    }
+    if (f.previewUrl) {
+      fetch(f.previewUrl).then(function (r) { return r.blob(); }).then(function (blob) {
+        triggerDownload(blob, name);
+        ElementPlus.ElMessage.success('已开始下载「' + name + '」');
+      }).catch(function () {
+        var a = document.createElement('a');
+        a.href = f.previewUrl;
+        a.download = name;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+      });
+      return;
+    }
+    if (f.content !== undefined && f.content !== null && f.content !== '') {
+      var mime = f.mime || 'text/plain';
+      var blob = new Blob([f.content], { type: mime + ';charset=utf-8' });
+      triggerDownload(blob, name);
+      ElementPlus.ElMessage.success('已开始下载「' + name + '」');
+      return;
+    }
+    ElementPlus.ElMessage.warning('该文件暂无可下载的内容');
+  }
+
   window.AppShared = {
     createChatFileUpload: createChatFileUpload,
     parseRoute: parseRoute,
@@ -224,6 +264,7 @@
     inferProjectFileType: inferProjectFileType,
     readUploadedFileContent: readUploadedFileContent,
     isProjectIconImage: isProjectIconImage,
+    downloadWorkspaceFile: downloadWorkspaceFile,
     PROJECT_ICON_PRESETS: PROJECT_ICON_PRESETS
   };
   window.BackLink = BackLink;

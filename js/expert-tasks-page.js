@@ -147,14 +147,12 @@
         { id: 'claude-sonnet-4', name: 'claude-sonnet-4', reasoning: true },
         { id: 'qwen-max', name: 'qwen-max', reasoning: false }
       ]);
-      var cwdOptions = Vue.ref(['工位8', '工位12', '产线A', '数据分析']);
       var showExpertPreviewDialog = Vue.ref(false);
       var previewStats = Vue.ref({ tasks: 0, projects: 0, skills: 0, tools: 0 });
       // 顶部状态栏状态（阶段0先用默认值，阶段2接 session.info）
       var sessionModel = Vue.ref('gpt-4o');
       // 工作目录按任务隔离：每个对话任务独立绑定 cwd（PRD 2.2 一任务一 session / 10.7）
       // 读取当前任务的 cwd；写入时更新该任务的 cwd 并刷新任务列表以触发响应式更新
-      var DEFAULT_CWD = store.DEFAULT_TASK_CWD || '工位8';
       var sessionCwd = Vue.computed({
         get: function () {
           var tid = currentTaskId.value;
@@ -204,6 +202,18 @@
           if (content) enriched = Object.assign({}, file, content);
         }
         previewFile.value = enriched;
+      }
+
+      function handleDownloadFile(file) {
+        if (!file) return;
+        var enriched = file;
+        if (store.getFileContent) {
+          var content = store.getFileContent(props.expertId, file.id);
+          if (content) enriched = Object.assign({}, file, content);
+        }
+        if (window.AppShared && window.AppShared.downloadWorkspaceFile) {
+          window.AppShared.downloadWorkspaceFile(enriched);
+        }
       }
 
       function handleCreateFolder(payload) {
@@ -999,8 +1009,8 @@
           return;
         }
         if (cwd === undefined || cwd === null) return;
-        sessionCwd.value = cwd;
-        ElementPlus.ElMessage.success('工作目录已切换为 ' + (cwd || '工作空间'));
+        sessionCwd.value = cwd === '__root__' ? '' : cwd;
+        ElementPlus.ElMessage.success('工作目录已切换为 ' + (cwd === '__root__' || !cwd ? '工作空间' : cwd));
       }
 
       function editTask(task, ev) {
@@ -1107,7 +1117,6 @@
         sessionCwd: sessionCwd,
         tokenEstimate: tokenEstimate,
         modelList: modelList,
-        cwdOptions: cwdOptions,
         workspaceFilesFlat: workspaceFilesFlat,
         handleSelectModel: handleSelectModel,
         handleSelectCwd: handleSelectCwd,
@@ -1129,6 +1138,7 @@
         sessionModel: sessionModel, sessionCwd: sessionCwd, workspaceOpen: workspaceOpen,
         workspaceTree: workspaceTree, workspaceRootPath: workspaceRootPath, previewFile: previewFile,
         loadWorkspaceTree: loadWorkspaceTree, handleSetCwd: handleSetCwd, handlePreviewFile: handlePreviewFile,
+        handleDownloadFile: handleDownloadFile,
         handleCreateFolder: handleCreateFolder, handleUploadFile: handleUploadFile,
         handleOpenWorkspaceFromTask: handleOpenWorkspaceFromTask,
         toggleWorkspace: toggleWorkspace,
@@ -1245,7 +1255,6 @@
             :model-override="sessionModelOverride"\
             :model-list="modelList"\
             :session-cwd="sessionCwd"\
-            :cwd-list="cwdOptions"\
             :token-estimate="tokenEstimate"\
             :workspace-files="workspaceFilesFlat"\
             @submit="send"\
@@ -1274,6 +1283,7 @@
           @close="toggleWorkspace"\
           @select-cwd="handleSetCwd"\
           @preview-file="handlePreviewFile"\
+          @download-file="handleDownloadFile"\
           @create-folder="handleCreateFolder"\
           @upload-file="handleUploadFile" />\
         </div>\

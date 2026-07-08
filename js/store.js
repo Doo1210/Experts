@@ -7,7 +7,7 @@
     '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 80 80"><rect width="80" height="80" fill="#e8eef8"/><circle cx="40" cy="29" r="13" fill="#b8c5dc"/><ellipse cx="40" cy="63" rx="21" ry="15" fill="#b8c5dc"/></svg>'
   );
   // 任务级默认工作目录：每个对话任务独立绑定 cwd（PRD 10.7 / 2.2 一任务一 session）
-  const DEFAULT_TASK_CWD = '工位8';
+  const DEFAULT_TASK_CWD = '';
   var DEV_MOCK = window.DEV_MOCK === true || String(window.DEV_MOCK).toLowerCase() === 'true';
   var sidecarAvailable = false;
 

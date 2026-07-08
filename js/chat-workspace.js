@@ -13,7 +13,7 @@
       cwdFolderId: { type: String, default: '' },
       selectedNodeId: { type: String, default: '' }
     },
-    emits: ['toggle', 'select', 'select-cwd', 'preview-file'],
+    emits: ['toggle', 'select', 'select-cwd', 'preview-file', 'download-file'],
     computed: {
       isFolder: function () { return this.node.type === 'folder'; },
       isFile: function () { return this.node.type === 'file'; },
@@ -54,6 +54,14 @@
       onSetCwd: function (ev) {
         ev.stopPropagation();
         this.$emit('select-cwd', this.node);
+      },
+      onPreview: function (ev) {
+        ev.stopPropagation();
+        this.$emit('preview-file', this.node);
+      },
+      onDownload: function (ev) {
+        ev.stopPropagation();
+        this.$emit('download-file', this.node);
       }
     },
     template: '\
@@ -79,8 +87,14 @@
             <span v-else>{{ fileIcon(node.name) }}</span>\
           </span>\
           <span class="ws-tree-name" :title="node.name">{{ node.name }}</span>\
-          <button v-if="isFolder" type="button" class="ws-tree-setcwd-btn" title="设为当前工作目录" @click="onSetCwd">\
-            <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>\
+          <button v-if="isFile" type="button" class="ws-tree-setcwd-btn" title="预览" @click="onPreview">\
+            <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>\
+          </button>\
+          <button v-if="isFile" type="button" class="ws-tree-setcwd-btn" title="下载" @click="onDownload">\
+            <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>\
+          </button>\
+          <button v-if="isFolder" type="button" class="ws-tree-setcwd-btn" title="设为当前任务工作目录" @click="onSetCwd">\
+            <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>\
           </button>\
         </div>\
         <div v-if="isFolder && expanded && node.children && node.children.length" class="ws-tree-children">\
@@ -95,7 +109,8 @@
             @toggle="$emit(\'toggle\', $event)"\
             @select="$emit(\'select\', $event)"\
             @select-cwd="$emit(\'select-cwd\', $event)"\
-            @preview-file="$emit(\'preview-file\', $event)" />\
+            @preview-file="$emit(\'preview-file\', $event)"\
+            @download-file="$emit(\'download-file\', $event)" />\
         </div>\
       </div>'
   };
@@ -111,12 +126,16 @@
       sessionCwd: { type: String, default: '' },
       previewFile: { type: Object, default: null }
     },
-    emits: ['close', 'select-cwd', 'preview-file', 'create-folder', 'upload-file'],
+    emits: ['close', 'select-cwd', 'preview-file', 'download-file', 'create-folder', 'upload-file'],
     data: function () {
       return {
         expandedKeys: {},
         selectedNodeId: '',
-        fileInputRef: null
+        fileInputRef: null,
+        folderDialogVisible: false,
+        folderName: '',
+        folderDialogParentId: null,
+        folderDialogTargetName: '工作空间'
       };
     },
     computed: {
@@ -167,6 +186,10 @@
       },
       isRootSelected: function () {
         return this.selectedNodeId === '__root__';
+      },
+      previewDialogVisible: {
+        get: function () { return !!this.previewFile; },
+        set: function (val) { if (!val) this.$emit('preview-file', null); }
       }
     },
     watch: {
@@ -206,6 +229,10 @@
       selectRoot: function () {
         this.selectedNodeId = '__root__';
         this.$emit('preview-file', null);
+      },
+      onTreeBlankClick: function (ev) {
+        if (ev.target.closest('.ws-tree-row')) return;
+        this.selectRoot();
       },
       isExpanded: function (folder) {
         return !!this.expandedKeys[folder.id] || folder.id === this.cwdFolderId;
@@ -276,23 +303,37 @@
         if (file && file.id) this.selectedNodeId = file.id;
         this.$emit('preview-file', file);
       },
+      onDownloadFile: function (file) {
+        if (!file) return;
+        if (file.id) this.selectedNodeId = file.id;
+        this.$emit('download-file', file);
+      },
       handleCreateFolder: function () {
+        this.folderDialogParentId = this.targetFolderId;
+        this.folderDialogTargetName = this.targetFolderName;
+        this.folderName = '';
+        this.folderDialogVisible = true;
+      },
+      onFolderDialogOpened: function () {
         var self = this;
-        var parentId = this.targetFolderId;
-        var inName = this.targetFolderName;
-        ElementPlus.ElMessageBox.prompt('将在「' + inName + '」下创建新文件夹', '新建文件夹', {
-          confirmButtonText: '创建',
-          cancelButtonText: '取消',
-          inputPlaceholder: '文件夹名称',
-          inputPattern: /\S+/,
-          inputErrorMessage: '名称不能为空',
-          appendTo: document.body
-        }).then(function (result) {
-          var name = (result && result.value ? result.value : '').trim();
-          if (!name) return;
-          if (parentId) self.expandedKeys = Object.assign({}, self.expandedKeys, (function () { var p = {}; p[parentId] = true; return p; })());
-          self.$emit('create-folder', { name: name, parentId: parentId });
-        }).catch(function () {});
+        this.$nextTick(function () {
+          var input = self.$refs.folderNameInput;
+          if (input && input.focus) input.focus();
+        });
+      },
+      submitCreateFolder: function () {
+        var name = (this.folderName || '').trim();
+        if (!name) {
+          ElementPlus.ElMessage.warning('请输入文件夹名称');
+          return;
+        }
+        var parentId = this.folderDialogParentId;
+        if (parentId) {
+          this.expandedKeys = Object.assign({}, this.expandedKeys, (function () { var p = {}; p[parentId] = true; return p; })());
+        }
+        this.$emit('create-folder', { name: name, parentId: parentId });
+        this.folderDialogVisible = false;
+        this.folderName = '';
       },
       handleUploadFile: function () {
         if (!this.fileInputRef) {
@@ -337,19 +378,34 @@
         if (bytes < 1024) return bytes + ' B';
         if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
         return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+      },
+      isImageFile: function (file) {
+        if (!file) return false;
+        if (file.kind === 'image') return true;
+        if (file.mime && file.mime.indexOf('image/') === 0) return true;
+        var ext = (file.name.split('.').pop() || '').toLowerCase();
+        return ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg'].indexOf(ext) >= 0;
+      },
+      closePreview: function () {
+        this.$emit('preview-file', null);
+      },
+      downloadFile: function () {
+        if (window.AppShared && window.AppShared.downloadWorkspaceFile) {
+          window.AppShared.downloadWorkspaceFile(this.previewFile);
+        }
       }
     },
     template: '\
       <aside v-show="open" class="chat-workspace-panel">\
         <div class="chat-workspace-inner">\
           <div class="chat-workspace-head">\
-            <div class="chat-workspace-head-body" :class="{ \'is-selected\': isRootSelected, \'is-cwd\': isRootCwd }">\
+            <div class="chat-workspace-head-body" :class="{ \'is-selected\': isRootSelected, \'is-cwd\': isRootCwd }" role="button" tabindex="0" @click="selectRoot" @keydown.enter="selectRoot">\
               <span class="task-panel-title-icon">\
                 <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>\
               </span>\
-              <div class="chat-workspace-title-line" role="button" tabindex="0" @click="selectRoot" @keydown.enter="selectRoot">工作空间</div>\
-              <button v-if="!isRootCwd" type="button" class="ws-head-setcwd-btn" title="设定为当前工作目录" @click="onSetRootCwd">\
-                <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>\
+              <div class="chat-workspace-title-line">工作空间</div>\
+              <button v-if="!isRootCwd" type="button" class="ws-head-setcwd-btn" title="设为当前任务工作目录" @click="onSetRootCwd">\
+                <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>\
               </button>\
             </div>\
             <div class="chat-workspace-head-actions">\
@@ -364,7 +420,7 @@
               </button>\
             </div>\
           </div>\
-          <div class="chat-workspace-tree">\
+          <div class="chat-workspace-tree" @click="onTreeBlankClick">\
             <workspace-tree-node\
               v-for="node in tree"\
               :key="node.id"\
@@ -376,29 +432,93 @@
               @toggle="toggleFolder"\
               @select="onSelectNode"\
               @select-cwd="onSetCwd"\
-              @preview-file="onPreviewFile" />\
+              @preview-file="onPreviewFile"\
+              @download-file="onDownloadFile" />\
             <div v-if="tree.length === 0" class="chat-workspace-empty">\
               <div class="chat-workspace-empty-icon">📁</div>\
               <p>暂无工作空间数据</p>\
               <span>请检查工作空间根目录设置</span>\
             </div>\
           </div>\
-          <div v-if="previewFile" class="chat-workspace-preview">\
-            <div class="chat-workspace-preview-head">\
-              <span class="chat-workspace-preview-title">{{ previewFile.name }}</span>\
-              <span class="chat-workspace-preview-size">{{ fileSizeLabel(previewFile.size) }}</span>\
-            </div>\
-            <div class="chat-workspace-preview-body">\
-              <img v-if="previewFile.kind === \'image\' && previewFile.previewUrl" :src="previewFile.previewUrl" :alt="previewFile.name" class="chat-workspace-preview-img" />\
-              <pre v-else-if="previewFile.content" class="chat-workspace-preview-text">{{ previewFile.content }}</pre>\
-              <div v-else class="chat-workspace-preview-binary">\
-                <span class="chat-workspace-preview-binary-icon">{{ fileIcon(previewFile.name) }}</span>\
-                <span>{{ previewFile.name }}</span>\
-                <span class="chat-workspace-preview-binary-info">{{ fileSizeLabel(previewFile.size) }} · {{ previewFile.mime || \'未知类型\' }}</span>\
+        </div>\
+        <el-dialog v-model="previewDialogVisible" width="720px" class="form-dialog ws-preview-dialog" append-to-body>\
+          <template #header>\
+            <div class="dialog-header-custom dialog-header-workspace">\
+              <div class="dialog-header-icon dialog-header-icon-workspace">\
+                <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">\
+                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>\
+                  <polyline points="14 2 14 8 20 8"/>\
+                </svg>\
+              </div>\
+              <div class="dialog-header-text">\
+                <div class="dialog-header-title">{{ previewFile ? previewFile.name : \'\' }}</div>\
+                <div class="dialog-header-sub">{{ previewFile ? (fileSizeLabel(previewFile.size) + \' · \' + (previewFile.mime || \'未知类型\') + \' · 只读预览\') : \'\' }}</div>\
               </div>\
             </div>\
+          </template>\
+          <div v-if="previewFile" class="ws-preview-body">\
+            <img v-if="isImageFile(previewFile) && previewFile.previewUrl" :src="previewFile.previewUrl" :alt="previewFile.name" class="ws-preview-img" />\
+            <pre v-else-if="previewFile.content" class="ws-preview-text" readonly>{{ previewFile.content }}</pre>\
+            <div v-else class="ws-preview-binary">\
+              <span class="ws-preview-binary-icon">{{ fileIcon(previewFile.name) }}</span>\
+              <span class="ws-preview-binary-name">{{ previewFile.name }}</span>\
+              <span class="ws-preview-binary-info">二进制文件暂不支持在线预览，可下载后查看</span>\
+            </div>\
           </div>\
-        </div>\
+          <template #footer>\
+            <div class="dialog-footer-custom dialog-footer-wizard">\
+              <div class="dialog-footer-actions">\
+                <el-button class="wizard-btn wizard-btn-cancel" @click="closePreview">关闭</el-button>\
+                <el-button type="primary" class="wizard-btn wizard-btn-submit" @click="downloadFile">\
+                  <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right:4px;vertical-align:-2px">\
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>\
+                    <polyline points="7 10 12 15 17 10"/>\
+                    <line x1="12" y1="15" x2="12" y2="3"/>\
+                  </svg>下载\
+                </el-button>\
+              </div>\
+            </div>\
+          </template>\
+        </el-dialog>\
+        <el-dialog v-model="folderDialogVisible" width="420px" class="form-dialog form-dialog-sm ws-folder-dialog" :close-on-click-modal="false" append-to-body @opened="onFolderDialogOpened">\
+          <template #header>\
+            <div class="dialog-header-custom dialog-header-workspace">\
+              <div class="dialog-header-icon dialog-header-icon-workspace">\
+                <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">\
+                  <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>\
+                  <line x1="12" y1="11" x2="12" y2="17"/>\
+                  <line x1="9" y1="14" x2="15" y2="14"/>\
+                </svg>\
+              </div>\
+              <div class="dialog-header-text">\
+                <div class="dialog-header-title">新建文件夹</div>\
+                <div class="dialog-header-sub">整理工作空间中的文件与任务产物</div>\
+              </div>\
+            </div>\
+          </template>\
+          <div class="form-dialog-body ws-folder-dialog-body">\
+            <div class="ws-folder-target">\
+              <span class="ws-folder-target-label">目标位置</span>\
+              <span class="ws-folder-target-path" :title="folderDialogTargetName">\
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>\
+                {{ folderDialogTargetName }}\
+              </span>\
+            </div>\
+            <el-form label-position="top" class="form-dialog-form ws-folder-form" @submit.prevent="submitCreateFolder">\
+              <el-form-item label="文件夹名称" required>\
+                <el-input ref="folderNameInput" v-model="folderName" placeholder="例如：分析报告、原始数据" maxlength="60" show-word-limit clearable @keyup.enter="submitCreateFolder" />\
+              </el-form-item>\
+            </el-form>\
+          </div>\
+          <template #footer>\
+            <div class="dialog-footer-custom dialog-footer-wizard">\
+              <div class="dialog-footer-actions">\
+                <el-button class="wizard-btn wizard-btn-cancel" @click="folderDialogVisible = false">取消</el-button>\
+                <el-button type="primary" class="wizard-btn wizard-btn-submit" :disabled="!folderName.trim()" @click="submitCreateFolder">创建</el-button>\
+              </div>\
+            </div>\
+          </template>\
+        </el-dialog>\
       </aside>'
   };
 
