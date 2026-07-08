@@ -2225,7 +2225,7 @@
               <span style="font-weight:600">{{ materialPreviewItem.name }}</span>\
               <span style="color:#909399;font-size:12px">{{ formatFileSize(materialPreviewItem.size) }}</span>\
             </div>\
-            <div style="white-space:pre-wrap;font-size:13px;line-height:1.7;color:#303133;background:#f5f7fa;padding:16px;border-radius:6px">{{ materialPreviewItem.content || \'（二进制文件，无法预览内容）\' }}</div>\
+            <div style="white-space:pre-wrap;font-size:13px;line-height:1.7;color:#303133;background:#f5f7fa;padding:16px;border-radius:6px">{{ materialPreviewItem.content || \'（该文件类型暂不支持预览，可下载后查看）\' }}</div>\
           </div>\
           <template #footer>\
             <el-button @click="materialPreviewVisible = false">关闭</el-button>\

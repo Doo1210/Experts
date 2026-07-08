@@ -462,7 +462,7 @@
             <div v-else class="ws-preview-binary">\
               <span class="ws-preview-binary-icon">{{ fileIcon(previewFile.name) }}</span>\
               <span class="ws-preview-binary-name">{{ previewFile.name }}</span>\
-              <span class="ws-preview-binary-info">二进制文件暂不支持在线预览，可下载后查看</span>\
+              <span class="ws-preview-binary-info">该文件类型暂不支持预览，可下载后查看</span>\
             </div>\
           </div>\
           <template #footer>\
