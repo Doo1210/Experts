@@ -42,7 +42,7 @@
         return false;
       },
       mainBtnTitle: function () {
-        return this.isRunning ? '停止' : '发送 (Ctrl+Enter)';
+        return this.isRunning ? '停止' : '发送 (Enter)';
       },
       placeholder: function () {
         if (this.expertStatus === 'hitl') return '请先回应专家的提问';
@@ -70,7 +70,7 @@
         if (this.expertStatus === 'hitl') return '请先回应上方卡片';
         if (this.expertStatus === 'error') return '可修改输入后重试';
         if (this.expertStatus === 'running') return '执行中 · 点击停止可中断';
-        return 'Ctrl + Enter 发送 · Shift + Enter 换行 · @file: 引用文件';
+        return 'Enter 发送 · Shift + Enter 换行 · @file: 引用文件';
       },
       filteredFiles: function () {
         var q = this.pathQuery.toLowerCase();
@@ -94,6 +94,10 @@
         this.$emit('submit');
       },
       onCtrlEnter: function () {
+        if (this.expertStatus === 'running' || this.expertStatus === 'hitl') return;
+        this.onSubmit();
+      },
+      onEnterSend: function () {
         if (this.expertStatus === 'running' || this.expertStatus === 'hitl') return;
         this.onSubmit();
       },
@@ -168,6 +172,17 @@
           this.onCtrlEnter();
           return;
         }
+        // Enter 发送（@file: 弹窗打开时优先选路径，否则发送）
+        if (ev.key === 'Enter' && !ev.shiftKey) {
+          if (this.showPathPopover && this.filteredFiles.length) {
+            ev.preventDefault();
+            this.selectPath(this.filteredFiles[this.pathSelectedIndex]);
+            return;
+          }
+          ev.preventDefault();
+          this.onEnterSend();
+          return;
+        }
         if (!this.showPathPopover || !this.filteredFiles.length) {
           return;
         }
@@ -177,9 +192,6 @@
         } else if (ev.key === 'ArrowUp') {
           ev.preventDefault();
           this.pathSelectedIndex = (this.pathSelectedIndex - 1 + this.filteredFiles.length) % this.filteredFiles.length;
-        } else if (ev.key === 'Enter') {
-          ev.preventDefault();
-          this.selectPath(this.filteredFiles[this.pathSelectedIndex]);
         } else if (ev.key === 'Escape') {
           ev.preventDefault();
           this.showPathPopover = false;
