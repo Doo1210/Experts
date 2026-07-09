@@ -1032,22 +1032,14 @@
       state.projectOutputs = [
         { id: uid(), projectId: p1.id, expertId: seedExperts[0].id, title: '良率波动根因分析报告 v1', content: '主要根因：etch 区 3 号 chamber 压力偏差 +12%。建议参数回标并加严 SPC 监控。', createdAt: nowIso() }
       ];
-      var ptSpc = uid();
-      var ptRoot = uid();
-      var ptDevice = uid();
-      state.projectTasks = [
-        { id: ptSpc, projectId: p1.id, title: 'SPC 数据分析', status: 'queued', expertId: seedExperts[4].id, sortOrder: 0 },
-        { id: ptRoot, projectId: p1.id, title: '良率根因分析', status: 'done', expertId: seedExperts[0].id, sortOrder: 1 },
-        { id: ptDevice, projectId: p1.id, title: '设备关联分析', status: 'running', expertId: seedExperts[2].id, sortOrder: 2 },
-        { id: uid(), projectId: p2.id, title: '需求预测建模', status: 'running', expertId: seedExperts[3].id, sortOrder: 0 },
-        { id: uid(), projectId: p2.id, title: '数据治理规范', status: 'running', expertId: seedExperts[5].id, sortOrder: 1 },
-        { id: uid(), projectId: p2.id, title: '多工厂仿真验证', status: 'queued', expertId: null, sortOrder: 2 }
-      ];
-      state.projectFiles = [
-        { id: uid(), projectId: p1.id, name: '良率波动根因分析.md', type: 'document', status: 'updating', expertId: seedExperts[0].id, content: '# 良率波动根因分析\n\n## 初步结论\netch 区 3 号 chamber 压力偏差 +12%…', updatedAt: nowIso() },
-        { id: uid(), projectId: p1.id, name: 'SPC 控制图模板.xlsx', type: 'spreadsheet', status: 'ready', content: 'SPC 模板：UCL / LCL / 中心线参数占位', updatedAt: nowIso() },
-        { id: uid(), projectId: p1.id, name: 'MES 良率原始数据.csv', type: 'data', status: 'ready', content: 'date,site,yield\n2026-05-01,etch-3,0.912', updatedAt: nowIso() }
-      ];
+      state.projectTasks = defaultProjectTasksFor(p1).concat(defaultProjectTasksFor(p2));
+      state.projectFiles = defaultProjectFilesFor(p1).concat(defaultProjectFilesFor(p2));
+      if (!state.projectEvents) state.projectEvents = [];
+      defaultYieldProjectEventsFor(p1, state.projectTasks.filter(function (t) { return sameId(t.projectId, p1.id); }))
+        .forEach(function (e) { state.projectEvents.push(e); });
+      defaultSupplyProjectEventsFor(p2, state.projectTasks.filter(function (t) { return sameId(t.projectId, p2.id); }))
+        .forEach(function (e) { state.projectEvents.push(e); });
+      state.projectTaskSchemaVersion = 6;
     }
 
     seedExperts.forEach(function (e) {
@@ -1122,30 +1114,613 @@
       ];
       state.projectTasks = defaultProjectTasksFor(p1).concat(defaultProjectTasksFor(p2));
       state.projectFiles = defaultProjectFilesFor(p1).concat(defaultProjectFilesFor(p2));
+      if (!state.projectEvents) state.projectEvents = [];
+      defaultYieldProjectEventsFor(p1, state.projectTasks.filter(function (t) { return sameId(t.projectId, p1.id); }))
+        .forEach(function (e) { state.projectEvents.push(e); });
+      defaultSupplyProjectEventsFor(p2, state.projectTasks.filter(function (t) { return sameId(t.projectId, p2.id); }))
+        .forEach(function (e) { state.projectEvents.push(e); });
+      state.projectTaskSchemaVersion = 6;
     }
     persist();
+  }
+
+  function projectTaskSeed(p, fields) {
+    var now = nowIso();
+    return Object.assign({
+      id: uid(),
+      projectId: p.id,
+      title: '',
+      status: 'todo',
+      expertId: null,
+      sortOrder: 0,
+      priority: 'medium',
+      parentTaskId: null,
+      isTriage: false,
+      commentCount: 0,
+      body: '',
+      latestSummary: '',
+      blockedReason: '',
+      createdAt: now,
+      updatedAt: now
+    }, fields || {});
+  }
+
+  function defaultYieldProjectTasksFor(p, members) {
+    var lead = members[0];
+    var device = members.find(function (m) { return m.expertId !== lead.expertId; }) || members[1];
+    var quality = members.find(function (m) {
+      return m.expertId !== lead.expertId && m.expertId !== device.expertId;
+    }) || members[0];
+
+    var goalActive = uid();
+    var goalDone = uid();
+    var goalTriage = uid();
+    var tReadySpc = uid();
+    var tDoneRoot = uid();
+    var tRunningDevice = uid();
+    var tRunningFdc = uid();
+
+    return [
+      projectTaskSeed(p, {
+        id: goalActive,
+        title: '针对近期良率波动组织专家排查',
+        status: 'todo',
+        isTriage: true,
+        expertId: lead.expertId,
+        sortOrder: -30,
+        priority: 'high',
+        body: '针对 etch 区近期良率下滑，组织工艺、质量、设备专家联合排查根因并输出整改方案。',
+        createdAt: minutesAgoIso(280),
+        updatedAt: minutesAgoIso(15)
+      }),
+      projectTaskSeed(p, {
+        id: goalDone,
+        title: '12寸产线工艺窗口复盘',
+        status: 'done',
+        isTriage: true,
+        expertId: lead.expertId,
+        sortOrder: -20,
+        priority: 'medium',
+        body: '复盘 12 寸产线关键工序工艺窗口设定，识别偏差来源并输出优化建议。',
+        createdAt: daysAgoIso(1, 10, 8),
+        updatedAt: daysAgoIso(1, 16, 30)
+      }),
+      projectTaskSeed(p, {
+        id: goalTriage,
+        title: 'etch 区设备健康度评估',
+        status: 'triage',
+        isTriage: true,
+        expertId: device.expertId,
+        sortOrder: -10,
+        priority: 'medium',
+        body: '评估 etch 区关键设备健康状态，识别潜在故障模式与良率关联风险。',
+        createdAt: daysAgoIso(3, 14, 20),
+        updatedAt: daysAgoIso(3, 14, 20)
+      }),
+
+      projectTaskSeed(p, {
+        id: tReadySpc,
+        title: 'SPC 数据分析',
+        status: 'ready',
+        expertId: quality.expertId,
+        parentTaskId: goalActive,
+        sortOrder: 0,
+        priority: 'high',
+        body: '排查 etch 区近 4 周 SPC 异常点，更新缺陷 pareto。',
+        latestSummary: '已锁定 etch-3 连续 3 点超 UCL，待生成更新版缺陷 pareto。',
+        commentCount: 3,
+        createdAt: minutesAgoIso(260),
+        updatedAt: minutesAgoIso(40)
+      }),
+      projectTaskSeed(p, {
+        id: tDoneRoot,
+        title: '良率根因分析',
+        status: 'done',
+        expertId: lead.expertId,
+        parentTaskId: goalActive,
+        sortOrder: 1,
+        priority: 'high',
+        body: '撰写良率波动根因分析报告，输出参数回标建议。',
+        latestSummary: '主要根因：etch 区 3 号 chamber 压力偏差 +12%。',
+        commentCount: 5,
+        result: '主要根因：etch 区 3 号 chamber 压力偏差 +12%。建议参数回标并加严 SPC 监控。',
+        createdAt: minutesAgoIso(250),
+        updatedAt: minutesAgoIso(90)
+      }),
+      projectTaskSeed(p, {
+        id: tRunningDevice,
+        title: '设备关联分析',
+        status: 'running',
+        expertId: device.expertId,
+        parentTaskId: goalActive,
+        sortOrder: 2,
+        priority: 'medium',
+        body: '交叉验证 chamber PM 记录与良率关联。',
+        latestSummary: '正在从设备管理系统导出近 3 个月 PM 记录。',
+        commentCount: 2,
+        createdAt: minutesAgoIso(240),
+        updatedAt: minutesAgoIso(20)
+      }),
+      projectTaskSeed(p, {
+        title: '缺陷 pareto 更新',
+        status: 'todo',
+        expertId: quality.expertId,
+        parentTaskId: goalActive,
+        sortOrder: 3,
+        priority: 'low',
+        body: '基于最新 SPC 数据更新缺陷 pareto 排名。',
+        createdAt: minutesAgoIso(230),
+        updatedAt: minutesAgoIso(120)
+      }),
+      projectTaskSeed(p, {
+        title: '颗粒污染 Top3 归因',
+        status: 'todo',
+        expertId: quality.expertId,
+        parentTaskId: goalActive,
+        sortOrder: 4,
+        priority: 'medium',
+        body: '对 Top3 颗粒污染缺陷做归因分析，输出临时控制措施。',
+        commentCount: 1,
+        createdAt: minutesAgoIso(220),
+        updatedAt: minutesAgoIso(100)
+      }),
+
+      projectTaskSeed(p, {
+        title: '工艺窗口参数采集',
+        status: 'done',
+        expertId: lead.expertId,
+        parentTaskId: goalDone,
+        sortOrder: 10,
+        priority: 'medium',
+        body: '采集 etch / CMP / 光刻关键工序工艺窗口参数。',
+        latestSummary: '已完成 8 条关键工序窗口参数采集。',
+        createdAt: daysAgoIso(1, 10, 30),
+        updatedAt: daysAgoIso(1, 12, 0)
+      }),
+      projectTaskSeed(p, {
+        title: '窗口偏差分析报告',
+        status: 'done',
+        expertId: lead.expertId,
+        parentTaskId: goalDone,
+        sortOrder: 11,
+        priority: 'medium',
+        body: '分析各工序窗口偏差对良率的影响权重。',
+        latestSummary: 'etch 窗口偏差贡献度最高（42%）。',
+        createdAt: daysAgoIso(1, 12, 15),
+        updatedAt: daysAgoIso(1, 14, 20)
+      }),
+      projectTaskSeed(p, {
+        title: '加严监控规则制定',
+        status: 'done',
+        expertId: quality.expertId,
+        parentTaskId: goalDone,
+        sortOrder: 12,
+        priority: 'medium',
+        body: '针对偏差较大的工序制定加严 SPC 监控规则。',
+        createdAt: daysAgoIso(1, 14, 30),
+        updatedAt: daysAgoIso(1, 15, 45)
+      }),
+      projectTaskSeed(p, {
+        title: '复盘纪要输出',
+        status: 'done',
+        expertId: lead.expertId,
+        parentTaskId: goalDone,
+        sortOrder: 13,
+        priority: 'low',
+        body: '汇总工艺窗口复盘结论，输出纪要并归档。',
+        createdAt: daysAgoIso(1, 15, 50),
+        updatedAt: daysAgoIso(1, 16, 30)
+      }),
+
+      projectTaskSeed(p, {
+        title: 'chamber 参数漂移复盘',
+        status: 'triage',
+        expertId: lead.expertId,
+        sortOrder: 20,
+        priority: 'high',
+        body: '反复阻塞后需重新拆解，梳理参数漂移与良率波动的关联假设。',
+        latestSummary: '反复 block/unblock 已达上限，需协调专家重新拆解。',
+        blockedReason: '反复阻塞已达上限，需重新拆解',
+        createdAt: minutesAgoIso(180),
+        updatedAt: minutesAgoIso(60)
+      }),
+      projectTaskSeed(p, {
+        title: '下周 SPC 复测计划',
+        status: 'scheduled',
+        expertId: quality.expertId,
+        sortOrder: 21,
+        priority: 'medium',
+        body: '参数回标后安排下周 SPC 复测，验证良率恢复情况。',
+        createdAt: minutesAgoIso(150),
+        updatedAt: minutesAgoIso(150)
+      }),
+      projectTaskSeed(p, {
+        title: '冷却系统关联验证',
+        status: 'todo',
+        expertId: device.expertId,
+        parentTaskId: tRunningDevice,
+        sortOrder: 22,
+        priority: 'medium',
+        body: '待设备关联分析完成后，验证冷却系统与温度漂移的关联性。',
+        commentCount: 1,
+        createdAt: minutesAgoIso(140),
+        updatedAt: minutesAgoIso(80)
+      }),
+      projectTaskSeed(p, {
+        title: 'etch 区清洁周期加严',
+        status: 'ready',
+        expertId: quality.expertId,
+        sortOrder: 23,
+        priority: 'high',
+        body: '根据颗粒污染归因结果，制定 etch 区清洁周期加严方案。',
+        latestSummary: '方案草案已完成，待调度执行。',
+        createdAt: minutesAgoIso(130),
+        updatedAt: minutesAgoIso(35)
+      }),
+      projectTaskSeed(p, {
+        title: 'CMP 区良率对标分析',
+        status: 'todo',
+        expertId: lead.expertId,
+        sortOrder: 24,
+        priority: 'medium',
+        body: '对比 CMP 区近 4 周良率与标杆线差异，识别改善空间。',
+        createdAt: minutesAgoIso(120),
+        updatedAt: minutesAgoIso(120)
+      }),
+      projectTaskSeed(p, {
+        id: tRunningFdc,
+        title: 'FDC 告警规则梳理',
+        status: 'running',
+        expertId: device.expertId,
+        sortOrder: 25,
+        priority: 'medium',
+        body: '梳理 etch 区 FDC 告警规则，识别与良率波动相关的异常模式。',
+        latestSummary: '已梳理 23 条告警规则，正在交叉验证命中率。',
+        commentCount: 2,
+        createdAt: minutesAgoIso(110),
+        updatedAt: minutesAgoIso(10)
+      }),
+      projectTaskSeed(p, {
+        title: '工艺参数回标方案',
+        status: 'review',
+        expertId: lead.expertId,
+        sortOrder: 26,
+        priority: 'high',
+        body: '输出 etch 区 3 号 chamber 参数回标方案，提交系统自动评审。',
+        latestSummary: 'PR 已提交，系统正在自动评审中。',
+        commentCount: 2,
+        createdAt: minutesAgoIso(100),
+        updatedAt: minutesAgoIso(25)
+      }),
+      projectTaskSeed(p, {
+        title: 'MES 数据接口对接',
+        status: 'blocked',
+        expertId: device.expertId,
+        sortOrder: 27,
+        priority: 'urgent',
+        body: '对接 MES 良率原始数据接口，拉取近 4 周各站点数据。',
+        latestSummary: 'MES API 权限待 IT 开通，无法继续拉取数据。',
+        blockedReason: 'MES API 权限待 IT 开通',
+        commentCount: 4,
+        createdAt: minutesAgoIso(200),
+        updatedAt: minutesAgoIso(30)
+      }),
+      projectTaskSeed(p, {
+        title: '光刻 overlay 偏差复核',
+        status: 'blocked',
+        expertId: lead.expertId,
+        sortOrder: 28,
+        priority: 'high',
+        body: '复核光刻工序 overlay 偏差数据，确认是否影响近期良率波动。',
+        latestSummary: '量测设备校准证书过期，需等待计量部门更新。',
+        blockedReason: '量测设备校准证书过期',
+        commentCount: 1,
+        createdAt: minutesAgoIso(90),
+        updatedAt: minutesAgoIso(45)
+      }),
+      projectTaskSeed(p, {
+        title: '站会纪要整理',
+        status: 'done',
+        expertId: lead.expertId,
+        sortOrder: 29,
+        priority: 'low',
+        body: '整理本周良率攻关站会纪要，同步各专家进展与下周计划。',
+        latestSummary: '纪要已发布至项目群组。',
+        createdAt: daysAgoIso(0, 9, 30),
+        updatedAt: daysAgoIso(0, 10, 0)
+      }),
+      projectTaskSeed(p, {
+        title: '初期数据摸底',
+        status: 'archived',
+        expertId: quality.expertId,
+        sortOrder: 30,
+        priority: 'low',
+        body: '项目启动初期的数据摸底与现状梳理，已归档。',
+        latestSummary: '已完成各站点良率基线梳理。',
+        createdAt: daysAgoIso(7, 9, 0),
+        updatedAt: daysAgoIso(6, 17, 0)
+      }),
+      projectTaskSeed(p, {
+        title: '立项背景调研',
+        status: 'archived',
+        expertId: lead.expertId,
+        sortOrder: 31,
+        priority: 'low',
+        body: '项目立项前的背景调研与可行性评估，已归档。',
+        latestSummary: '确认 etch 区为良率波动主要贡献站点。',
+        createdAt: daysAgoIso(10, 14, 0),
+        updatedAt: daysAgoIso(9, 11, 0)
+      })
+    ];
+  }
+
+  function defaultYieldProjectEventsFor(p, tasks) {
+    var lead = (state.projectMembers.find(function (m) { return sameId(m.projectId, p.id) && m.role === 'lead'; }) || {}).expertId;
+    var quality = (state.projectMembers.find(function (m) {
+      return sameId(m.projectId, p.id) && m.role === 'member';
+    }) || {}).expertId;
+    function taskId(title) {
+      var t = (tasks || []).find(function (x) { return x.title === title; });
+      return t ? t.id : null;
+    }
+    return [
+      { type: 'project_created', category: 'project', title: '项目已创建', content: '项目「12寸产线良率提升项目」已创建，协调专家开始拆解目标。', createdAt: daysAgoIso(7, 9, 0) },
+      { type: 'goal_created', category: 'task', title: '目标已发起', taskId: taskId('针对近期良率波动组织专家排查'), expertId: lead, content: '用户发起目标「针对近期良率波动组织专家排查」，系统自动拆解为 5 个子任务。', createdAt: minutesAgoIso(280) },
+      { type: 'task_decomposed', category: 'task', title: '任务已拆解', taskId: taskId('针对近期良率波动组织专家排查'), expertId: lead, content: '协调专家将目标拆解为 SPC 数据分析、良率根因分析、设备关联分析等 5 个子任务并派发。', createdAt: minutesAgoIso(275) },
+      { type: 'task_completed', category: 'task', title: '任务已完成', taskId: taskId('良率根因分析'), expertId: lead, content: '任务「良率根因分析」已完成：主要根因 etch 区 3 号 chamber 压力偏差 +12%。', createdAt: minutesAgoIso(90) },
+      { type: 'task_status_moved', category: 'task', title: '任务状态变更', taskId: taskId('设备关联分析'), expertId: (state.projectMembers.find(function (m) { return sameId(m.projectId, p.id) && m.expertId !== lead; }) || {}).expertId, content: '任务「设备关联分析」状态变更为「执行中」。', createdAt: minutesAgoIso(20) },
+      { type: 'task_blocked', category: 'exception', title: '任务阻塞', taskId: taskId('MES 数据接口对接'), expertId: (state.projectMembers.find(function (m) { return sameId(m.projectId, p.id); }) || {}).expertId, content: '任务「MES 数据接口对接」被阻塞：MES API 权限待 IT 开通。', createdAt: minutesAgoIso(30) },
+      { type: 'comment_added', category: 'comment', title: '新增评论', taskId: taskId('SPC 数据分析'), expertId: quality, content: '[质量专家] 建议同步检查冷却系统对颗粒污染的影响。', createdAt: minutesAgoIso(50) },
+      { type: 'execution_run', category: 'execution', title: '执行记录', taskId: taskId('良率根因分析'), expertId: lead, content: 'Run #1 工艺专家 完成 18m32s — 已定位 etch 区 3 号 chamber 压力漂移。', createdAt: minutesAgoIso(95) },
+      { type: 'goal_completed', category: 'task', title: '目标已完成', taskId: taskId('12寸产线工艺窗口复盘'), expertId: lead, content: '目标「12寸产线工艺窗口复盘」全部子任务已完成（4/4）。', createdAt: daysAgoIso(1, 16, 30) },
+      { type: 'task_review', category: 'execution', title: '进入评审', taskId: taskId('工艺参数回标方案'), expertId: lead, content: '任务「工艺参数回标方案」已提交 PR，系统自动评审中。', createdAt: minutesAgoIso(25) }
+    ].map(function (e) {
+      return Object.assign({ id: uid(), projectId: p.id, meta: null }, e);
+    });
+  }
+
+  function defaultSupplyProjectTasksFor(p, members) {
+    var supplyLead = members[0];
+    var digital = members[1];
+
+    var goalActive = uid();
+    var goalDone = uid();
+    var goalTriage = uid();
+    var tForecast = uid();
+
+    return [
+      projectTaskSeed(p, {
+        id: goalActive,
+        title: '推进供应链数字化核心能力建设',
+        status: 'todo',
+        isTriage: true,
+        expertId: supplyLead.expertId,
+        sortOrder: -30,
+        priority: 'high',
+        body: '构建多工厂需求预测模型，同步推进主数据治理与仿真验证，提升交付准时率。',
+        createdAt: minutesAgoIso(320),
+        updatedAt: minutesAgoIso(18)
+      }),
+      projectTaskSeed(p, {
+        id: goalDone,
+        title: '完成供应链数据底座建设',
+        status: 'done',
+        isTriage: true,
+        expertId: supplyLead.expertId,
+        sortOrder: -20,
+        priority: 'medium',
+        body: '完成历史订单清洗、主数据编码规则梳理与 WMS 数据导出，夯实供应链数据底座。',
+        createdAt: daysAgoIso(5, 10, 0),
+        updatedAt: daysAgoIso(2, 16, 0)
+      }),
+      projectTaskSeed(p, {
+        id: goalTriage,
+        title: '数据治理规范建设',
+        status: 'triage',
+        isTriage: true,
+        expertId: digital.expertId,
+        sortOrder: -10,
+        priority: 'high',
+        body: '制定供应链主数据治理规范，覆盖物料编码、供应商主数据与一对多映射规则。',
+        createdAt: daysAgoIso(3, 14, 20),
+        updatedAt: daysAgoIso(3, 14, 20)
+      }),
+
+      projectTaskSeed(p, {
+        title: '促销日历对齐',
+        status: 'done',
+        expertId: supplyLead.expertId,
+        parentTaskId: goalActive,
+        sortOrder: 0,
+        priority: 'medium',
+        body: '与营销团队对齐 Q3 促销日历，纳入预测模型特征。',
+        latestSummary: '促销日历已对齐并入库。',
+        createdAt: minutesAgoIso(300),
+        updatedAt: minutesAgoIso(200)
+      }),
+      projectTaskSeed(p, {
+        title: '渠道反馈数据接入',
+        status: 'done',
+        expertId: digital.expertId,
+        parentTaskId: goalActive,
+        sortOrder: 1,
+        priority: 'medium',
+        body: '接入渠道销售反馈与海外订单数据，补充预测特征。',
+        latestSummary: '已完成 6 个渠道数据源接入。',
+        createdAt: minutesAgoIso(290),
+        updatedAt: minutesAgoIso(180)
+      }),
+      projectTaskSeed(p, {
+        title: '历史特征工程',
+        status: 'done',
+        expertId: supplyLead.expertId,
+        parentTaskId: goalActive,
+        sortOrder: 2,
+        priority: 'high',
+        body: '整理近 12 个月订单与库存数据，构建预测特征集。',
+        latestSummary: '特征集 v2 已发布，含季节性分解字段。',
+        createdAt: minutesAgoIso(280),
+        updatedAt: minutesAgoIso(150)
+      }),
+      projectTaskSeed(p, {
+        id: tForecast,
+        title: '需求预测建模',
+        status: 'running',
+        expertId: supplyLead.expertId,
+        parentTaskId: goalActive,
+        sortOrder: 3,
+        priority: 'high',
+        body: '训练多 SKU 需求预测模型，完成回测与误差分析。',
+        latestSummary: '已加载近 12 个月订单数据，开始特征工程。',
+        commentCount: 3,
+        createdAt: minutesAgoIso(270),
+        updatedAt: minutesAgoIso(25)
+      }),
+      projectTaskSeed(p, {
+        title: 'ERP 编码映射核对',
+        status: 'todo',
+        expertId: digital.expertId,
+        parentTaskId: tForecast,
+        sortOrder: 4,
+        priority: 'medium',
+        body: '待预测建模完成后，核对 ERP 物料编码一对多映射清单。',
+        commentCount: 1,
+        createdAt: minutesAgoIso(260),
+        updatedAt: minutesAgoIso(100)
+      }),
+
+      projectTaskSeed(p, {
+        title: '历史订单数据清洗',
+        status: 'done',
+        expertId: supplyLead.expertId,
+        parentTaskId: goalDone,
+        sortOrder: 10,
+        priority: 'medium',
+        body: '清洗并对齐近 12 个月历史订单数据。',
+        latestSummary: '已完成近 12 个月订单数据清洗与对齐。',
+        createdAt: daysAgoIso(5, 10, 30),
+        updatedAt: daysAgoIso(4, 15, 0)
+      }),
+      projectTaskSeed(p, {
+        title: '主数据编码规则梳理',
+        status: 'done',
+        expertId: digital.expertId,
+        parentTaskId: goalDone,
+        sortOrder: 11,
+        priority: 'medium',
+        body: '梳理物料、供应商、库位等主数据编码规则。',
+        latestSummary: '编码规则清单已输出，待与 ERP 团队确认。',
+        createdAt: daysAgoIso(4, 9, 0),
+        updatedAt: daysAgoIso(3, 17, 0)
+      }),
+      projectTaskSeed(p, {
+        title: 'WMS 库位热力图导出',
+        status: 'done',
+        expertId: digital.expertId,
+        parentTaskId: goalDone,
+        sortOrder: 12,
+        priority: 'medium',
+        body: '导出 WMS 库位热力图，供预测模型区域分仓特征使用。',
+        latestSummary: '热力图已导出，可供区域分仓特征使用。',
+        result: '已完成 WMS 库位热力图导出。',
+        createdAt: daysAgoIso(3, 11, 0),
+        updatedAt: daysAgoIso(2, 16, 0)
+      }),
+      projectTaskSeed(p, {
+        title: '数据质量基线报告',
+        status: 'done',
+        expertId: supplyLead.expertId,
+        parentTaskId: goalDone,
+        sortOrder: 13,
+        priority: 'low',
+        body: '输出供应链主数据质量基线报告，定义监控指标。',
+        latestSummary: '基线报告已归档，完整率 96.2%。',
+        createdAt: daysAgoIso(2, 14, 0),
+        updatedAt: daysAgoIso(2, 16, 0)
+      }),
+
+      projectTaskSeed(p, {
+        title: '数据治理规范',
+        status: 'review',
+        expertId: digital.expertId,
+        sortOrder: 20,
+        priority: 'high',
+        body: '编写供应链主数据治理规范，提交评审。',
+        latestSummary: '规范草案已提交 PR，系统正在自动评审中。',
+        commentCount: 2,
+        createdAt: minutesAgoIso(120),
+        updatedAt: minutesAgoIso(30)
+      }),
+      projectTaskSeed(p, {
+        title: '多工厂仿真验证',
+        status: 'ready',
+        expertId: null,
+        sortOrder: 21,
+        priority: 'medium',
+        body: '执行多工厂物料计划仿真验证，评估交付准时率提升空间。',
+        createdAt: minutesAgoIso(110),
+        updatedAt: minutesAgoIso(40)
+      }),
+      projectTaskSeed(p, {
+        title: '安全库存策略评审',
+        status: 'triage',
+        expertId: supplyLead.expertId,
+        sortOrder: 22,
+        priority: 'high',
+        body: '反复阻塞后需重新拆解安全库存策略优化方案。',
+        latestSummary: '反复 block/unblock 已达上限，需重新拆解。',
+        blockedReason: '反复阻塞已达上限，需重新拆解',
+        createdAt: minutesAgoIso(90),
+        updatedAt: minutesAgoIso(50)
+      }),
+      projectTaskSeed(p, {
+        title: '供应商协同平台对接',
+        status: 'blocked',
+        expertId: digital.expertId,
+        sortOrder: 23,
+        priority: 'urgent',
+        body: '对接供应商协同平台 API，获取实时交付数据。',
+        latestSummary: '供应商平台 API 密钥待采购部门审批。',
+        blockedReason: '供应商平台 API 密钥待采购部门审批',
+        commentCount: 2,
+        createdAt: minutesAgoIso(80),
+        updatedAt: minutesAgoIso(35)
+      })
+    ];
+  }
+
+  function defaultSupplyProjectEventsFor(p, tasks) {
+    var lead = (state.projectMembers.find(function (m) { return sameId(m.projectId, p.id) && m.role === 'lead'; }) || {}).expertId;
+    var digital = (state.projectMembers.find(function (m) {
+      return sameId(m.projectId, p.id) && m.role === 'member';
+    }) || {}).expertId;
+    function taskId(title) {
+      var t = (tasks || []).find(function (x) { return x.title === title; });
+      return t ? t.id : null;
+    }
+    return [
+      { type: 'project_created', category: 'project', title: '项目已创建', content: '项目「供应链数字化规划」已创建，协调专家开始拆解目标。', createdAt: daysAgoIso(7, 9, 0) },
+      { type: 'goal_created', category: 'task', title: '目标已发起', taskId: taskId('推进供应链数字化核心能力建设'), expertId: lead, content: '用户发起目标「推进供应链数字化核心能力建设」，系统自动拆解为 5 个子任务。', createdAt: minutesAgoIso(320) },
+      { type: 'task_decomposed', category: 'task', title: '任务已拆解', taskId: taskId('推进供应链数字化核心能力建设'), expertId: lead, content: '协调专家将目标拆解为需求预测建模、促销日历对齐、历史特征工程等子任务并派发。', createdAt: minutesAgoIso(315) },
+      { type: 'task_completed', category: 'task', title: '任务已完成', taskId: taskId('促销日历对齐'), expertId: lead, content: '任务「促销日历对齐」已完成，促销特征已纳入预测模型。', createdAt: minutesAgoIso(200) },
+      { type: 'task_status_moved', category: 'task', title: '任务状态变更', taskId: taskId('需求预测建模'), expertId: lead, content: '任务「需求预测建模」状态变更为「执行中」。', createdAt: minutesAgoIso(25) },
+      { type: 'task_blocked', category: 'exception', title: '任务阻塞', taskId: taskId('供应商协同平台对接'), expertId: digital, content: '任务「供应商协同平台对接」被阻塞：供应商平台 API 密钥待采购部门审批。', createdAt: minutesAgoIso(35) },
+      { type: 'comment_added', category: 'comment', title: '新增评论', taskId: taskId('需求预测建模'), expertId: digital, content: '[数字化顾问] WMS 热力图特征已可供模型使用，请同步纳入。', createdAt: minutesAgoIso(60) },
+      { type: 'goal_completed', category: 'task', title: '目标已完成', taskId: taskId('完成供应链数据底座建设'), expertId: lead, content: '目标「完成供应链数据底座建设」全部子任务已完成（4/4）。', createdAt: daysAgoIso(2, 16, 0) },
+      { type: 'goal_created', category: 'task', title: '目标已发起', taskId: taskId('数据治理规范建设'), expertId: digital, content: '用户发起目标「数据治理规范建设」，待协调专家拆解。', createdAt: daysAgoIso(3, 14, 20) },
+      { type: 'task_review', category: 'execution', title: '进入评审', taskId: taskId('数据治理规范'), expertId: digital, content: '任务「数据治理规范」已提交 PR，系统自动评审中。', createdAt: minutesAgoIso(30) }
+    ].map(function (e) {
+      return Object.assign({ id: uid(), projectId: p.id, meta: null }, e);
+    });
   }
 
   function defaultProjectTasksFor(p) {
     var members = state.projectMembers.filter(function (m) { return sameId(m.projectId, p.id); });
     if (p.name.indexOf('良率') >= 0 && members.length >= 2) {
-      var lead = members[0];
-      var device = members.find(function (m) { return m.expertId !== lead.expertId; }) || members[1];
-      var quality = members.find(function (m) {
-        return m.expertId !== lead.expertId && m.expertId !== device.expertId;
-      }) || members[0];
-      return [
-        { id: uid(), projectId: p.id, title: 'SPC 数据分析', status: 'queued', expertId: quality.expertId, sortOrder: 0 },
-        { id: uid(), projectId: p.id, title: '良率根因分析', status: 'done', expertId: lead.expertId, sortOrder: 1 },
-        { id: uid(), projectId: p.id, title: '设备关联分析', status: 'running', expertId: device.expertId, sortOrder: 2 }
-      ];
+      return defaultYieldProjectTasksFor(p, members);
     }
     if (p.name.indexOf('供应链') >= 0 && members.length >= 2) {
-      return [
-        { id: uid(), projectId: p.id, title: '需求预测建模', status: 'running', expertId: members[0].expertId, sortOrder: 0 },
-        { id: uid(), projectId: p.id, title: '数据治理规范', status: 'running', expertId: members[1].expertId, sortOrder: 1 },
-        { id: uid(), projectId: p.id, title: '多工厂仿真验证', status: 'queued', expertId: null, sortOrder: 2 }
-      ];
+      return defaultSupplyProjectTasksFor(p, members);
     }
     if (members.length === 0) {
       return [{ id: uid(), projectId: p.id, title: '任务拆解', status: 'queued', expertId: null, sortOrder: 0 }];
@@ -1277,14 +1852,48 @@
   }
 
   var DEMO_PROJECT_TASK_STATUSES = {
-    'SPC 数据分析': 'queued',
+    'SPC 数据分析': 'ready',
     '良率根因分析': 'done',
     '设备关联分析': 'running',
+    'chamber 参数漂移复盘': 'triage',
+    '下周 SPC 复测计划': 'scheduled',
+    '冷却系统关联验证': 'todo',
+    '缺陷 pareto 更新': 'todo',
+    '工艺参数回标方案': 'review',
+    'MES 数据接口对接': 'blocked',
+    '初期数据摸底': 'archived',
+    '立项背景调研': 'archived',
+    '针对近期良率波动组织专家排查': 'todo',
+    '12寸产线工艺窗口复盘': 'done',
+    'etch 区设备健康度评估': 'triage',
+    '颗粒污染 Top3 归因': 'todo',
+    '工艺窗口参数采集': 'done',
+    '窗口偏差分析报告': 'done',
+    '加严监控规则制定': 'done',
+    '复盘纪要输出': 'done',
+    'etch 区清洁周期加严': 'ready',
+    'CMP 区良率对标分析': 'todo',
+    'FDC 告警规则梳理': 'running',
+    '光刻 overlay 偏差复核': 'blocked',
+    '站会纪要整理': 'done',
+    '推进供应链数字化核心能力建设': 'todo',
+    '完成供应链数据底座建设': 'done',
+    '数据治理规范建设': 'triage',
+    '渠道反馈数据接入': 'done',
+    '历史特征工程': 'done',
+    '主数据编码规则梳理': 'done',
+    '数据质量基线报告': 'done',
     '需求预测建模': 'running',
-    '数据治理规范': 'running',
-    '多工厂仿真验证': 'queued',
-    '任务拆解': 'queued',
-    '数据收集': 'queued',
+    '数据治理规范': 'review',
+    '多工厂仿真验证': 'ready',
+    '促销日历对齐': 'done',
+    'ERP 编码映射核对': 'todo',
+    '安全库存策略评审': 'triage',
+    'WMS 库位热力图导出': 'done',
+    '历史订单数据清洗': 'done',
+    '供应商协同平台对接': 'blocked',
+    '任务拆解': 'ready',
+    '数据收集': 'ready',
     '分析报告': 'running',
     '评审闭环': 'done'
   };
@@ -1352,6 +1961,57 @@
     if (updated) persist();
   }
 
+  function migrateProjectTaskSeed() {
+    var SCHEMA = 4;
+    if ((state.projectTaskSchemaVersion || 0) >= SCHEMA) return;
+    (state.projects || []).forEach(function (p) {
+      if (p.name.indexOf('良率') < 0 && p.name.indexOf('供应链') < 0) return;
+      var existing = (state.projectTasks || []).filter(function (t) { return sameId(t.projectId, p.id); });
+      if (existing.length >= 8) return;
+      state.projectTasks = (state.projectTasks || []).filter(function (t) { return !sameId(t.projectId, p.id); });
+      defaultProjectTasksFor(p).forEach(function (t) { state.projectTasks.push(t); });
+    });
+    state.projectTaskSchemaVersion = SCHEMA;
+    persist();
+  }
+
+  function migrateYieldProjectSeed() {
+    var SCHEMA = 5;
+    if ((state.projectTaskSchemaVersion || 0) >= SCHEMA) return;
+    (state.projects || []).forEach(function (p) {
+      if (p.name.indexOf('良率') < 0) return;
+      var existing = (state.projectTasks || []).filter(function (t) { return sameId(t.projectId, p.id); });
+      if (existing.length >= 22) return;
+      state.projectTasks = (state.projectTasks || []).filter(function (t) { return !sameId(t.projectId, p.id); });
+      var tasks = defaultProjectTasksFor(p);
+      tasks.forEach(function (t) { state.projectTasks.push(t); });
+      state.projectEvents = (state.projectEvents || []).filter(function (e) { return !sameId(e.projectId, p.id); });
+      defaultYieldProjectEventsFor(p, tasks).forEach(function (e) { state.projectEvents.push(e); });
+      state.projectFiles = (state.projectFiles || []).filter(function (f) { return !sameId(f.projectId, p.id); });
+      defaultProjectFilesFor(p).forEach(function (f) { state.projectFiles.push(f); });
+    });
+    state.projectTaskSchemaVersion = SCHEMA;
+    persist();
+  }
+
+  function migrateSupplyProjectSeed() {
+    var SCHEMA = 6;
+    if ((state.projectTaskSchemaVersion || 0) >= SCHEMA) return;
+    (state.projects || []).forEach(function (p) {
+      if (p.name.indexOf('供应链') < 0) return;
+      var existing = (state.projectTasks || []).filter(function (t) { return sameId(t.projectId, p.id); });
+      var hasGoalRecords = existing.some(function (t) { return t.isTriage === true; });
+      if (hasGoalRecords && existing.length >= 18) return;
+      state.projectTasks = (state.projectTasks || []).filter(function (t) { return !sameId(t.projectId, p.id); });
+      var tasks = defaultProjectTasksFor(p);
+      tasks.forEach(function (t) { state.projectTasks.push(t); });
+      state.projectEvents = (state.projectEvents || []).filter(function (e) { return !sameId(e.projectId, p.id); });
+      defaultSupplyProjectEventsFor(p, tasks).forEach(function (e) { state.projectEvents.push(e); });
+    });
+    state.projectTaskSchemaVersion = SCHEMA;
+    persist();
+  }
+
   function migrateProjectTasks() {
     if (state.projectTasks && state.projectTasks.length > 0) return;
     state.projectTasks = [];
@@ -1364,8 +2024,12 @@
   function defaultProjectFilesFor(p) {
     if (p.name.indexOf('良率') >= 0) {
       return [
-        { id: uid(), projectId: p.id, name: '良率波动根因分析.md', type: 'document', status: 'updating', content: '# 良率波动根因分析\n\n撰写中…', updatedAt: nowIso() },
-        { id: uid(), projectId: p.id, name: 'SPC 控制图模板.xlsx', type: 'spreadsheet', status: 'ready', content: 'SPC 模板占位', updatedAt: nowIso() }
+        { id: uid(), projectId: p.id, name: '良率波动根因分析.md', type: 'document', status: 'updating', expertId: null, content: '# 良率波动根因分析\n\n## 初步结论\netch 区 3 号 chamber 压力偏差 +12%…', updatedAt: minutesAgoIso(90) },
+        { id: uid(), projectId: p.id, name: 'SPC 控制图模板.xlsx', type: 'spreadsheet', status: 'ready', content: 'SPC 模板：UCL / LCL / 中心线参数占位', updatedAt: daysAgoIso(2, 11, 0) },
+        { id: uid(), projectId: p.id, name: 'MES 良率原始数据.csv', type: 'data', status: 'ready', content: 'date,site,yield\n2026-05-01,etch-3,0.912\n2026-05-02,etch-3,0.908', updatedAt: daysAgoIso(3, 15, 30) },
+        { id: uid(), projectId: p.id, name: 'etch-3 chamber PM 记录.xlsx', type: 'spreadsheet', status: 'ready', content: 'PM 记录：近 3 个月维护日志', updatedAt: minutesAgoIso(45) },
+        { id: uid(), projectId: p.id, name: '缺陷 pareto 周报.pdf', type: 'document', status: 'ready', content: '缺陷 pareto 周报 — Top1 颗粒污染 38%', updatedAt: minutesAgoIso(50) },
+        { id: uid(), projectId: p.id, name: '工艺窗口复盘纪要.md', type: 'document', status: 'ready', content: '# 工艺窗口复盘纪要\n\netch 窗口偏差贡献度 42%…', updatedAt: daysAgoIso(1, 16, 30) }
       ];
     }
     if (p.name.indexOf('供应链') >= 0) {
@@ -1558,6 +2222,9 @@
       migrateProjectTasks();
       migrateProjectTaskTitles();
       migrateProjectTaskStatus();
+      migrateProjectTaskSeed();
+      migrateYieldProjectSeed();
+      migrateSupplyProjectSeed();
       migrateProjectFiles();
       migrateProjectMessageTypes();
       if (DEV_MOCK) {
@@ -2845,7 +3512,7 @@
       return (state.projectTasks || [])
         .filter(function (t) {
           if (!sameId(t.projectId, projectId)) return false;
-          return t.isTriage || normalizeProjectTaskStatus(t.status) === 'triage';
+          return t.isTriage === true;
         })
         .sort(function (a, b) { return (b.createdAt || '').localeCompare(a.createdAt || ''); });
     },
