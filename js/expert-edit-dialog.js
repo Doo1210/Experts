@@ -23,7 +23,7 @@
         name: expert.name,
         description: expert.description,
         avatar: expert.avatar || '',
-        expertise: (expert.expertise || []).slice(0, 3)
+        expertise: (expert.expertise || []).slice(0, 10)
       };
       editExpertiseTagInput.value = '';
       showEditDialog.value = true;
@@ -48,15 +48,15 @@
     function addEditExpertiseTag() {
       var tag = editExpertiseTagInput.value.trim();
       if (!tag) return;
-      if (editForm.value.expertise.length >= 3) {
-        ElementPlus.ElMessage.warning('擅长领域最多添加 3 个');
+      if (editForm.value.expertise.length >= 10) {
+        ElementPlus.ElMessage.warning('擅长领域最多添加 10 个');
         return;
       }
       if (editForm.value.expertise.indexOf(tag) !== -1) {
         ElementPlus.ElMessage.warning('该标签已存在');
         return;
       }
-      editForm.value.expertise = editForm.value.expertise.concat([tag]).slice(0, 3);
+      editForm.value.expertise = editForm.value.expertise.concat([tag]).slice(0, 10);
       editExpertiseTagInput.value = '';
     }
 
@@ -82,7 +82,7 @@
         name: editForm.value.name.trim(),
         description: editForm.value.description.trim(),
         avatar: editForm.value.avatar || expert.avatar,
-        expertise: editForm.value.expertise.slice(0, 3)
+        expertise: editForm.value.expertise.slice(0, 10)
       }));
       closeEditDialog();
       if (options.onSaved) options.onSaved();

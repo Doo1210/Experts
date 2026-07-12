@@ -1,4 +1,4 @@
-(function () {
+﻿(function () {
   var store = window.AppStore;
   var catalog = window;
   var readImageFile = window.readImageFile;
@@ -8,11 +8,98 @@
   var PROJECT_ICON_PRESETS = window.AppShared.PROJECT_ICON_PRESETS;
   var isProjectIconImage = window.AppShared.isProjectIconImage;
 
+  var LIST_PAGE_TEMPLATE = [
+    '<div class="main-scroll list-page">',
+    '  <div class="page-header-row">',
+    '    <div class="page-header-text">',
+    '      <h1 class="page-title">专家</h1>',
+    '      <p class="page-subtitle">共 {{ experts.length }} 位智能体专家 · 发起任务或管理专家配置</p>',
+    '    </div>',
+    '    <create-action-btn label="新建专家" theme="expert" @click="openCreateDialog" />',
+    '  </div>',
+    '  <div class="expert-grid">',
+    '    <div v-for="expert in experts" :key="expert.id" class="expert-card">',
+    '      <div class="expert-card-accent"></div>',
+    '      <el-dropdown trigger="click" @command="handleExpertMenu($event, expert)">',
+    '        <button class="card-more-btn" title="更多操作" @click.stop>',
+    '          <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><circle cx="12" cy="5" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="12" cy="19" r="1.8"/></svg>',
+    '        </button>',
+    '        <template #dropdown>',
+    '          <el-dropdown-menu>',
+    '            <el-dropdown-item command="edit">编辑</el-dropdown-item>',
+    '            <el-dropdown-item command="delete" divided>删除</el-dropdown-item>',
+    '          </el-dropdown-menu>',
+    '        </template>',
+    '      </el-dropdown>',
+    '      <div class="expert-card-body" @click="goManage(expert)">',
+    '        <div class="card-header">',
+    '          <img class="card-avatar" :src="expert.avatar" :alt="expert.name">',
+    '          <div class="card-header-text">',
+    '            <div class="card-name">',
+    '              {{ expert.name }}',
+    '              <span v-if="runningCounts[expert.id]" class="expert-card-running-indicator" @click.stop="goStartTask(expert)">',
+    '                <span class="expert-card-running-dot"></span>',
+    '                {{ runningCounts[expert.id] }} 个运行中',
+    '              </span>',
+    '            </div>',
+    '          </div>',
+    '        </div>',
+    '        <p class="card-desc">{{ expert.description }}</p>',
+    '        <div class="card-footer">',
+    '          <div class="card-tags">',
+    '            <span v-for="(tag, idx) in expert.expertise.slice(0, 3)" :key="tag" class="expertise-tag" :class="tagColors[idx % tagColors.length]">{{ tag }}</span>',
+    '          </div>',
+    '        </div>',
+    '      </div>',
+    '      <div class="expert-card-actions">',
+    '        <button type="button" class="expert-card-action expert-card-action-primary" @click="goStartTask(expert)">',
+    '          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 2L11 13"/><path d="M22 2l-7 20-4-9-9-4 20-7z"/></svg>',
+    '          发起任务',
+    '        </button>',
+    '      </div>',
+    '    </div>',
+    '    <div v-if="experts.length === 0" class="empty-state">',
+    '      <div class="empty-state-icon">👤</div>',
+    '      <p>暂无专家</p>',
+    '      <create-action-btn label="创建第一位专家" theme="expert" soft @click="openCreateDialog" />',
+    '    </div>',
+    '  </div>',
+    '  <expert-create-page-dialog :wizard="createWizard" :tag-colors="tagColors" :skills="skills" :tools="tools" />',
+    '  <expert-edit-page-dialog :edit="expertEdit" header-title="编辑专家" :tag-colors="tagColors" />',
+    '  <el-dialog v-model="deleteDialog.visible" width="560px" class="form-dialog delete-expert-dialog" :close-on-click-modal="false" append-to-body>',
+    '    <template #header>',
+    '      <div class="dialog-header-custom">',
+    '        <div class="dialog-header-title">删除专家</div>',
+    '      </div>',
+    '    </template>',
+    '    <div class="delete-expert-warning" v-if="deleteDialog.expert">',
+    '      <span class="delete-expert-warning-icon">⚠</span>',
+    '      <div class="delete-expert-warning-text">',
+    '        即将删除专家「<strong>{{ deleteDialog.expert.name }}</strong>」，此操作不可恢复。<br>',
+    '        所有专家配置、人设、技能、工具绑定将被永久清除。',
+    '        <div v-if="deleteDialog.runningCount > 0" class="delete-expert-running-warn">',
+    '          该专家当前有 {{ deleteDialog.runningCount }} 个运行中会话，强制删除可能导致这些会话异常。',
+    '        </div>',
+    '      </div>',
+    '    </div>',
+    '    <label class="delete-expert-input-label" v-if="deleteDialog.expert">请输入专家名称「{{ deleteDialog.expert.name }}」以确认</label>',
+    '    <el-input v-model="deleteDialog.inputName" placeholder="输入专家名称" v-if="deleteDialog.expert" />',
+    '    <template #footer>',
+    '      <div class="dialog-footer-custom">',
+    '        <el-button @click="deleteDialog.visible = false">取消</el-button>',
+    '        <el-button type="danger" :disabled="!canConfirmDelete()" @click="confirmDelete">{{ deleteButtonText() }}</el-button>',
+    '      </div>',
+    '    </template>',
+    '  </el-dialog>',
+    '</div>'
+  ].join('\n');
+
   var ExpertCenterPage = {
     props: ['openCreate'],
     emits: ['nav', 'refresh'],
     setup: function (props, ctx) {
       var experts = Vue.ref([]);
+      var runningCounts = Vue.ref({});
       var expertEdit = createExpertEditForm(store, { onSaved: function () { load(); } });
       var createWizard = createExpertCreateForm(store, {
         onCreated: function (expert) {
@@ -23,26 +110,51 @@
 
       function load() {
         experts.value = store.getExperts();
+        var counts = {};
+        experts.value.forEach(function (e) {
+          counts[e.id] = store.getRunningSessionCount(e.id);
+        });
+        runningCounts.value = counts;
       }
 
-      function goTasks(expert) { ctx.emit('nav', '/experts/' + expert.id + '/tasks'); }
+      function goStartTask(expert) {
+        var task = store.createTask({ expertId: expert.id, title: '新任务', type: 'dialogue' });
+        ctx.emit('nav', '/experts/' + expert.id + '/tasks/' + task.id);
+      }
       function goManage(expert) { ctx.emit('nav', '/experts/' + expert.id + '?tab=persona'); }
 
-      function removeExpert(expert) {
-        ElementPlus.ElMessageBox.confirm(
-          '确定删除专家「' + expert.name + '」？删除后不可恢复。',
-          '删除专家',
-          { confirmButtonText: '删除', cancelButtonText: '取消', type: 'warning' }
-        ).then(function () {
-          store.deleteExpert(expert.id);
-          load();
-          ElementPlus.ElMessage.success('专家已删除');
-        }).catch(function () {});
+      var deleteDialog = Vue.ref({ visible: false, expert: null, inputName: '', runningCount: 0 });
+
+      function openDeleteDialog(expert) {
+        deleteDialog.value = {
+          visible: true,
+          expert: expert,
+          inputName: '',
+          runningCount: store.getRunningSessionCount(expert.id)
+        };
+      }
+
+      function canConfirmDelete() {
+        var d = deleteDialog.value;
+        return d.expert && d.inputName.trim() === d.expert.name;
+      }
+
+      function confirmDelete() {
+        var d = deleteDialog.value;
+        if (!canConfirmDelete()) return;
+        store.deleteExpert(d.expert.id);
+        deleteDialog.value = { visible: false, expert: null, inputName: '', runningCount: 0 };
+        load();
+        ElementPlus.ElMessage.success('专家已删除');
+      }
+
+      function deleteButtonText() {
+        return deleteDialog.value.runningCount > 0 ? '强制删除' : '删除';
       }
 
       function handleExpertMenu(command, expert) {
         if (command === 'edit') expertEdit.openEdit(expert);
-        else if (command === 'delete') removeExpert(expert);
+        else if (command === 'delete') openDeleteDialog(expert);
       }
 
       load();
@@ -63,76 +175,25 @@
 
       return {
         experts: experts,
+        runningCounts: runningCounts,
         tagColors: catalog.TAG_COLORS,
         skills: catalog.SKILLS_CATALOG,
         tools: catalog.TOOLS_CATALOG,
         expertEdit: expertEdit,
         createWizard: createWizard,
-        goTasks: goTasks,
+        deleteDialog: deleteDialog,
+        goStartTask: goStartTask,
         goManage: goManage,
         openCreateDialog: createWizard.openCreateDialog,
         handleExpertMenu: handleExpertMenu,
+        openDeleteDialog: openDeleteDialog,
+        canConfirmDelete: canConfirmDelete,
+        confirmDelete: confirmDelete,
+        deleteButtonText: deleteButtonText,
         load: load
       };
     },
-    template: '\
-      <div class="main-scroll list-page">\
-        <div class="page-header-row">\
-          <div class="page-header-text">\
-            <h1 class="page-title">专家</h1>\
-            <p class="page-subtitle">共 {{ experts.length }} 位智能体专家 · 发起任务或管理专家配置</p>\
-          </div>\
-          <create-action-btn label="新建专家" theme="expert" @click="openCreateDialog" />\
-        </div>\
-        <div class="expert-grid">\
-          <div v-for="expert in experts" :key="expert.id" class="expert-card">\
-            <div class="expert-card-accent"></div>\
-            <el-dropdown trigger="click" @command="handleExpertMenu($event, expert)">\
-              <button class="card-more-btn" title="更多操作" @click.stop>\
-                <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><circle cx="12" cy="5" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="12" cy="19" r="1.8"/></svg>\
-              </button>\
-              <template #dropdown>\
-                <el-dropdown-menu>\
-                  <el-dropdown-item command="edit">编辑</el-dropdown-item>\
-                  <el-dropdown-item command="delete" divided>删除</el-dropdown-item>\
-                </el-dropdown-menu>\
-              </template>\
-            </el-dropdown>\
-            <div class="expert-card-body" @click="goManage(expert)">\
-              <div class="card-header">\
-                <img class="card-avatar" :src="expert.avatar" :alt="expert.name">\
-                <div class="card-header-text">\
-                  <div class="card-name">{{ expert.name }}</div>\
-                </div>\
-              </div>\
-              <p class="card-desc">{{ expert.description }}</p>\
-              <div class="card-footer">\
-                <div class="card-tags">\
-                  <span v-for="(tag, idx) in expert.expertise.slice(0, 3)" :key="tag" class="expertise-tag" :class="tagColors[idx % tagColors.length]">{{ tag }}</span>\
-                </div>\
-              </div>\
-            </div>\
-            <div class="expert-card-actions">\
-              <button type="button" class="expert-card-action expert-card-action-primary" @click="goTasks(expert)">\
-                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 2L11 13"/><path d="M22 2l-7 20-4-9-9-4 20-7z"/></svg>\
-                发起任务\
-              </button>\
-              <span class="expert-card-action-divider"></span>\
-              <button type="button" class="expert-card-action" @click="goManage(expert)">\
-                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>\
-                管理\
-              </button>\
-            </div>\
-          </div>\
-          <div v-if="experts.length === 0" class="empty-state">\
-            <div class="empty-state-icon">👤</div>\
-            <p>暂无专家</p>\
-            <create-action-btn label="创建第一位专家" theme="expert" soft @click="openCreateDialog" />\
-          </div>\
-        </div>\
-        <expert-create-page-dialog :wizard="createWizard" :tag-colors="tagColors" :skills="skills" :tools="tools" />\
-        <expert-edit-page-dialog :edit="expertEdit" header-title="编辑专家" :tag-colors="tagColors" />\
-      </div>'
+    template: LIST_PAGE_TEMPLATE
   };
 
   // ExpertDetailPage lives in js/expert-detail-page.js

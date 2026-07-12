@@ -59,55 +59,105 @@ window.toolsetLabel = function (id) {
 
 window.IM_CHANNEL_TYPES = [
   {
+    id: 'wecom',
+    label: '企业微信 (WeCom)',
+    name: '企业微信',
+    emoji: '💼',
+    description: '企业微信 AI Bot，走 WebSocket 长连接，无需公网回调端点，适合内网/本地部署。',
+    docsUrl: 'https://developer.work.weixin.qq.com/document/path/99510',
+    credentialFields: [
+      { key: 'WECOM_BOT_ID', label: 'Bot ID', description: '企业微信 AI Bot 的 bot_id（管理后台 → 智能机器人 → API 模式获取）。', required: true },
+      { key: 'WECOM_SECRET', label: 'Secret', description: '企业微信 AI Bot 对应 secret。', password: true, required: true }
+    ],
+    policyFields: [
+      {
+        key: 'WECOM_DM_POLICY', label: 'DM 策略', type: 'select', default: 'pairing',
+        description: '私聊准入策略：open=开放访问、allowlist=白名单、pairing=配对模式、disabled=禁用私聊。',
+        options: [
+          { value: 'pairing', label: '配对模式 (pairing)' },
+          { value: 'allowlist', label: '白名单 (allowlist)' },
+          { value: 'open', label: '开放访问 (open)' },
+          { value: 'disabled', label: '禁用 (disabled)' }
+        ]
+      },
+      { key: 'WECOM_ALLOWED_USERS', label: '允许用户', type: 'text', default: '', description: '逗号分隔的 user_id 列表，仅 allowlist 模式下生效。' },
+      { key: 'WECOM_HOME_CHANNEL', label: 'Home 渠道', type: 'text', default: '', description: 'chat_id，cron/通知默认投递渠道。' }
+    ]
+  },
+  {
     id: 'dingtalk',
-    label: '钉钉',
+    label: '钉钉 (DingTalk)',
     name: '钉钉',
-    description: '连接到钉钉群，支持群聊消息协作。',
+    emoji: '🐳',
+    description: '钉钉企业内部应用，走 Stream Mode（WebSocket 长连接），无需公网回调端点。',
     docsUrl: 'https://open.dingtalk.com/document/orgapp/the-robot-development-process',
     credentialFields: [
-      { key: 'DINGTALK_CLIENT_ID', label: 'Client ID', description: 'DingTalk client ID (App key)。', required: true },
-      { key: 'DINGTALK_CLIENT_SECRET', label: 'Client secret', description: 'DingTalk client secret (App secret)。', password: true, required: true }
+      { key: 'DINGTALK_CLIENT_ID', label: 'Client ID', description: '钉钉应用 App Key（开发者后台 → 应用基础信息）。', required: true },
+      { key: 'DINGTALK_CLIENT_SECRET', label: 'Client Secret', description: '钉钉应用 App Secret。', password: true, required: true }
+    ],
+    policyFields: [
+      {
+        key: 'DINGTALK_REQUIRE_MENTION', label: '群聊需 @', type: 'switch', default: true,
+        description: '群聊是否必须 @机器人才会响应。'
+      },
+      { key: 'DINGTALK_ALLOWED_USERS', label: '允许用户', type: 'text', default: '', description: 'staff_id / sender_id 列表，逗号分隔；填 * 表示任意用户。' },
+      { key: 'DINGTALK_HOME_CHANNEL', label: 'Home 渠道', type: 'text', default: '', description: 'conversationId，cron/通知默认投递渠道。' }
     ]
   },
   {
     id: 'feishu',
-    label: '飞书 / Lark',
-    name: '飞书 / Lark',
-    description: '连接到飞书 / Lark，支持机器人消息与事件回调。',
+    label: '飞书 (Feishu/Lark)',
+    name: '飞书',
+    emoji: '🪽',
+    description: '飞书 / Lark 企业自建应用，默认 WebSocket 长连接（推荐），可选 Webhook 模式。',
     docsUrl: 'https://open.feishu.cn/document/uAjLw4CM/ukTMukTMukTM/reference/im-v1/intro',
     credentialFields: [
-      { key: 'FEISHU_APP_ID', label: 'App ID', description: 'Feishu / Lark app ID。', required: true },
-      { key: 'FEISHU_APP_SECRET', label: 'App secret', description: 'Feishu / Lark app secret。', password: true, required: true },
-      { key: 'FEISHU_ENCRYPT_KEY', label: 'Encrypt key', description: 'Feishu / Lark encrypt key。', password: true },
-      { key: 'FEISHU_VERIFICATION_TOKEN', label: 'Verification token', description: 'Feishu / Lark verification token。', password: true }
-    ]
-  },
-  {
-    id: 'wecom_callback',
-    label: '企业微信',
-    name: '企业微信',
-    description: '连接到企业微信自建应用，支持双向消息与应用回调。',
-    docsUrl: 'https://developer.work.weixin.qq.com/document/path/90930',
-    credentialFields: [
-      { key: 'WECOM_CALLBACK_CORP_ID', label: 'WeCom Corp ID', description: '企业微信企业 ID。', required: true },
-      { key: 'WECOM_CALLBACK_CORP_SECRET', label: 'WeCom Corp Secret', description: '企业微信应用 corp secret。', password: true, required: true },
-      { key: 'WECOM_CALLBACK_AGENT_ID', label: 'WeCom Agent ID', description: '企业微信应用 agent ID。', required: true },
-      { key: 'WECOM_CALLBACK_TOKEN', label: 'WeCom Token', description: '企业微信 callback verification token。', password: true },
-      { key: 'WECOM_CALLBACK_ENCODING_AES_KEY', label: 'WeCom AES Key', description: '企业微信 callback AES encoding key。', password: true }
-    ]
-  },
-  {
-    id: 'wecom',
-    label: '企业微信群机器人',
-    name: '企业微信群机器人',
-    description: '通过群机器人 webhook 发送消息到企业微信群，仅支持发送消息。',
-    docsUrl: 'https://developer.work.weixin.qq.com/document/path/91770',
-    credentialFields: [
-      { key: 'WECOM_BOT_ID', label: 'WeCom Bot ID', description: '企业微信群机器人 ID / webhook key。', required: true },
-      { key: 'WECOM_SECRET', label: 'WeCom Secret', description: '企业微信群机器人 secret。', password: true }
+      { key: 'FEISHU_APP_ID', label: 'App ID', description: '飞书应用 App ID（开放平台 → 凭证与基础信息）。', required: true },
+      { key: 'FEISHU_APP_SECRET', label: 'App Secret', description: '飞书应用 App Secret。', password: true, required: true },
+      {
+        key: 'FEISHU_DOMAIN', label: '域名', type: 'select', default: 'feishu',
+        description: '飞书国内版或 Lark 海外版。',
+        options: [
+          { value: 'feishu', label: 'feishu（国内）' },
+          { value: 'lark', label: 'lark（海外）' }
+        ]
+      },
+      {
+        key: 'FEISHU_CONNECTION_MODE', label: '连接模式', type: 'select', default: 'websocket',
+        description: 'WebSocket 模式无需公网端点（推荐）；Webhook 模式需配置 Encrypt Key 或 Verification Token。',
+        options: [
+          { value: 'websocket', label: 'WebSocket（推荐）' },
+          { value: 'webhook', label: 'Webhook' }
+        ]
+      },
+      { key: 'FEISHU_ENCRYPT_KEY', label: 'Encrypt Key', description: 'Webhook 模式下用于事件加密（飞书后台配置）。', password: true },
+      { key: 'FEISHU_VERIFICATION_TOKEN', label: 'Verification Token', description: 'Webhook 模式下第二层鉴权 token。', password: true }
+    ],
+    policyFields: [
+      {
+        key: 'FEISHU_REQUIRE_MENTION', label: '群聊需 @', type: 'switch', default: true,
+        description: '群聊是否必须 @机器人才会响应。'
+      },
+      {
+        key: 'FEISHU_GROUP_POLICY', label: '群聊策略', type: 'select', default: 'allowlist',
+        description: '群聊准入策略：open=任意群、allowlist=白名单。',
+        options: [
+          { value: 'allowlist', label: '白名单 (allowlist)' },
+          { value: 'open', label: '开放 (open)' }
+        ]
+      },
+      { key: 'FEISHU_ALLOWED_USERS', label: '允许用户', type: 'text', default: '', description: 'open_id / user_id / union_id 列表，逗号分隔。' },
+      { key: 'FEISHU_HOME_CHANNEL', label: 'Home 渠道', type: 'text', default: '', description: 'chat_id，cron/通知默认投递渠道。' }
     ]
   }
 ];
+
+/** 用于凭据互斥校验的锁标识字段（对应 PRD §8.11.6 acquire_scoped_lock）。 */
+window.IM_CHANNEL_LOCK_FIELDS = {
+  wecom: 'WECOM_BOT_ID',
+  dingtalk: 'DINGTALK_CLIENT_ID',
+  feishu: 'FEISHU_APP_ID'
+};
 
 /** Platform icons for IM sidebar (emoji fallback). */
 window.IM_PLATFORM_ICONS = {
@@ -120,8 +170,8 @@ window.IM_PLATFORM_ICONS = {
   whatsapp: '📱',
   email: '📧',
   sms: '💬',
-  dingtalk: '🔷',
-  feishu: '🐦',
+  dingtalk: '🐳',
+  feishu: '🪽',
   wecom: '💼',
   wecom_callback: '💼',
   weixin: '💚',
@@ -270,3 +320,80 @@ window.TOOL_PARAM_SCHEMAS = {
     { key: 'channel', label: '推送渠道', type: 'select', options: ['企业微信', '钉钉', '飞书', '邮件'], default: '企业微信' }
   ]
 };
+
+/** Provider / Model 目录（Mock） */
+window.PROVIDER_CATALOG = [
+  {
+    id: 'openai',
+    name: 'OpenAI',
+    models: [
+      { id: 'gpt-4o', name: 'GPT-4o' },
+      { id: 'gpt-4o-mini', name: 'GPT-4o mini' },
+      { id: 'gpt-4-turbo', name: 'GPT-4 Turbo' },
+      { id: 'o1', name: 'o1' },
+      { id: 'o3-mini', name: 'o3-mini' }
+    ]
+  },
+  {
+    id: 'anthropic',
+    name: 'Anthropic',
+    models: [
+      { id: 'claude-sonnet-4-20250514', name: 'Claude Sonnet 4' },
+      { id: 'claude-3-5-sonnet-20241022', name: 'Claude 3.5 Sonnet' },
+      { id: 'claude-3-5-haiku-20241022', name: 'Claude 3.5 Haiku' }
+    ]
+  },
+  {
+    id: 'deepseek',
+    name: 'DeepSeek',
+    models: [
+      { id: 'deepseek-chat', name: 'DeepSeek Chat' },
+      { id: 'deepseek-reasoner', name: 'DeepSeek Reasoner' }
+    ]
+  },
+  {
+    id: 'qwen',
+    name: '通义千问',
+    models: [
+      { id: 'qwen-max', name: 'Qwen Max' },
+      { id: 'qwen-plus', name: 'Qwen Plus' },
+      { id: 'qwen-turbo', name: 'Qwen Turbo' }
+    ]
+  }
+];
+
+window.getProviderModels = function (providerId) {
+  var p = (window.PROVIDER_CATALOG || []).find(function (x) { return x.id === providerId; });
+  return p ? p.models : [];
+};
+
+/** Hub 技能目录（Mock） */
+window.SKILLS_HUB_CATALOG = [
+  { id: 'hub-lean-manufacturing', name: '精益生产分析', category: '工艺制造', description: '价值流图分析、七大浪费识别与改善方案' },
+  { id: 'hub-six-sigma', name: '六西格玛工具箱', category: '质量管理', description: 'DMAIC 流程、假设检验与过程能力分析' },
+  { id: 'hub-digital-twin', name: '数字孪生仿真', category: '数字化', description: '产线仿真建模与节拍优化' },
+  { id: 'hub-predictive-quality', name: '质量预测模型', category: '智能算法', description: '基于工艺参数的良率预测与异常预警' },
+  { id: 'hub-lean-logistics', name: '精益物流规划', category: '供应链', description: '厂内物流路径优化与线边库存设计' },
+  { id: 'hub-energy-optimization', name: '能效优化引擎', category: '能源环保', description: '能耗基线建模与节能策略推荐' },
+  { id: 'hub-safety-risk', name: '安全风险图谱', category: '安全合规', description: 'JHA 分析与 LEC 风险评估' },
+  { id: 'hub-mes-connector', name: 'MES 数据连接器', category: '数字化', description: '对接主流 MES 系统拉取工单与报工数据' }
+];
+
+/** Mock 运行中会话数：基于 expertId 稳定哈希返回 0-3 */
+window.getRunningSessionCount = function (expertId) {
+  var s = String(expertId || '');
+  var hash = 0;
+  for (var i = 0; i < s.length; i++) {
+    hash = ((hash << 5) - hash + s.charCodeAt(i)) | 0;
+  }
+  return Math.abs(hash) % 4;
+};
+
+/** Mock MEMORY.md 文本 */
+window.MOCK_MEMORY_MD = '# 专家长期记忆\n\n## 用户偏好\n- 偏好用数据驱动方式做决策，汇报时需附带量化结论\n- 习惯用中文输出，技术术语可保留英文\n\n## 项目背景\n- 当前产线为 12 寸晶圆厂，月产能 5 万片\n- 重点攻关工序：光刻对准精度与刻蚀均匀性\n\n## 领域知识\n- SPC 控制限按 ±3σ 设定，Cpk 目标 ≥ 1.33\n- 异常处理流程：发现 -> 隔离 -> 根因分析 -> 纠正措施 -> 验证关闭';
+
+/** Mock USER.md 文本 */
+window.MOCK_USER_MD = '# 用户画像\n\n## 角色\n- 制造工艺工程师，负责良率提升与工艺优化\n\n## 沟通风格\n- 直接、简洁，偏好结论先行\n- 喜欢用表格和图表对比方案\n\n## 常用工具\n- MES 报表系统、JMP 统计分析、Minitab';
+
+/** SOUL.md 模板 */
+window.SOUL_MD_TEMPLATE = '## 核心职责\n\n（描述该专家的核心职责与目标）\n\n## 工作流程\n\n1. \n2. \n3. \n\n## 行为准则\n\n- \n- \n\n## 工作目录与产物约定\n\n- 任务产出须落在当前工作目录内\n';

@@ -285,6 +285,11 @@
         body: JSON.stringify(payload || {})
       });
     },
+    restartGateway: function (profile) {
+      return request("/experts/" + encodeURIComponent(profile) + "/gateway/restart", {
+        method: "POST"
+      });
+    },
     listPermissions: function (profile) {
       return request("/experts/" + encodeURIComponent(profile) + "/permissions");
     },

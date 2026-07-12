@@ -21,7 +21,7 @@
       } else if (activeTab.value === 'permissions') {
         activeTab.value = 'persona';
       }
-      var persona = Vue.ref({ coreDutyMd: '', workflowMd: '', behaviorMd: '' });
+      var persona = Vue.ref({ soulMd: '', onboarded: false });
       var tasks = Vue.ref([]);
       var memories = Vue.ref([]);
       var memoryInput = Vue.ref('');
@@ -35,6 +35,19 @@
         getExpert: function () { return expert.value; },
         onSaved: function () { load(); }
       });
+      var runningSessionCount = Vue.ref(0);
+      var workspaceRootPath = Vue.ref('');
+      var workspaceRootDialogVisible = Vue.ref(false);
+      var workspaceRootInput = Vue.ref('');
+      var highlightSessionId = Vue.ref('');
+      var memoryMdContent = Vue.ref('');
+      var userMdContent = Vue.ref('');
+      var personaOnboardDismissed = Vue.ref(false);
+      var personaApplyImmediate = Vue.ref(false);
+      var hubInstallDialogVisible = Vue.ref(false);
+      var hubInstallSearch = Vue.ref('');
+      var hubInstalling = Vue.ref(false);
+      var hubInstallProgress = Vue.ref(0);
 
       // ---- 任务 Tab 新增 ----
       var taskSearchQuery = Vue.ref('');
@@ -73,6 +86,7 @@
       var memoryDialogMode = Vue.ref('create');
       var editingMemoryId = Vue.ref('');
       var memoryForm = Vue.ref({ content: '', category: 'other' });
+      var memorySubTab = Vue.ref('memory');
 
       // ---- 人设 Tab 新增 ----
       var personaPreviewTab = Vue.ref('coreDutyMd');
@@ -90,36 +104,48 @@
       var messagingSearchQuery = Vue.ref('');
       var selectedImChannelId = Vue.ref('');
       var imSecretDraft = Vue.ref({});
+      var imPolicyDraft = Vue.ref({});
       var imGatewayEnabled = Vue.ref(false);
       var imSaving = Vue.ref(false);
+      var imRestarting = Vue.ref(false);
+      var imConflictProfile = Vue.ref('');
+      var imPolicyCollapse = Vue.ref([]);
 
       var isDevMock = Vue.computed(function () { return store.isDevMock(); });
 
       function goAssignTask() {
         if (!expert.value) return;
-        ctx.emit('nav', '/experts/' + expert.value.id + '/tasks');
+        var task = store.createTask({ expertId: expert.value.id, title: '新任务', type: 'dialogue' });
+        ctx.emit('nav', '/experts/' + expert.value.id + '/tasks/' + task.id);
       }
 
       var loadSeq = 0;
 
       function normalizePersonaForEditor(raw) {
         var p = raw || {};
+        if (p.soulMd !== undefined) return { soulMd: p.soulMd || '' };
         var sections = [];
         if (p.coreDutyMd && String(p.coreDutyMd).trim()) sections.push(String(p.coreDutyMd).trim());
         if (p.workflowMd && String(p.workflowMd).trim()) sections.push(String(p.workflowMd).trim());
         if (p.behaviorMd && String(p.behaviorMd).trim()) sections.push(String(p.behaviorMd).trim());
-        return { coreDutyMd: sections.join('\n\n'), workflowMd: '', behaviorMd: '' };
+        return { soulMd: sections.join('\n\n') };
       }
 
       function applyBaseLocalState() {
         var eid = String(props.expertId);
         expert.value = store.getExpert(eid);
         if (!expert.value) return false;
-        persona.value = normalizePersonaForEditor(store.getPersona(eid));
+        var p = store.getPersona(eid);
+        persona.value = normalizePersonaForEditor(p);
+        personaOnboardDismissed.value = !!(p && p.onboarded);
         tasks.value = store.getTasksByExpert(eid);
         memories.value = store.getMemories(eid);
         materials.value = store.getWorkspaceFiles(eid);
         expertArtifacts.value = store.getExpertArtifacts(eid);
+        runningSessionCount.value = store.getRunningSessionCount(eid);
+        workspaceRootPath.value = store.getWorkspaceRoot(eid);
+        memoryMdContent.value = store.getMemoryMd(eid);
+        userMdContent.value = store.getUserMd(eid);
         var localChannels = store.getImChannels(eid);
         imChannels.value = normalizeImChannels(localChannels.length ? localChannels : (store.isDevMock() ? catalog.IM_CHANNEL_TYPES : []));
         return true;
@@ -153,21 +179,25 @@
           id: c.id || c.type,
           label: c.label || c.name,
           name: c.name || c.label,
+          emoji: c.emoji || '',
           enabled: false,
           configured: false,
           state: 'disabled',
           config: '',
-          subscriptions: []
+          subscriptions: [],
+          policy: {},
+          policyFields: []
         }, c);
       }
 
       function mergeImChannelWithCatalog(channel, template) {
-        var out = Object.assign({ subscriptions: [] }, template ? makeImCatalogChannel(template) : {}, channel);
+        var out = Object.assign({ subscriptions: [], policy: {} }, template ? makeImCatalogChannel(template) : {}, channel);
         if (template) {
           out.type = template.id || template.type || out.type;
           out.id = template.id || template.type || out.id;
           out.label = template.label || template.name || out.label;
           out.name = template.name || template.label || out.name;
+          out.emoji = template.emoji || out.emoji || '';
           out.description = template.description || out.description;
           out.docsUrl = template.docsUrl || out.docsUrl;
         }
@@ -190,6 +220,18 @@
             required: true,
             configured: !!out.configured
           }];
+        }
+        var templatePolicy = template && template.policyFields ? template.policyFields : null;
+        if (templatePolicy && templatePolicy.length) {
+          var savedPolicy = channel.policy || {};
+          out.policyFields = templatePolicy.map(function (field) {
+            var savedVal = savedPolicy[field.key];
+            return Object.assign({}, field, {
+              value: savedVal !== undefined && savedVal !== null && savedVal !== '' ? savedVal : (field.default !== undefined ? field.default : '')
+            });
+          });
+        } else {
+          out.policyFields = [];
         }
         return out;
       }
@@ -236,6 +278,9 @@
       function selectImChannel(ch) {
         selectedImChannelId.value = String(ch.id || ch.type);
         imSecretDraft.value = {};
+        imPolicyDraft.value = {};
+        imConflictProfile.value = '';
+        imPolicyCollapse.value = [];
       }
 
       function load() {
@@ -262,11 +307,165 @@
       }
 
       function savePersona() {
-        persona.value.workflowMd = '';
-        persona.value.behaviorMd = '';
-        store.savePersona(props.expertId, persona.value);
-        ElementPlus.ElMessage.success('人设已保存');
+        store.savePersona(props.expertId, { soulMd: persona.value.soulMd || '' });
+        var count = runningSessionCount.value;
+        var msg;
+        if (personaApplyImmediate.value && count > 0) {
+          msg = '人设已保存并立即生效。已有 ' + count + ' 个运行中会话已刷新缓存。';
+          ElementPlus.ElMessageBox.confirm(
+            '立即生效将刷新当前 ' + count + ' 个运行中会话的 prompt 缓存，可能导致会话中断。确定继续？',
+            '确认立即生效',
+            { confirmButtonText: '确认立即生效', cancelButtonText: '取消', type: 'warning' }
+          ).then(function () {
+            ElementPlus.ElMessage.success(msg);
+          }).catch(function () {
+            ElementPlus.ElMessage.success('人设已保存。修改将在新会话生效。');
+          });
+        } else if (count > 0) {
+          msg = '已保存。该专家当前有 ' + count + ' 个运行中会话，修改将在新会话生效。';
+          ElementPlus.ElMessage.success(msg);
+        } else {
+          msg = '已保存。修改将在新会话生效。';
+          ElementPlus.ElMessage.success(msg);
+        }
+        personaApplyImmediate.value = false;
       }
+
+      function dismissPersonaOnboard() {
+        personaOnboardDismissed.value = true;
+        store.setPersonaOnboarded(props.expertId, true);
+      }
+      function fillPersonaFromTemplate() {
+        persona.value.soulMd = window.SOUL_MD_TEMPLATE || '## 核心职责\n\n（描述该专家的核心职责与目标）\n\n## 工作流程\n\n1. \n2. \n3. \n\n## 行为准则\n\n- \n';
+        personaOnboardDismissed.value = true;
+        store.setPersonaOnboarded(props.expertId, true);
+      }
+      function importPersonaSoulMd() {
+        if (personaImportInput.value) personaImportInput.value.click();
+      }
+
+      function goToRunningTasks() {
+        activeTab.value = 'tasks';
+        taskStatusFilter.value = 'running';
+      }
+
+      function openWorkspaceRootDialog() {
+        workspaceRootInput.value = workspaceRootPath.value;
+        workspaceRootDialogVisible.value = true;
+      }
+      function submitWorkspaceRootChange() {
+        var newPath = workspaceRootInput.value.trim();
+        if (!newPath) {
+          ElementPlus.ElMessage.warning('请输入新的工作空间路径');
+          return;
+        }
+        ElementPlus.ElMessageBox.confirm(
+          '更改工作空间根路径可能导致已有文件引用失效，确定继续？',
+          '确认更改路径',
+          { confirmButtonText: '确认更改', cancelButtonText: '取消', type: 'warning' }
+        ).then(function () {
+          store.updateWorkspaceRoot(props.expertId, newPath);
+          workspaceRootPath.value = newPath;
+          workspaceRootDialogVisible.value = false;
+          ElementPlus.ElMessage.success('工作空间路径已更新');
+        }).catch(function () {});
+      }
+
+      function getTaskCwdLabel(task) {
+        if (!task.cwd) return '.';
+        return task.cwd;
+      }
+      function goToWorkspaceFromTask(task) {
+        if (task.cwd) highlightSessionId.value = task.cwd;
+        activeTab.value = 'workspace';
+      }
+
+      function openHubInstallDialog() {
+        hubInstallSearch.value = '';
+        hubInstallDialogVisible.value = true;
+      }
+      var hubSkillOptions = Vue.computed(function () {
+        var q = hubInstallSearch.value.trim().toLowerCase();
+        var assigned = {};
+        skillBindings.value.forEach(function (s) { assigned[s.skillId] = true; });
+        return (window.SKILLS_HUB_CATALOG || []).filter(function (s) {
+          if (assigned[s.id]) return false;
+          if (!q) return true;
+          return (s.name || '').toLowerCase().indexOf(q) >= 0 || (s.description || '').toLowerCase().indexOf(q) >= 0 || (s.category || '').toLowerCase().indexOf(q) >= 0;
+        });
+      });
+      function installHubSkill(skill) {
+        hubInstalling.value = true;
+        hubInstallProgress.value = 0;
+        var timer = setInterval(function () {
+          hubInstallProgress.value += 20;
+          if (hubInstallProgress.value >= 100) {
+            clearInterval(timer);
+            hubInstalling.value = false;
+            var next = skillBindings.value.slice();
+            next.push({ skillId: skill.id, enabled: true, params: {} });
+            store.setSkillBindings(props.expertId, next);
+            skillBindings.value = store.getSkillBindings(props.expertId).slice();
+            hubInstallDialogVisible.value = false;
+            var count = runningSessionCount.value;
+            var msg = count > 0
+              ? '已安装「' + skill.name + '」。该专家当前有 ' + count + ' 个运行中会话，修改将在新会话生效。'
+              : '已安装「' + skill.name + '」。修改将在新会话生效。';
+            ElementPlus.ElMessage.success(msg);
+          }
+        }, 400);
+      }
+
+      function removeSkillBindingDynamic(skillId, row) {
+        var name = (row && row.name) || skillId;
+        ElementPlus.ElMessageBox.confirm(
+          '确定解绑技能「' + name + '」？',
+          '解绑技能',
+          { confirmButtonText: '解绑', cancelButtonText: '取消', type: 'warning' }
+        ).then(function () {
+          skillBindings.value = skillBindings.value.filter(function (s) { return s.skillId !== skillId; });
+          store.setSkillBindings(props.expertId, skillBindings.value);
+          var count = runningSessionCount.value;
+          var msg = count > 0
+            ? '已解绑。该专家当前有 ' + count + ' 个运行中会话，修改将在新会话生效。'
+            : '已解绑。修改将在新会话生效。';
+          ElementPlus.ElMessage.success(msg);
+        }).catch(function () {});
+      }
+
+      function removeToolBindingDynamic(toolset, row) {
+        var name = (row && row.label) || toolset;
+        ElementPlus.ElMessageBox.confirm(
+          '确定解绑工具「' + name + '」？',
+          '解绑工具',
+          { confirmButtonText: '解绑', cancelButtonText: '取消', type: 'warning' }
+        ).then(function () {
+          toolBindings.value = toolBindings.value.filter(function (t) {
+            return (t.toolset || t.toolId) !== toolset;
+          });
+          store.setToolBindings(props.expertId, toolBindings.value);
+          var count = runningSessionCount.value;
+          var msg = count > 0
+            ? '已解绑。该专家当前有 ' + count + ' 个运行中会话，修改将在新会话生效。'
+            : '已解绑。修改将在新会话生效。';
+          ElementPlus.ElMessage.success(msg);
+        }).catch(function () {});
+      }
+
+      function unbindMcpServer(server) {
+        ElementPlus.ElMessageBox.confirm(
+          '确定解绑 MCP 服务器「' + (server.name || server.id) + '」？',
+          '解绑 MCP',
+          { confirmButtonText: '解绑', cancelButtonText: '取消', type: 'warning' }
+        ).then(function () {
+          var count = runningSessionCount.value;
+          var msg = count > 0
+            ? '已解绑。该专家当前有 ' + count + ' 个运行中会话，修改将在新会话生效。'
+            : '已解绑。修改将在新会话生效。';
+          ElementPlus.ElMessage.success(msg);
+        }).catch(function () {});
+      }
+
       function saveSkillBindings() { store.setSkillBindings(props.expertId, skillBindings.value); ElementPlus.ElMessage.success('技能已更新'); }
       function saveToolBindings() { store.setToolBindings(props.expertId, toolBindings.value); ElementPlus.ElMessage.success('工具已更新'); }
       function addMemory() {
@@ -288,10 +487,14 @@
           detailMeta.value = Object.assign({}, detailMeta.value, {
             gateway: Object.assign({}, detailMeta.value.gateway || {}, {
               enabled: !!res.gatewayEnabled,
-              running: !!res.running
+              running: res.running !== undefined ? !!res.running : (detailMeta.value.gateway || {}).running
             })
           });
         }
+        // 重新计算每个渠道的连接状态
+        imChannels.value.forEach(function (c) {
+          c.state = imConnectionStatus(c);
+        });
         store.saveImChannels(props.expertId, imChannels.value, {
           gatewayEnabled: res.gatewayEnabled,
           skipRemote: true
@@ -360,7 +563,7 @@
         return true;
       }
 
-      function applyLocalImSecretState(ch, secrets) {
+      function applyLocalImSecretState(ch, secrets, policy) {
         var fields = ch.credentialFields || [];
         fields.forEach(function (field) {
           if (secrets[field.key]) field.configured = true;
@@ -368,7 +571,36 @@
         ch.configured = fields.filter(function (field) { return field.required; }).every(function (field) {
           return !!field.configured;
         });
+        if (policy) {
+          ch.policy = Object.assign({}, ch.policy || {}, policy);
+          (ch.policyFields || []).forEach(function (field) {
+            var v = policy[field.key];
+            field.value = v !== undefined && v !== null && v !== '' ? v : (field.default !== undefined ? field.default : '');
+          });
+        }
         ch.state = !ch.enabled ? 'disabled' : (ch.configured ? (imGatewayEnabled.value ? 'configured' : 'gateway_stopped') : 'not_configured');
+      }
+
+      function getImPolicyDraftValue(key) {
+        return imPolicyDraft.value && imPolicyDraft.value[key] !== undefined
+          ? imPolicyDraft.value[key]
+          : '';
+      }
+
+      function collectImPolicy(ch) {
+        var policy = {};
+        (ch.policyFields || []).forEach(function (field) {
+          var draftVal = getImPolicyDraftValue(field.key);
+          var curVal = draftVal !== '' && draftVal !== undefined && draftVal !== null
+            ? draftVal
+            : (field.value !== undefined && field.value !== null && field.value !== '' ? field.value : field.default);
+          if (field.type === 'switch') {
+            policy[field.key] = curVal === true || curVal === 'true' || curVal === '1' ? 'true' : 'false';
+          } else if (curVal !== undefined && curVal !== null && curVal !== '') {
+            policy[field.key] = String(curVal).trim();
+          }
+        });
+        return policy;
       }
 
       function saveSelectedImChannel() {
@@ -380,6 +612,7 @@
           if (val) secrets[field.key] = val;
         });
         if (!validateSelectedImChannel(ch, secrets)) return;
+        var policy = collectImPolicy(ch);
         var activeId = String(ch.id || ch.type);
         var payload = {
           gatewayEnabled: imGatewayEnabled.value,
@@ -391,13 +624,26 @@
               enabled: cid === activeId ? !!ch.enabled : !!c.enabled
             };
           }),
-          secrets: secrets
+          secrets: secrets,
+          policy: policy
         };
+        imConflictProfile.value = '';
         if (store.isDevMock()) {
-          applyLocalImSecretState(ch, secrets);
+          // dev mock: 模拟凭据互斥校验（同一 bot_id/client_id/app_id 不能复用）
+          var lockField = (window.IM_CHANNEL_LOCK_FIELDS || {})[activeId];
+          if (lockField && secrets[lockField]) {
+            var conflict = store.findImCredentialConflict && store.findImCredentialConflict(props.expertId, lockField, secrets[lockField]);
+            if (conflict) {
+              imConflictProfile.value = conflict.expertName || conflict.expertId;
+              ElementPlus.ElMessage.error('该凭据（' + secrets[lockField] + '）正被 profile「' + imConflictProfile.value + '」使用，不能复用。');
+              return;
+            }
+          }
+          applyLocalImSecretState(ch, secrets, policy);
           store.saveImChannels(props.expertId, imChannels.value, { gatewayEnabled: imGatewayEnabled.value });
           imSecretDraft.value = {};
-          ElementPlus.ElMessage.success('渠道配置已保存');
+          imPolicyDraft.value = {};
+          ElementPlus.ElMessage.success('配置已保存。需重启 gateway 生效。');
           return;
         }
         if (!window.SidecarApi || !window.SidecarApi.putImChannels) return;
@@ -406,10 +652,17 @@
           imSaving.value = false;
           applyImChannelsResponse(res);
           imSecretDraft.value = {};
-          ElementPlus.ElMessage.success('渠道配置已保存');
-        }).catch(function () {
+          imPolicyDraft.value = {};
+          ElementPlus.ElMessage.success('配置已保存。需重启 gateway 生效。');
+        }).catch(function (err) {
           imSaving.value = false;
-          ElementPlus.ElMessage.error('保存失败');
+          var body = err && err.body;
+          if (body && body.conflict_profile) {
+            imConflictProfile.value = body.conflict_profile;
+            ElementPlus.ElMessage.error('该凭据正被 profile「' + body.conflict_profile + '」使用，不能复用。请为当前专家单独创建机器人/应用。');
+          } else {
+            ElementPlus.ElMessage.error('保存失败');
+          }
         });
       }
       function addMaterial() {
@@ -441,6 +694,8 @@
           list = list.filter(function (t) { return t.status === 'running'; });
         } else if (taskStatusFilter.value === 'ready') {
           list = list.filter(function (t) { return t.status !== 'running'; });
+        } else if (taskStatusFilter.value === 'completed') {
+          list = list.filter(function (t) { return t.status === 'completed' || t.status === 'done'; });
         }
         return list;
       });
@@ -475,14 +730,14 @@
             }
             newTaskDialogVisible.value = false;
             tasks.value = store.getTasksByExpert(props.expertId);
-            ElementPlus.ElMessage.success('任务已创建');
+            ctx.emit('nav', '/experts/' + props.expertId + '/tasks/' + task.id);
           });
           return;
         }
-        store.createTask({ expertId: props.expertId, title: title, type: 'dialogue' });
+        var task = store.createTask({ expertId: props.expertId, title: title, type: 'dialogue' });
         newTaskDialogVisible.value = false;
         tasks.value = store.getTasksByExpert(props.expertId);
-        ElementPlus.ElMessage.success('任务已创建');
+        ctx.emit('nav', '/experts/' + props.expertId + '/tasks/' + task.id);
       }
 
       function editTaskTitle(task) {
@@ -1086,7 +1341,7 @@
 
       // ---- 人设 Tab 方法 ----
       function exportPersonaMd() {
-        var content = persona.value.coreDutyMd || '';
+        var content = persona.value.soulMd || '';
         var filename = 'soul.md';
         var blob = new Blob([content], { type: 'text/markdown;charset=utf-8' });
         var url = URL.createObjectURL(blob);
@@ -1106,9 +1361,7 @@
         if (!file) return;
         var reader = new FileReader();
         reader.onload = function (ev) {
-          persona.value.coreDutyMd = ev.target.result || '';
-          persona.value.workflowMd = '';
-          persona.value.behaviorMd = '';
+          persona.value.soulMd = ev.target.result || '';
           ElementPlus.ElMessage.success('已导入 ' + file.name);
         };
         reader.readAsText(file);
@@ -1116,7 +1369,7 @@
       }
 
       function personaPreviewContent() {
-        return persona.value.coreDutyMd || '';
+        return persona.value.soulMd || '';
       }
 
       function personaPreviewTabLabel() {
@@ -1343,11 +1596,121 @@
         return detailMeta.value.gateway || {};
       });
 
+      var gatewayRunning = Vue.computed(function () {
+        var g = gatewayMeta.value;
+        return !!(g && g.running);
+      });
+
+      function imConnectionStatus(ch) {
+        if (!ch || !ch.enabled) return 'disabled';
+        if (!ch.configured) return 'not_configured';
+        if (!gatewayRunning.value) return 'gateway_stopped';
+        return 'configured';
+      }
+
+      function imConnectionLabel(ch) {
+        var s = imConnectionStatus(ch);
+        if (s === 'disabled') return '已禁用';
+        if (s === 'not_configured') return '未连接';
+        if (s === 'gateway_stopped') return '未连接';
+        if (s === 'configured') return '连接中';
+        return '—';
+      }
+
+      function imConnectionDotClass(ch) {
+        var s = imConnectionStatus(ch);
+        if (s === 'disabled') return 'im-channel-dot--disabled';
+        if (s === 'configured') return 'im-channel-dot--ok';
+        return 'im-channel-dot--warn';
+      }
+
+      function restartImGateway() {
+        if (imRestarting.value) return;
+        imRestarting.value = true;
+        if (store.isDevMock()) {
+          // dev mock: 模拟重启过程
+          setTimeout(function () {
+            detailMeta.value = Object.assign({}, detailMeta.value, {
+              gateway: Object.assign({}, detailMeta.value.gateway || {}, {
+                enabled: true,
+                running: true
+              })
+            });
+            imGatewayEnabled.value = true;
+            // 重新计算所有渠道连接状态
+            imChannels.value.forEach(function (c) {
+              c.state = imConnectionStatus(c);
+            });
+            store.saveImChannels(props.expertId, imChannels.value, { gatewayEnabled: true });
+            imRestarting.value = false;
+            ElementPlus.ElMessage.success('Gateway 已重启，渠道连接状态已刷新');
+          }, 1200);
+          return;
+        }
+        if (!window.SidecarApi || !window.SidecarApi.restartGateway) {
+          imRestarting.value = false;
+          ElementPlus.ElMessage.warning('当前后端暂不支持重启 gateway');
+          return;
+        }
+        window.SidecarApi.restartGateway(String(props.expertId)).then(function () {
+          detailMeta.value = Object.assign({}, detailMeta.value, {
+            gateway: Object.assign({}, detailMeta.value.gateway || {}, { running: true })
+          });
+          imChannels.value.forEach(function (c) {
+            c.state = imConnectionStatus(c);
+          });
+          imRestarting.value = false;
+          ElementPlus.ElMessage.success('Gateway 已重启，渠道连接状态已刷新');
+        }).catch(function () {
+          imRestarting.value = false;
+          ElementPlus.ElMessage.error('重启 gateway 失败');
+        });
+      }
+
+      function getImPolicyDisplayValue(field) {
+        var draftVal = getImPolicyDraftValue(field.key);
+        if (draftVal !== '' && draftVal !== undefined && draftVal !== null) return draftVal;
+        if (field.value !== undefined && field.value !== null && field.value !== '') return field.value;
+        return field.default !== undefined ? field.default : '';
+      }
+
+      function getImPolicySelectLabel(field) {
+        var val = getImPolicyDisplayValue(field);
+        if (!field.options) return val;
+        var match = field.options.find(function (o) { return o.value === val; });
+        return match ? match.label : val;
+      }
+
+      function imPolicySwitchValue(field) {
+        var v = getImPolicyDisplayValue(field);
+        return v === true || v === 'true' || v === '1';
+      }
+
+      function toggleImChannelEnabled(ch) {
+        ch.enabled = !ch.enabled;
+        ch.state = imConnectionStatus(ch);
+      }
+
+      function imPolicySummary(ch) {
+        if (!ch || !ch.policyFields || !ch.policyFields.length) return '';
+        var parts = [];
+        ch.policyFields.forEach(function (field) {
+          var val = getImPolicyDisplayValue(field);
+          if (val === '' || val === undefined || val === null) return;
+          if (field.type === 'select' && field.options) {
+            var match = field.options.find(function (o) { return o.value === val; });
+            if (match) val = match.label;
+          } else if (field.type === 'switch') {
+            val = imPolicySwitchValue(field) ? '是' : '否';
+          }
+          parts.push(field.label + '：' + val);
+        });
+        return parts.length ? parts.join(' · ') : '使用默认值';
+      }
+
       var personaConfigured = Vue.computed(function () {
         var p = persona.value;
-        return !!(p.coreDutyMd && p.coreDutyMd.trim()) ||
-          !!(p.workflowMd && p.workflowMd.trim()) ||
-          !!(p.behaviorMd && p.behaviorMd.trim());
+        return !!(p.soulMd && p.soulMd.trim());
       });
 
       var tabBadges = Vue.computed(function () {
@@ -1403,11 +1766,7 @@
       }
 
       function imChannelDotClass(ch) {
-        if (!ch || !ch.enabled) return 'im-channel-dot--disabled';
-        if (!ch.configured || ch.state === 'not_configured') return 'im-channel-dot--warn';
-        if (ch.state === 'gateway_stopped') return 'im-channel-dot--warn';
-        if (ch.state === 'configured') return 'im-channel-dot--ok';
-        return 'im-channel-dot--muted';
+        return imConnectionDotClass(ch);
       }
 
       function credentialPlaceholder(field) {
@@ -1423,20 +1782,22 @@
 
       function messagingStateLabel(state) {
         if (state === 'disabled') return '已禁用';
-        if (state === 'not_configured') return '需配置';
-        if (state === 'configured') return '已配置';
-        if (state === 'gateway_stopped') return '消息网关未启用';
+        if (state === 'not_configured') return '未连接';
+        if (state === 'configured') return '连接中';
+        if (state === 'gateway_stopped') return '未连接（网关未运行）';
         return state || '—';
       }
 
       function messagingStateType(state) {
         if (state === 'configured') return 'success';
-        if (state === 'not_configured') return 'warning';
+        if (state === 'not_configured' || state === 'gateway_stopped') return 'warning';
+        if (state === 'disabled') return 'info';
         return 'info';
       }
 
       function personaSectionEmpty(key) {
-        return !(persona.value[key] && String(persona.value[key]).trim());
+        if (key === 'soulMd') return !(persona.value.soulMd && String(persona.value.soulMd).trim());
+        return !(persona.value.soulMd && String(persona.value.soulMd).trim());
       }
 
       function onSkillPickerSelection(rows) {
@@ -1648,16 +2009,55 @@
         isDevMock: isDevMock,
         detailMeta: detailMeta,
         memoryMeta: memoryMeta, isMemoryExternal: isMemoryExternal, gatewayMeta: gatewayMeta,
+        gatewayRunning: gatewayRunning,
         personaConfigured: personaConfigured, tabBadges: tabBadges,
         messagingSearchQuery: messagingSearchQuery, filteredImSidebarChannels: filteredImSidebarChannels,
         selectedImChannelId: selectedImChannelId, selectedImChannel: selectedImChannel,
-        imSecretDraft: imSecretDraft, imGatewayEnabled: imGatewayEnabled, imSaving: imSaving,
+        imSecretDraft: imSecretDraft, imPolicyDraft: imPolicyDraft,
+        imGatewayEnabled: imGatewayEnabled, imSaving: imSaving,
+        imRestarting: imRestarting, imConflictProfile: imConflictProfile,
+        imPolicyCollapse: imPolicyCollapse,
         imRequiredFields: imRequiredFields, imOptionalFields: imOptionalFields,
         selectImChannel: selectImChannel, imPlatformIcon: imPlatformIcon, imChannelDotClass: imChannelDotClass,
         credentialPlaceholder: credentialPlaceholder, openImSetupGuide: openImSetupGuide,
         saveSelectedImChannel: saveSelectedImChannel, saveGatewayEnabled: saveGatewayEnabled,
+        restartImGateway: restartImGateway,
+        imConnectionStatus: imConnectionStatus, imConnectionLabel: imConnectionLabel,
+        imConnectionDotClass: imConnectionDotClass,
+        toggleImChannelEnabled: toggleImChannelEnabled,
+        imPolicySummary: imPolicySummary,
+        getImPolicyDisplayValue: getImPolicyDisplayValue, getImPolicySelectLabel: getImPolicySelectLabel,
+        imPolicySwitchValue: imPolicySwitchValue,
         messagingStateLabel: messagingStateLabel, messagingStateType: messagingStateType,
-        personaSectionEmpty: personaSectionEmpty
+        personaSectionEmpty: personaSectionEmpty,
+        runningSessionCount: runningSessionCount,
+        goToRunningTasks: goToRunningTasks,
+        workspaceRootPath: workspaceRootPath,
+        workspaceRootDialogVisible: workspaceRootDialogVisible,
+        workspaceRootInput: workspaceRootInput,
+        openWorkspaceRootDialog: openWorkspaceRootDialog,
+        submitWorkspaceRootChange: submitWorkspaceRootChange,
+        highlightSessionId: highlightSessionId,
+        memoryMdContent: memoryMdContent,
+        userMdContent: userMdContent,
+        memorySubTab: memorySubTab,
+        personaOnboardDismissed: personaOnboardDismissed,
+        personaApplyImmediate: personaApplyImmediate,
+        dismissPersonaOnboard: dismissPersonaOnboard,
+        fillPersonaFromTemplate: fillPersonaFromTemplate,
+        importPersonaSoulMd: importPersonaSoulMd,
+        getTaskCwdLabel: getTaskCwdLabel,
+        goToWorkspaceFromTask: goToWorkspaceFromTask,
+        hubInstallDialogVisible: hubInstallDialogVisible,
+        hubInstallSearch: hubInstallSearch,
+        hubInstalling: hubInstalling,
+        hubInstallProgress: hubInstallProgress,
+        hubSkillOptions: hubSkillOptions,
+        openHubInstallDialog: openHubInstallDialog,
+        installHubSkill: installHubSkill,
+        removeSkillBindingDynamic: removeSkillBindingDynamic,
+        removeToolBindingDynamic: removeToolBindingDynamic,
+        unbindMcpServer: unbindMcpServer
       };
     },
     template: '\
@@ -1679,7 +2079,7 @@
               <img class="expert-basic-info-avatar" :src="expert.avatar" :alt="expert.name">\
             </div>\
             <div class="expert-basic-info-content">\
-              <h2 class="expert-basic-info-name">{{ expert.name }}</h2>\
+              <h2 class="expert-basic-info-name">{{ expert.name }}<span v-if="runningSessionCount > 0" class="detail-running-indicator" @click="goToRunningTasks"><span class="detail-running-dot"></span>{{ runningSessionCount }} 个运行中会话</span></h2>\
               <p v-if="expert.description" class="expert-basic-info-desc">{{ expert.description }}</p>\
               <div v-if="expert.expertise && expert.expertise.length" class="expert-basic-info-tags">\
                 <span v-for="(tag, idx) in expert.expertise.slice(0, 3)" :key="tag" class="expertise-tag" :class="tagColors[idx % tagColors.length]">{{ tag }}</span>\
@@ -1699,6 +2099,15 @@
                     <h3 class="detail-section-title">人设</h3>\
                     <p class="detail-section-desc">定义专家的核心职责、工作流程与行为准则</p>\
                   </div>\
+                  <div v-if="!personaOnboardDismissed && !persona.soulMd" class="persona-onboard-banner">\
+                    <div class="persona-onboard-title">首次使用：为专家编写 SOUL.md</div>\
+                    <div class="persona-onboard-desc">SOUL.md 是专家的「灵魂文件」，定义其角色、职责与行为准则。你可以从模板创建，或导入已有的 soul.md。</div>\
+                    <div class="persona-onboard-actions">\
+                      <el-button type="primary" size="small" @click="fillPersonaFromTemplate">从模板创建</el-button>\
+                      <el-button size="small" @click="importPersonaSoulMd">导入 soul.md</el-button>\
+                      <el-button link size="small" @click="dismissPersonaOnboard">知道了</el-button>\
+                    </div>\
+                  </div>\
                   <div class="detail-action-bar detail-action-bar--split">\
                     <input ref="personaImportInput" type="file" accept=".md" class="material-file-input-hidden" @change="handlePersonaImport">\
                     <div class="detail-action-left">\
@@ -1712,6 +2121,7 @@
                       </el-button>\
                     </div>\
                     <div class="detail-action-right">\
+                      <el-checkbox v-if="runningSessionCount > 0" v-model="personaApplyImmediate" size="small" style="margin-right:12px">立即生效</el-checkbox>\
                       <el-button type="primary" size="small" @click="savePersona">保存</el-button>\
                     </div>\
                   </div>\
@@ -1768,7 +2178,7 @@
                           </template>\
                         </el-dropdown>\
                       </div>\
-                      <el-input v-model="persona.coreDutyMd" type="textarea" :rows="14" placeholder="编辑soul.md，支持 Markdown 格式" class="persona-textarea" />\
+                      <el-input v-model="persona.soulMd" type="textarea" :rows="14" placeholder="编辑 SOUL.md，支持 Markdown 格式" class="persona-textarea" />\
                     </div>\
                     <div class="persona-preview-panel">\
                       <div class="persona-preview-head">\
@@ -1784,7 +2194,12 @@
                 <div class="detail-tab-pane">\
                   <div class="detail-section-head">\
                     <h3 class="detail-section-title">工作空间</h3>\
-                    <p class="detail-section-desc">统一展示上传文件与任务生成文件，便于专家执行任务时引用</p>\
+                    <p class="detail-section-desc">专家工作空间根；所有 task 共享此目录树，工作目录默认为根，用户可改为子目录</p>\
+                  </div>\
+                  <div class="workspace-root-bar">\
+                    <span style="font-weight:600;color:var(--text-primary,#303133)">工作空间根：</span>\
+                    <span class="workspace-root-path">{{ workspaceRootPath }}</span>\
+                    <el-button size="small" @click="openWorkspaceRootDialog">更改路径</el-button>\
                   </div>\
                   <div class="detail-action-bar detail-action-bar--split workspace-action-bar">\
                     <input ref="materialFileInput" type="file" multiple class="material-file-input-hidden" @change="handleMaterialFileSelect">\
@@ -1818,7 +2233,7 @@
                         <div class="workspace-list-cell workspace-list-size-cell">大小</div>\
                         <div class="workspace-list-cell workspace-list-action-cell">操作</div>\
                       </div>\
-                      <div v-for="file in workspaceFiles" :key="file.id" class="workspace-list-row workspace-list-item" :class="{ \'is-folder\': file.kind === \'folder\', \'is-drop-target\': canDropWorkspaceItem(file) }" :draggable="file.source === \'upload\'" @dragstart="onWorkspaceDragStart(file, $event)" @dragend="onWorkspaceDragEnd" @dragover.prevent="file.kind === \'folder\' && canDropWorkspaceItem(file)" @drop.prevent="file.kind === \'folder\' && onWorkspaceDrop(file)">\
+                      <div v-for="file in workspaceFiles" :key="file.id" class="workspace-list-row workspace-list-item" :class="{ \'is-folder\': file.kind === \'folder\', \'is-drop-target\': canDropWorkspaceItem(file), \'workspace-root-highlight-row\': file.kind === \'folder\' && file.name === highlightSessionId }" :draggable="file.source === \'upload\'" @dragstart="onWorkspaceDragStart(file, $event)" @dragend="onWorkspaceDragEnd" @dragover.prevent="file.kind === \'folder\' && canDropWorkspaceItem(file)" @drop.prevent="file.kind === \'folder\' && onWorkspaceDrop(file)">\
                         <div class="workspace-list-cell workspace-list-name-cell" @click="file.kind === \'folder\' && openWorkspaceFolder(file)" @dblclick="openWorkspaceFilePreview(file)">\
                           <span class="workspace-file-icon-wrap" :class="workspaceFileTypeClass(file)">\
                             <span class="workspace-file-icon">{{ workspaceFileIcon(file) }}</span>\
@@ -1871,6 +2286,7 @@
                         <el-option label="全部" value="all" />\
                         <el-option label="运行中" value="running" />\
                         <el-option label="已就绪" value="ready" />\
+                        <el-option label="已完成" value="completed" />\
                       </el-select>\
                       <el-button type="primary" size="small" @click="openNewTaskDialog">+ 新建任务</el-button>\
                     </div>\
@@ -1885,6 +2301,9 @@
                     <el-table-column prop="title" label="任务名称" min-width="200" show-overflow-tooltip />\
                     <el-table-column label="状态" width="88">\
                       <template #default="{ row }"><el-tag :type="statusType[row.status]" size="small">{{ statusLabel[row.status] }}</el-tag></template>\
+                    </el-table-column>\
+                    <el-table-column label="工作目录" width="120">\
+                      <template #default="{ row }"><el-button link type="primary" size="small" @click="goToWorkspaceFromTask(row)">{{ getTaskCwdLabel(row) }}</el-button></template>\
                     </el-table-column>\
                     <el-table-column label="创建时间" width="190">\
                       <template #default="{ row }">{{ taskCreatedAtLabel(row) }}</template>\
@@ -1904,57 +2323,21 @@
               </el-tab-pane>\
               <el-tab-pane name="memory">\
                 <template #label>记忆</template>\
-                <div class="detail-tab-pane">\
+                <div class="detail-tab-pane memory-tab">\
                   <div class="detail-section-head">\
                     <h3 class="detail-section-title">记忆</h3>\
-                    <p class="detail-section-desc">沉淀用户偏好、项目背景与领域知识，帮助专家持续积累上下文</p>\
+                    <p class="detail-section-desc">专家长期记忆与用户画像，由会话自动沉淀</p>\
                   </div>\
-                  <div v-if="isMemoryExternal" class="profile-readonly-banner">\
-                    <strong>外部记忆 Provider</strong>\
-                    <span>{{ memoryMeta.hint || (\'当前使用 \' + (memoryMeta.provider || \'external\') + \'，请通过外部记忆服务管理\') }}</span>\
-                  </div>\
-                  <template v-else>\
-                  <div class="detail-action-bar detail-action-bar--split detail-action-bar--filters">\
-                    <div class="detail-action-left">\
-                      <el-input v-model="memorySearchQuery" placeholder="搜索记忆..." size="small" clearable style="width:180px" />\
-                      <el-select v-model="memoryCategoryFilter" size="small" style="width:110px">\
-                        <el-option label="全部分类" value="all" />\
-                        <el-option label="用户偏好" value="user_preference" />\
-                        <el-option label="项目背景" value="project_context" />\
-                        <el-option label="领域知识" value="domain_knowledge" />\
-                        <el-option label="其他" value="other" />\
-                      </el-select>\
-                      <el-select v-model="memorySourceFilter" size="small" style="width:110px">\
-                        <el-option label="全部来源" value="all" />\
-                        <el-option label="手动添加" value="manual" />\
-                        <el-option label="自动沉淀" value="auto" />\
-                      </el-select>\
-                    </div>\
-                    <div class="detail-action-right">\
-                      <el-button type="primary" size="small" @click="openCreateMemoryDialog">+ 新增记忆</el-button>\
-                    </div>\
-                  </div>\
-                  <div v-if="filteredMemories.length === 0" class="profile-empty-state">\
-                    <p class="profile-empty-title">暂无有效记忆条目</p>\
-                    <p class="profile-empty-desc">可在上方添加用户偏好、项目背景或领域知识，帮助专家持续沉淀上下文。</p>\
-                  </div>\
-                  <div v-else class="memory-card-grid">\
-                    <button v-for="memory in filteredMemories" :key="memory.id" type="button" class="memory-card" @click="openEditMemoryDialog(memory)">\
-                      <div class="memory-card-head">\
-                        <span class="memory-card-category">\
-                          <span class="memory-card-category-icon">{{ MEMORY_CATEGORY_ICONS[memory.category] || MEMORY_CATEGORY_ICONS.other }}</span>\
-                          {{ MEMORY_CATEGORY_LABELS[memory.category] || memory.category || \'其他\' }}\
-                        </span>\
-                        <span class="memory-card-source">{{ memory.source === \'auto\' ? \'自动沉淀\' : \'手动添加\' }}</span>\
-                      </div>\
-                      <p class="memory-card-content">{{ memory.content }}</p>\
-                      <div class="memory-card-footer">\
-                        <span>{{ memory.createdAt || memory.updatedAt || \'—\' }}</span>\
-                        <span class="memory-card-edit-hint">点击编辑</span>\
-                      </div>\
-                    </button>\
-                  </div>\
-                  </template>\
+                  <el-tabs v-model="memorySubTab" class="memory-sub-tabs">\
+                    <el-tab-pane name="memory">\
+                      <template #label>MEMORY.md<span v-if="memoryMdContent" class="memory-sub-dot"></span></template>\
+                      <div class="memory-readonly-content">{{ memoryMdContent || \'（暂无长期记忆，会话过程中自动沉淀）\' }}</div>\
+                    </el-tab-pane>\
+                    <el-tab-pane name="user">\
+                      <template #label>USER.md<span v-if="userMdContent" class="memory-sub-dot"></span></template>\
+                      <div class="memory-readonly-content">{{ userMdContent || \'（暂无用户画像记忆）\' }}</div>\
+                    </el-tab-pane>\
+                  </el-tabs>\
                 </div>\
               </el-tab-pane>\
               <el-tab-pane name="skills">\
@@ -1969,9 +2352,11 @@
                       <span class="detail-action-bar-label">已配给 {{ skillBindings.length }} 项技能</span>\
                     </div>\
                     <div class="detail-action-right">\
+                      <el-button size="small" @click="openHubInstallDialog">从 Hub 安装</el-button>\
                       <el-button type="primary" size="small" :loading="capabilitySaving" @click="openSkillPicker">+ 添加技能</el-button>\
                     </div>\
                   </div>\
+                  <div v-if="runningSessionCount > 0" class="capability-notice">该专家当前有 {{ runningSessionCount }} 个运行中会话，技能变更将在新会话生效。</div>\
                   <div v-loading="capabilitiesLoading || capabilitySaving">\
                     <div v-if="skillBindings.length === 0 && !capabilitiesLoading" class="profile-empty-state">\
                     <p class="profile-empty-title">尚未配给任何技能</p>\
@@ -1996,7 +2381,7 @@
                       </el-table-column>\
                       <el-table-column label="操作" width="80" align="center">\
                         <template #default="{ row }">\
-                          <el-button link type="danger" size="small" @click="removeSkillBinding(row.skillId)">移除</el-button>\
+                          <el-button link type="danger" size="small" @click="removeSkillBindingDynamic(row.skillId, getSkillInfo(row.skillId))">移除</el-button>\
                         </template>\
                       </el-table-column>\
                     </el-table>\
@@ -2019,6 +2404,7 @@
                       <el-button type="primary" size="small" :loading="capabilitySaving" @click="openToolPicker">+ 添加工具</el-button>\
                     </div>\
                   </div>\
+                  <div v-if="runningSessionCount > 0" class="capability-notice">该专家当前有 {{ runningSessionCount }} 个运行中会话，工具变更将在新会话生效。</div>\
                   <div v-if="toolBindings.length === 0" class="profile-empty-state">\
                     <p class="profile-empty-title">尚未配给任何工具</p>\
                     <p class="profile-empty-desc">点击「添加工具」从可选工具列表中挑选。</p>\
@@ -2041,7 +2427,7 @@
                       </el-table-column>\
                       <el-table-column label="操作" width="80" align="center">\
                         <template #default="{ row }">\
-                          <el-button link type="danger" size="small" @click="removeToolBinding(getToolsetId(row))">移除</el-button>\
+                          <el-button link type="danger" size="small" @click="removeToolBindingDynamic(getToolsetId(row), getToolInfo(getToolsetId(row)))">移除</el-button>\
                         </template>\
                       </el-table-column>\
                     </el-table>\
@@ -2061,6 +2447,12 @@
                           <span v-else class="toolset-id-cell">需补充配置：{{ (row.missingEnv || []).join(\', \') || \'相关 KEY\' }}</span>\
                         </template>\
                       </el-table-column>\
+                      <el-table-column label="操作" width="140" align="center">\
+                        <template #default="{ row }">\
+                          <el-button link type="primary" size="small" @click="$emit(\'nav\', \'/experts/\' + expert.id + \'?tab=tools\')">管理</el-button>\
+                          <el-button link type="danger" size="small" @click="unbindMcpServer(row)">解绑</el-button>\
+                        </template>\
+                      </el-table-column>\
                     </el-table>\
                   </div>\
                 </div>\
@@ -2070,107 +2462,105 @@
                 <div class="detail-tab-pane im-channel-tab">\
                   <div class="detail-section-head">\
                     <h3 class="detail-section-title">IM渠道</h3>\
-                    <p class="detail-section-desc">配置专家可接入的即时消息渠道，统一管理启用状态与平台凭证</p>\
+                    <p class="detail-section-desc">配置专家可被触达的 IM 渠道（企业微信 / 钉钉 / 飞书）。启用后用户在 IM 端 @机器人或私聊即可与该专家对话。</p>\
                   </div>\
                   <div class="im-channel-layout">\
-                    <aside class="im-channel-sidebar">\
-                      <el-input v-model="messagingSearchQuery" placeholder="搜索渠道..." size="small" clearable class="im-channel-search" />\
+                    <div class="im-channel-sidebar">\
+                      <el-input v-model="messagingSearchQuery" placeholder="搜索渠道..." clearable size="small" class="im-channel-search" />\
                       <div class="im-channel-list">\
-                        <button\
-                          v-for="ch in filteredImSidebarChannels"\
-                          :key="ch.id || ch.type"\
-                          type="button"\
-                          class="im-channel-list-item"\
-                          :class="{ active: String(selectedImChannelId) === String(ch.id || ch.type) }"\
-                          @click="selectImChannel(ch)"\
-                        >\
-                          <span class="im-channel-list-icon">{{ imPlatformIcon(ch) }}</span>\
+                        <button v-for="ch in filteredImSidebarChannels" :key="ch.id || ch.type" type="button" class="im-channel-list-item" :class="{ active: String(selectedImChannelId) === String(ch.id || ch.type) }" @click="selectImChannel(ch)">\
+                          <span class="im-channel-list-icon">{{ ch.emoji || imPlatformIcon(ch) }}</span>\
                           <span class="im-channel-list-name">{{ ch.name || ch.label }}</span>\
                           <span class="im-channel-dot" :class="imChannelDotClass(ch)"></span>\
                         </button>\
-                        <div v-if="filteredImSidebarChannels.length === 0" class="im-channel-list-empty">无匹配渠道</div>\
+                        <div v-if="!filteredImSidebarChannels.length" class="im-channel-list-empty">未找到匹配渠道</div>\
                       </div>\
-                    </aside>\
-                    <section v-if="selectedImChannel" class="im-channel-panel">\
-                      <div class="im-channel-panel-head">\
-                        <div class="im-channel-panel-top">\
-                          <div class="im-channel-panel-title">\
-                            <span class="im-channel-panel-icon">{{ imPlatformIcon(selectedImChannel) }}</span>\
-                            <div>\
-                              <h3 class="im-channel-panel-name">{{ selectedImChannel.name || selectedImChannel.label }}</h3>\
-                              <p class="im-channel-panel-desc">{{ selectedImChannel.description || \'—\' }}</p>\
+                    </div>\
+                    <div class="im-channel-panel">\
+                      <div v-if="!selectedImChannel" class="im-channel-panel--empty">\
+                        请在左侧选择一个渠道进行配置\
+                      </div>\
+                      <div v-else>\
+                        <div class="im-channel-panel-head">\
+                          <div class="im-channel-panel-top">\
+                            <div class="im-channel-panel-title">\
+                              <span class="im-channel-panel-icon">{{ selectedImChannel.emoji || imPlatformIcon(selectedImChannel) }}</span>\
+                              <div>\
+                                <h3 class="im-channel-panel-name">{{ selectedImChannel.name || selectedImChannel.label }}</h3>\
+                                <p class="im-channel-panel-desc">{{ selectedImChannel.description || \'\' }}</p>\
+                              </div>\
+                            </div>\
+                            <div class="im-channel-panel-actions">\
+                              <el-tag size="small" :type="messagingStateType(imConnectionStatus(selectedImChannel))">\
+                                <span class="im-channel-status-dot" :class="imConnectionDotClass(selectedImChannel)"></span>\
+                                {{ imConnectionLabel(selectedImChannel) }}\
+                              </el-tag>\
+                              <el-switch :model-value="!!selectedImChannel.enabled" @change="toggleImChannelEnabled(selectedImChannel)" active-text="启用" inactive-text="禁用" inline-prompt />\
                             </div>\
                           </div>\
-                          <div class="im-channel-panel-actions">\
-                            <div class="im-channel-enable">\
-                              <span>启用渠道</span>\
-                              <el-switch v-model="selectedImChannel.enabled" />\
-                            </div>\
-                            <el-button type="primary" :loading="imSaving" @click="saveSelectedImChannel">保存配置</el-button>\
+                        </div>\
+                        \
+                        <div v-if="imConflictProfile" class="im-channel-conflict-hint">\
+                          <el-alert type="error" :closable="false" show-icon>\
+                            该凭据正被 profile「{{ imConflictProfile }}」使用，不能复用。请为当前专家单独创建机器人/应用。\
+                          </el-alert>\
+                        </div>\
+                        \
+                        <div class="im-channel-toolbar">\
+                          <div class="im-channel-toolbar-left">\
+                            <el-button link type="primary" @click="openImSetupGuide(selectedImChannel)">设置指南 ↗</el-button>\
+                            <span v-if="!selectedImChannel.enabled" class="im-channel-inline-hint">渠道已禁用，开启右上角开关并填写凭据后保存生效</span>\
+                          </div>\
+                          <div class="im-channel-toolbar-right">\
+                            <el-button type="primary" :loading="imSaving" @click="saveSelectedImChannel">保存</el-button>\
+                            <el-tooltip content="保存或切换启用状态后，需重启 Gateway 才能加载/卸载平台适配器（MVP 不支持热加载）" placement="top" effect="dark">\
+                              <el-button :loading="imRestarting" :disabled="imSaving" @click="restartImGateway">重启 Gateway</el-button>\
+                            </el-tooltip>\
                           </div>\
                         </div>\
-                        <div class="im-channel-badges">\
-                          <el-tag :type="selectedImChannel.enabled ? \'success\' : \'info\'" size="small" effect="plain">\
-                            {{ selectedImChannel.enabled ? \'已启用\' : \'已禁用\' }}\
-                          </el-tag>\
-                          <el-tag :type="selectedImChannel.configured ? \'success\' : \'warning\'" size="small" effect="plain">\
-                            {{ selectedImChannel.configured ? \'已配置\' : \'需配置\' }}\
-                          </el-tag>\
-                        </div>\
-                      </div>\
-                      <div class="im-channel-section">\
-                        <div class="im-channel-section-label">获取凭证</div>\
-                        <p class="im-channel-section-hint">在对应平台创建机器人 / 应用后，将所需凭证填入下方字段并保存。</p>\
-                        <el-button v-if="selectedImChannel.docsUrl" link type="primary" class="im-channel-guide-link" @click="openImSetupGuide(selectedImChannel)">\
-                          打开设置指南 ↗\
-                        </el-button>\
-                      </div>\
-                      <div v-if="imRequiredFields.length" class="im-channel-section">\
-                        <div class="im-channel-section-label im-channel-section-label--required">必填</div>\
-                        <div class="im-credential-form">\
-                          <div v-for="field in imRequiredFields" :key="field.key" class="im-credential-row">\
-                            <div class="im-credential-labels">\
-                              <div class="im-credential-label">{{ field.label }}</div>\
-                              <div class="im-credential-desc">{{ field.description || field.key }}</div>\
+                        \
+                        <div class="im-channel-section">\
+                          <div class="im-channel-section-label im-channel-section-label--required">凭据配置</div>\
+                          <div class="im-credential-form">\
+                            <div v-for="field in selectedImChannel.credentialFields" :key="field.key" class="im-credential-row">\
+                              <div>\
+                                <div class="im-credential-label">{{ field.label }}<span v-if="field.required" class="im-cred-required">*</span></div>\
+                                <div class="im-credential-desc">{{ field.description || \'\' }}</div>\
+                              </div>\
+                              <el-input v-model="imSecretDraft[field.key]" :type="field.password ? \'password\' : \'text\'" :placeholder="credentialPlaceholder(field)" show-password :class="\'im-credential-input\'" />\
                             </div>\
-                            <el-input\
-                              v-model="imSecretDraft[field.key]"\
-                              :type="field.password ? \'password\' : \'text\'"\
-                              :placeholder="credentialPlaceholder(field)"\
-                              size="default"\
-                              :show-password="field.password ? true : false"\
-                              class="im-credential-input"\
-                            />\
                           </div>\
+                          <div class="im-channel-section-foot">凭据写入 <code>.env</code>，保存时校验唯一性（bot_id / client_id / app_id 不可跨专家复用）</div>\
+                        </div>\
+                        \
+                        <div v-if="selectedImChannel.policyFields && selectedImChannel.policyFields.length" class="im-channel-section im-channel-policy-section">\
+                          <el-collapse v-model="imPolicyCollapse" accordion>\
+                            <el-collapse-item name="policy">\
+                              <template #title>\
+                                <span class="im-channel-section-label im-channel-policy-title">访问策略</span>\
+                                <span class="im-channel-policy-summary">{{ imPolicySummary(selectedImChannel) }}</span>\
+                              </template>\
+                              <div class="im-channel-section-foot">写入 <code>config.yaml</code> / <code>.env</code>，留空使用默认值</div>\
+                              <div class="im-credential-form">\
+                                <div v-for="field in selectedImChannel.policyFields" :key="field.key" class="im-credential-row">\
+                                  <div>\
+                                    <div class="im-credential-label">{{ field.label }}</div>\
+                                    <div class="im-credential-desc">{{ field.description || \'\' }}</div>\
+                                  </div>\
+                                  <div class="im-credential-input">\
+                                    <el-switch v-if="field.type === \'switch\'" :model-value="imPolicySwitchValue(field)" @change="imPolicyDraft[field.key] = $event ? \'true\' : \'false\'" />\
+                                    <el-select v-else-if="field.type === \'select\'" :model-value="getImPolicyDisplayValue(field)" @change="imPolicyDraft[field.key] = $event" placeholder="请选择" style="width:100%">\
+                                      <el-option v-for="opt in field.options" :key="opt.value" :label="opt.label" :value="opt.value" />\
+                                    </el-select>\
+                                    <el-input v-else v-model="imPolicyDraft[field.key]" :placeholder="getImPolicyDisplayValue(field) || \'请输入\'" />\
+                                  </div>\
+                                </div>\
+                              </div>\
+                            </el-collapse-item>\
+                          </el-collapse>\
                         </div>\
                       </div>\
-                      <div v-if="imOptionalFields.length" class="im-channel-section">\
-                        <div class="im-channel-section-label">可选</div>\
-                        <div class="im-credential-form">\
-                          <div v-for="field in imOptionalFields" :key="field.key" class="im-credential-row">\
-                            <div class="im-credential-labels">\
-                              <div class="im-credential-label">{{ field.label }}</div>\
-                              <div class="im-credential-desc">{{ field.description || field.key }}</div>\
-                            </div>\
-                            <el-input\
-                              v-model="imSecretDraft[field.key]"\
-                              :type="field.password ? \'password\' : \'text\'"\
-                              :placeholder="credentialPlaceholder(field)"\
-                              size="default"\
-                              :show-password="field.password ? true : false"\
-                              class="im-credential-input"\
-                            />\
-                          </div>\
-                        </div>\
-                      </div>\
-                      <div v-if="!imRequiredFields.length && !imOptionalFields.length" class="profile-empty-state im-channel-no-fields">\
-                        <p class="profile-empty-title">此渠道无需额外凭证</p>\
-                        <p class="profile-empty-desc">打开右上角「启用渠道」并保存。</p>\
-                      </div>\
-                    </section>\
-                    <section v-else class="im-channel-panel im-channel-panel--empty">\
-                      <p>请从左侧选择一个消息渠道</p>\
-                    </section>\
+                    </div>\
                   </div>\
                 </div>\
               </el-tab-pane>\
@@ -2305,6 +2695,44 @@
           <template #footer>\
             <el-button @click="toolPickerVisible = false">取消</el-button>\
             <el-button type="primary" :loading="capabilitySaving" @click="confirmToolPicker">添加所选</el-button>\
+          </template>\
+        </el-dialog>\
+        <el-dialog v-model="hubInstallDialogVisible" title="从 Hub 安装技能" width="600px" append-to-body class="form-dialog capability-picker-dialog">\
+          <div v-if="hubInstalling" class="hub-install-progress">\
+            <div class="hub-install-progress-text">正在安装技能… {{ hubInstallProgress }}%</div>\
+            <el-progress :percentage="hubInstallProgress" :stroke-width="8" />\
+          </div>\
+          <template v-else>\
+            <div class="capability-picker-head">\
+              <el-input v-model="hubInstallSearch" placeholder="搜索 Hub 技能..." size="small" clearable class="member-picker-search" />\
+              <span class="member-picker-count">可选 {{ hubSkillOptions.length }} 项</span>\
+            </div>\
+            <el-table :data="hubSkillOptions" stripe max-height="360" class="toolset-table capability-picker-table" empty-text="暂无可安装的 Hub 技能">\
+              <el-table-column label="技能" min-width="160">\
+                <template #default="{ row }">\
+                  <div class="toolset-name-cell">{{ row.name }}</div>\
+                  <div class="toolset-id-cell">{{ row.id }}</div>\
+                </template>\
+              </el-table-column>\
+              <el-table-column prop="category" label="分类" width="120" show-overflow-tooltip />\
+              <el-table-column prop="description" label="说明" min-width="200" show-overflow-tooltip />\
+              <el-table-column label="操作" width="90" align="center">\
+                <template #default="{ row }">\
+                  <el-button link type="primary" size="small" @click="installHubSkill(row)">安装</el-button>\
+                </template>\
+              </el-table-column>\
+            </el-table>\
+          </template>\
+          <template #footer>\
+            <el-button @click="hubInstallDialogVisible = false">关闭</el-button>\
+          </template>\
+        </el-dialog>\
+        <el-dialog v-model="workspaceRootDialogVisible" title="更改工作空间根路径" width="480px" append-to-body class="form-dialog">\
+          <p style="margin-bottom:12px;color:var(--text-secondary,#606266);font-size:13px">更改工作空间根路径可能导致已有文件引用失效，请谨慎操作。</p>\
+          <el-input v-model="workspaceRootInput" placeholder="如：~/.hermes/profiles/expert/workspace" />\
+          <template #footer>\
+            <el-button @click="workspaceRootDialogVisible = false">取消</el-button>\
+            <el-button type="primary" @click="submitWorkspaceRootChange">确认更改</el-button>\
           </template>\
         </el-dialog>\
       </div>\

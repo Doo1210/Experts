@@ -255,6 +255,8 @@
 
   function addDemoDialogueTask(expertId, def) {
     var createdAt = resolveDemoTaskCreatedAt(def);
+    var cwdOptions = ['.', '.', '.', '工位8', '工位3', '工位12', '设备区A', '原料仓'];
+    var cwd = def.cwd || cwdOptions[Math.floor(Math.random() * cwdOptions.length)];
     var task = {
       id: uid(),
       title: def.title,
@@ -263,6 +265,7 @@
       expertId: expertId,
       ownerId: 'admin',
       archived: false,
+      cwd: cwd,
       titleSet: true,
       createdAt: createdAt,
       updatedAt: createdAt
@@ -887,11 +890,16 @@
   function seedExpertToStateExpert(seed) {
     return {
       id: String(seed.id),
+      slug: seed.slug || String(seed.id),
       name: seed.name,
       avatar: seed.avatar,
       description: seed.description,
-      expertise: (seed.expertise || []).slice(0, 3),
+      expertise: (seed.expertise || seed.tags || []).slice(0, 10),
+      tags: (seed.tags || seed.expertise || []).slice(0, 10),
       category: seed.category,
+      model: seed.model || 'gpt-4o',
+      provider: seed.provider || 'openai',
+      workspaceRoot: '~/.hermes/profiles/' + (seed.slug || seed.id) + '/workspace',
       visibility: 'public',
       status: 'active',
       updatedAt: seed.updatedAt || nowIso()
@@ -937,6 +945,26 @@
         e.category = seed.category;
         updated = true;
       }
+      if (seed.slug && !e.slug) {
+        e.slug = seed.slug;
+        updated = true;
+      }
+      if (seed.model && !e.model) {
+        e.model = seed.model;
+        updated = true;
+      }
+      if (seed.provider && !e.provider) {
+        e.provider = seed.provider;
+        updated = true;
+      }
+      if (seed.tags && !e.tags) {
+        e.tags = seed.tags.slice();
+        updated = true;
+      }
+      if (!e.workspaceRoot) {
+        e.workspaceRoot = '~/.hermes/profiles/' + (e.slug || e.id) + '/workspace';
+        updated = true;
+      }
     });
     seeds.forEach(function (seed) {
       var seedId = String(seed.id);
@@ -957,11 +985,16 @@
     const seedExperts = (window.EXPERTS_DATA || []).map(function (e) {
       return {
         id: String(e.id),
+        slug: e.slug || String(e.id),
         name: e.name,
         avatar: e.avatar,
         description: e.description,
-        expertise: (e.expertise || []).slice(0, 3),
+        expertise: (e.expertise || e.tags || []).slice(0, 10),
+        tags: (e.tags || e.expertise || []).slice(0, 10),
         category: e.category,
+        model: e.model || 'gpt-4o',
+        provider: e.provider || 'openai',
+        workspaceRoot: '~/.hermes/profiles/' + (e.slug || e.id) + '/workspace',
         visibility: 'public',
         status: 'active',
         updatedAt: e.updatedAt || nowIso()
@@ -1140,8 +1173,22 @@
       body: '',
       latestSummary: '',
       blockedReason: '',
+      blockKind: '',
+      consecutiveFailures: 0,
+      lastFailureError: '',
       createdAt: now,
-      updatedAt: now
+      updatedAt: now,
+      completedAt: null,
+      startedAt: null,
+      currentRunId: null,
+      lastHeartbeatAt: null,
+      workspaceKind: '',
+      workspacePath: '',
+      runs: [],
+      taskEvents: [],
+      diagnostics: [],
+      comments: [],
+      skills: []
     }, fields || {});
   }
 
@@ -1209,6 +1256,17 @@
         body: '排查 etch 区近 4 周 SPC 异常点，更新缺陷 pareto。',
         latestSummary: '已锁定 etch-3 连续 3 点超 UCL，待生成更新版缺陷 pareto。',
         commentCount: 3,
+        workspaceKind: 'git',
+        workspacePath: '/workspace/yield/spc-analysis',
+        skills: ['spc-analysis', 'pareto-chart'],
+        taskEvents: [
+          { id: uid(), kind: 'assigned', label: '分配负责人', author: lead.expertId, payload: { assignee: quality.expertId }, createdAt: minutesAgoIso(260) },
+          { id: uid(), kind: 'created', label: '创建', author: lead.expertId, payload: {}, createdAt: minutesAgoIso(260) }
+        ],
+        comments: [
+          { id: uid(), author: '工艺专家', expertId: lead.expertId, body: 'etch-3 近 4 周异常点较多，建议优先排查。', createdAt: minutesAgoIso(200) },
+          { id: uid(), author: '质量专家', expertId: quality.expertId, body: '收到，已开始拉取 SPC 数据。', createdAt: minutesAgoIso(180) }
+        ],
         createdAt: minutesAgoIso(260),
         updatedAt: minutesAgoIso(40)
       }),
@@ -1224,6 +1282,28 @@
         latestSummary: '主要根因：etch 区 3 号 chamber 压力偏差 +12%。',
         commentCount: 5,
         result: '主要根因：etch 区 3 号 chamber 压力偏差 +12%。建议参数回标并加严 SPC 监控。',
+        completedAt: minutesAgoIso(90),
+        startedAt: minutesAgoIso(160),
+        workspaceKind: 'git',
+        workspacePath: '/workspace/yield/root-cause',
+        skills: ['root-cause-analysis', 'report-writing'],
+        runs: [
+          {
+            id: 'run-1', profile: lead.expertId, outcome: 'completed', status: 'completed',
+            startedAt: minutesAgoIso(160), endedAt: minutesAgoIso(90),
+            summary: '完成根因分析报告，确认 etch-3 chamber 压力偏差 +12% 为主要根因。', error: '', metadata: { reportPages: 8, chartsGenerated: 5 }
+          }
+        ],
+        taskEvents: [
+          { id: uid(), kind: 'completed', label: '完成', author: lead.expertId, payload: { result: '主要根因已确认' }, createdAt: minutesAgoIso(90) },
+          { id: uid(), kind: 'spawned', label: '启动', author: lead.expertId, payload: { assignee: lead.expertId }, createdAt: minutesAgoIso(160) },
+          { id: uid(), kind: 'created', label: '创建', author: lead.expertId, payload: {}, createdAt: minutesAgoIso(250) }
+        ],
+        diagnostics: [],
+        comments: [
+          { id: uid(), author: '质量专家', expertId: quality.expertId, body: '建议将 SPC 监控窗口从 4 周扩展到 8 周以覆盖完整周期。', createdAt: minutesAgoIso(100) },
+          { id: uid(), author: '设备运维专家', expertId: device.expertId, body: 'PM 记录显示该 chamber 上月有过维护，可能与偏差有关。', createdAt: minutesAgoIso(120) }
+        ],
         createdAt: minutesAgoIso(250),
         updatedAt: minutesAgoIso(90)
       }),
@@ -1238,6 +1318,33 @@
         body: '交叉验证 chamber PM 记录与良率关联。',
         latestSummary: '正在从设备管理系统导出近 3 个月 PM 记录。',
         commentCount: 2,
+        startedAt: minutesAgoIso(35),
+        currentRunId: 'run-2',
+        lastHeartbeatAt: minutesAgoIso(2),
+        workspaceKind: 'git',
+        workspacePath: '/workspace/yield/device-analysis',
+        skills: ['data-query', 'correlation-analysis'],
+        runs: [
+          {
+            id: 'run-2', profile: device.expertId, outcome: 'running', status: 'running',
+            startedAt: minutesAgoIso(35), endedAt: null,
+            summary: '正在从设备管理系统导出近 3 个月 PM 记录。', error: '', metadata: null
+          },
+          {
+            id: 'run-1', profile: device.expertId, outcome: 'timed_out', status: 'timed_out',
+            startedAt: minutesAgoIso(120), endedAt: minutesAgoIso(110),
+            summary: '首次尝试拉取 PM 记录，因连接超时中断。', error: 'ConnectionTimeout: EMS API timeout after 600s', metadata: { retries: 1 }
+          }
+        ],
+        taskEvents: [
+          { id: uid(), kind: 'spawned', label: '启动', author: device.expertId, payload: { assignee: device.expertId }, createdAt: minutesAgoIso(35) },
+          { id: uid(), kind: 'created', label: '创建', author: lead.expertId, payload: {}, createdAt: minutesAgoIso(240) }
+        ],
+        diagnostics: [],
+        comments: [
+          { id: uid(), author: '工艺专家', expertId: lead.expertId, body: '建议同步检查冷却系统流量数据，可能与 PM 周期相关。', createdAt: minutesAgoIso(30) },
+          { id: uid(), author: '设备运维专家', expertId: device.expertId, body: '收到，已加入数据拉取范围。', createdAt: minutesAgoIso(25) }
+        ],
         createdAt: minutesAgoIso(240),
         updatedAt: minutesAgoIso(20)
       }),
@@ -1400,7 +1507,38 @@
         priority: 'urgent',
         body: '对接 MES 良率原始数据接口，拉取近 4 周各站点数据。',
         latestSummary: 'MES API 权限待 IT 开通，无法继续拉取数据。',
-        blockedReason: 'MES API 权限待 IT 开通',
+        blockedReason: 'MES API 权限待 IT 开通，无法继续拉取数据。',
+        blockKind: 'capability',
+        consecutiveFailures: 2,
+        lastFailureError: 'Permission denied: MES API access not authorized for current profile',
+        startedAt: minutesAgoIso(120),
+        workspaceKind: 'git',
+        workspacePath: '/workspace/yield/mes-integration',
+        skills: ['data-query', 'api-integration'],
+        runs: [
+          {
+            id: 'run-2', profile: device.expertId, outcome: 'blocked', status: 'blocked',
+            startedAt: minutesAgoIso(60), endedAt: minutesAgoIso(58),
+            summary: 'MES API 权限校验失败，需 IT 开通访问权限。', error: 'Permission denied: MES API access not authorized for current profile', metadata: { attempts: 2 }
+          },
+          {
+            id: 'run-1', profile: device.expertId, outcome: 'crashed', status: 'crashed',
+            startedAt: minutesAgoIso(120), endedAt: minutesAgoIso(115),
+            summary: '首次连接 MES API 时认证失败。', error: 'AuthError: invalid token', metadata: null
+          }
+        ],
+        taskEvents: [
+          { id: uid(), kind: 'blocked', label: '阻塞', author: device.expertId, payload: { reason: 'MES API 权限待 IT 开通', block_kind: 'capability' }, createdAt: minutesAgoIso(30) },
+          { id: uid(), kind: 'spawned', label: '启动', author: device.expertId, payload: { assignee: device.expertId }, createdAt: minutesAgoIso(120) },
+          { id: uid(), kind: 'created', label: '创建', author: lead.expertId, payload: {}, createdAt: minutesAgoIso(200) }
+        ],
+        diagnostics: [
+          { title: 'Agent 连续失败 2 次：能力/权限不足', suggestion: '建议转交给其他专家或联系 IT 开通 MES API 权限', kind: 'capability', severity: 'warn' }
+        ],
+        comments: [
+          { id: uid(), author: '工艺专家', expertId: lead.expertId, body: 'IT 工单已提交，预计 2 小时内开通。', createdAt: minutesAgoIso(20) },
+          { id: uid(), author: '设备运维专家', expertId: device.expertId, body: '已重试两次均失败，等待权限开通后重启。', createdAt: minutesAgoIso(25) }
+        ],
         commentCount: 4,
         createdAt: minutesAgoIso(200),
         updatedAt: minutesAgoIso(30)
@@ -2012,6 +2150,29 @@
     persist();
   }
 
+  function migrateTaskDetailFields() {
+    var SCHEMA = 7;
+    if ((state.projectTaskSchemaVersion || 0) >= SCHEMA) return;
+    (state.projectTasks || []).forEach(function (t) {
+      if (t.blockKind === undefined) t.blockKind = '';
+      if (t.consecutiveFailures === undefined) t.consecutiveFailures = 0;
+      if (t.lastFailureError === undefined) t.lastFailureError = '';
+      if (t.completedAt === undefined) t.completedAt = null;
+      if (t.startedAt === undefined) t.startedAt = null;
+      if (t.currentRunId === undefined) t.currentRunId = null;
+      if (t.lastHeartbeatAt === undefined) t.lastHeartbeatAt = null;
+      if (t.workspaceKind === undefined) t.workspaceKind = '';
+      if (t.workspacePath === undefined) t.workspacePath = '';
+      if (!Array.isArray(t.runs)) t.runs = [];
+      if (!Array.isArray(t.taskEvents)) t.taskEvents = [];
+      if (!Array.isArray(t.diagnostics)) t.diagnostics = [];
+      if (!Array.isArray(t.comments)) t.comments = [];
+      if (!Array.isArray(t.skills)) t.skills = [];
+    });
+    state.projectTaskSchemaVersion = SCHEMA;
+    persist();
+  }
+
   function migrateProjectTasks() {
     if (state.projectTasks && state.projectTasks.length > 0) return;
     state.projectTasks = [];
@@ -2225,6 +2386,7 @@
       migrateProjectTaskSeed();
       migrateYieldProjectSeed();
       migrateSupplyProjectSeed();
+      migrateTaskDetailFields();
       migrateProjectFiles();
       migrateProjectMessageTypes();
       if (DEV_MOCK) {
@@ -2274,18 +2436,25 @@
     },
     createExpert: function (payload) {
       var expert = {
-        id: uid(),
+        id: payload.slug || uid(),
+        slug: payload.slug || '',
         name: payload.name,
         avatar: payload.avatar || DEFAULT_EXPERT_AVATAR,
         description: payload.description,
-        expertise: (payload.expertise || []).slice(0, 3),
+        expertise: (payload.expertise || payload.tags || []).slice(0, 10),
+        tags: (payload.tags || payload.expertise || []).slice(0, 10),
         category: payload.category || '工艺制造',
+        model: payload.model || '',
+        provider: payload.provider || '',
+        source: payload.source || 'blank',
+        cloneFrom: payload.cloneFrom || '',
+        workspaceRoot: payload.workspaceRoot || '~/.hermes/profiles/' + (payload.slug || 'expert') + '/workspace',
         visibility: payload.visibility || 'internal',
         status: 'active',
         updatedAt: nowIso()
       };
       state.experts.unshift(expert);
-      state.personas[expert.id] = payload.persona || { coreDutyMd: '', workflowMd: '', behaviorMd: '' };
+      state.personas[expert.id] = { soulMd: '', onboarded: false };
       state.skillBindings[expert.id] = payload.skillIds || [];
       state.toolBindings[expert.id] = payload.toolIds || [];
       persist();
@@ -2372,6 +2541,40 @@
       }
     },
 
+    getRunningSessionCount: function (expertId) {
+      if (DEV_MOCK && window.getRunningSessionCount) {
+        return window.getRunningSessionCount(expertId);
+      }
+      var count = 0;
+      (state.tasks || []).forEach(function (t) {
+        if (String(t.expertId) === String(expertId) && t.status === 'running') count++;
+      });
+      return count;
+    },
+
+    getMemoryMd: function (expertId) {
+      if (window.MOCK_MEMORY_MD) return window.MOCK_MEMORY_MD;
+      return '';
+    },
+
+    getUserMd: function (expertId) {
+      if (window.MOCK_USER_MD) return window.MOCK_USER_MD;
+      return '';
+    },
+
+    getWorkspaceRoot: function (expertId) {
+      var expert = state.experts.find(function (e) { return String(e.id) === String(expertId); });
+      return (expert && expert.workspaceRoot) || ('~/.hermes/profiles/' + expertId + '/workspace');
+    },
+
+    updateWorkspaceRoot: function (expertId, path) {
+      var expert = state.experts.find(function (e) { return String(e.id) === String(expertId); });
+      if (expert) {
+        expert.workspaceRoot = path;
+        persist();
+      }
+    },
+
     isFavorite: function (expertId) {
       return state.favorites.indexOf(expertId) >= 0;
     },
@@ -2383,7 +2586,14 @@
     },
 
     getPersona: function (expertId) {
-      return state.personas[expertId] || { coreDutyMd: '', workflowMd: '', behaviorMd: '' };
+      var p = state.personas[expertId];
+      if (!p) return { soulMd: '', onboarded: false };
+      if (p.soulMd !== undefined) return p;
+      var legacy = '';
+      if (p.coreDutyMd) legacy += String(p.coreDutyMd);
+      if (p.workflowMd) legacy += '\n\n' + String(p.workflowMd);
+      if (p.behaviorMd) legacy += '\n\n' + String(p.behaviorMd);
+      return { soulMd: legacy, onboarded: false };
     },
     getExpertDetailMeta: function (expertId) {
       return (state.expertDetailMeta && state.expertDetailMeta[expertId]) || {
@@ -2438,34 +2648,37 @@
       return this.getExpertDetailMeta(expertId).gateway || {};
     },
     savePersona: function (expertId, persona) {
+      var soulMd = persona.soulMd || '';
       var old = state.personas[expertId];
-      if (old && old.coreDutyMd === persona.coreDutyMd && old.workflowMd === persona.workflowMd && old.behaviorMd === persona.behaviorMd) {
-        return;
-      }
+      var oldSoul = old ? (old.soulMd !== undefined ? old.soulMd : [old.coreDutyMd, old.workflowMd, old.behaviorMd].filter(Boolean).join('\n\n')) : '';
+      if (oldSoul === soulMd) return;
       var history = (old && old.history) ? old.history.slice(0, 4) : [];
       history.unshift({
         version: history.length + 1,
         savedAt: nowIso(),
-        snapshot: {
-          coreDutyMd: old ? old.coreDutyMd || '' : '',
-          workflowMd: old ? old.workflowMd || '' : '',
-          behaviorMd: old ? old.behaviorMd || '' : ''
-        }
+        snapshot: { soulMd: oldSoul }
       });
       state.personas[expertId] = {
-        coreDutyMd: persona.coreDutyMd,
-        workflowMd: persona.workflowMd,
-        behaviorMd: persona.behaviorMd,
+        soulMd: soulMd,
+        onboarded: (old && old.onboarded) || false,
         history: history
       };
       persist();
       if (!DEV_MOCK && window.SidecarApi && window.SidecarApi.patchExpert) {
         window.SidecarApi.patchExpert(String(expertId), {
-          coreDutyMd: persona.coreDutyMd || '',
-          workflowMd: persona.workflowMd || '',
-          behaviorMd: persona.behaviorMd || ''
+          soulMd: soulMd
         });
       }
+    },
+    setPersonaOnboarded: function (expertId, onboarded) {
+      var p = state.personas[expertId] || {};
+      if (p.soulMd === undefined) {
+        var legacy = [p.coreDutyMd, p.workflowMd, p.behaviorMd].filter(Boolean).join('\n\n');
+        p = { soulMd: legacy, onboarded: false };
+      }
+      p.onboarded = !!onboarded;
+      state.personas[expertId] = p;
+      persist();
     },
     getPersonaHistory: function (expertId) {
       var p = state.personas[expertId];
@@ -3283,8 +3496,25 @@
       if (!task) return null;
       var text = String(comment || '').trim();
       task.commentCount = (task.commentCount || 0) + 1;
+      if (!Array.isArray(task.comments)) task.comments = [];
+      task.comments.push({
+        id: uid(),
+        author: '当前用户',
+        expertId: null,
+        body: text,
+        createdAt: nowIso()
+      });
       task.latestSummary = text;
       task.updatedAt = nowIso();
+      if (!Array.isArray(task.taskEvents)) task.taskEvents = [];
+      task.taskEvents.unshift({
+        id: uid(),
+        kind: 'commented',
+        label: '添加评论',
+        author: '当前用户',
+        payload: { reason: text },
+        createdAt: nowIso()
+      });
       AppStore.addProjectEvent(projectId, {
         type: 'task_commented',
         category: 'comment',
@@ -3305,6 +3535,15 @@
       task.updatedAt = nowIso();
       var expert = expertId ? AppStore.getExpert(expertId) : null;
       task.latestSummary = expert ? ('已指派给 ' + expert.name) : '已取消负责人';
+      if (!Array.isArray(task.taskEvents)) task.taskEvents = [];
+      task.taskEvents.unshift({
+        id: uid(),
+        kind: 'assigned',
+        label: '分配负责人',
+        author: '当前用户',
+        payload: { assignee: expert ? expert.name : '未指派', expertId: expertId },
+        createdAt: nowIso()
+      });
       AppStore.addProjectEvent(projectId, {
         type: 'task_assigned',
         category: 'task',
@@ -3324,7 +3563,17 @@
       task.result = text;
       task.latestSummary = text || '任务已完成';
       task.completedAt = nowIso();
+      task.consecutiveFailures = 0;
       task.updatedAt = task.completedAt;
+      if (!Array.isArray(task.taskEvents)) task.taskEvents = [];
+      task.taskEvents.unshift({
+        id: uid(),
+        kind: 'completed',
+        label: '完成',
+        author: '当前用户',
+        payload: { result: text },
+        createdAt: nowIso()
+      });
       AppStore.addProjectEvent(projectId, {
         type: 'task_completed',
         category: 'task',
@@ -3336,14 +3585,27 @@
       persist();
       return task;
     },
-    blockProjectTask: function (projectId, taskId, reason) {
+    blockProjectTask: function (projectId, taskId, reason, blockKind) {
       var task = (state.projectTasks || []).find(function (t) { return sameId(t.projectId, projectId) && sameId(t.id, taskId); });
       if (!task) return null;
       var text = String(reason || '').trim();
+      var kind = String(blockKind || '').trim();
       task.status = 'blocked';
       task.blockedReason = text;
+      task.blockKind = kind;
+      task.consecutiveFailures = (task.consecutiveFailures || 0) + 1;
+      task.lastFailureError = text;
       task.latestSummary = text || '任务被阻塞';
       task.updatedAt = nowIso();
+      if (!Array.isArray(task.taskEvents)) task.taskEvents = [];
+      task.taskEvents.unshift({
+        id: uid(),
+        kind: 'blocked',
+        label: '阻塞',
+        author: '当前用户',
+        payload: { reason: text, block_kind: kind },
+        createdAt: nowIso()
+      });
       AppStore.addProjectEvent(projectId, {
         type: 'task_blocked',
         category: 'exception',
@@ -3361,8 +3623,18 @@
       var text = String(reason || '').trim();
       task.status = normalizeProjectTaskStatus('ready');
       task.blockedReason = '';
+      task.consecutiveFailures = 0;
       task.latestSummary = text ? ('已重启：' + text) : '任务已重启';
       task.updatedAt = nowIso();
+      if (!Array.isArray(task.taskEvents)) task.taskEvents = [];
+      task.taskEvents.unshift({
+        id: uid(),
+        kind: 'unblocked',
+        label: '解除阻塞',
+        author: '当前用户',
+        payload: { reason: text },
+        createdAt: nowIso()
+      });
       AppStore.addProjectEvent(projectId, {
         type: 'task_unblocked',
         category: 'task',
@@ -3557,6 +3829,12 @@
 
     getImChannels: function (expertId) {
       return state.imChannels[expertId] || [];
+    },
+    findImCredentialConflict: function (expertId, lockField, lockValue) {
+      // dev mock：前端不持久化凭据明文，无法精确比对，默认不报冲突。
+      // 真实场景由后端 acquire_scoped_lock 校验（PUT /im-channels/<platform> 返回 409 + conflict_profile）。
+      // 如需演示冲突 UX，可在 demo-data.js 预置一个占用凭据的专家并在此处匹配。
+      return null;
     },
     saveImChannels: function (expertId, channels, opts) {
       opts = opts || {};
