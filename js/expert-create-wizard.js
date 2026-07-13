@@ -59,8 +59,12 @@
         slugEdited: false,
         description: '',
         expertise: [],
-        provider: '',
-        model: ''
+        modelConfig: {
+          baseUrl: '',
+          apiKey: '',
+          model: '',
+          providerName: ''
+        }
       };
     }
 
@@ -105,20 +109,11 @@
       clonePickerVisible.value = false;
     }
 
-    var providerList = Vue.computed(function () {
-      return window.PROVIDER_CATALOG || [];
-    });
-
-    var modelList = Vue.computed(function () {
-      if (!createForm.value.provider) return [];
-      return window.getProviderModels ? window.getProviderModels(createForm.value.provider) : [];
-    });
-
     var isCloneMode = Vue.computed(function () {
       return createForm.value.source !== 'blank';
     });
 
-    var modelDisabled = Vue.computed(function () {
+    var modelFormDisabled = Vue.computed(function () {
       return isCloneMode.value;
     });
 
@@ -148,10 +143,6 @@
           clonePickerVisible.value = true;
         });
       }
-    }
-
-    function onProviderChange() {
-      createForm.value.model = '';
     }
 
     function addCreateExpertiseTag() {
@@ -250,12 +241,23 @@
         return false;
       }
       if (f.source === 'blank') {
-        if (!f.provider) {
-          ElementPlus.ElMessage.warning('请选择 Provider');
+        var mc = f.modelConfig;
+        if (!mc.baseUrl.trim()) {
+          ElementPlus.ElMessage.warning('请填写 Base URL');
           return false;
         }
-        if (!f.model) {
-          ElementPlus.ElMessage.warning('请选择模型');
+        try {
+          new URL(mc.baseUrl.trim());
+        } catch (e) {
+          ElementPlus.ElMessage.warning('Base URL 格式不正确');
+          return false;
+        }
+        if (!mc.apiKey.trim()) {
+          ElementPlus.ElMessage.warning('请填写 API Key');
+          return false;
+        }
+        if (!mc.model.trim()) {
+          ElementPlus.ElMessage.warning('请填写模型名称');
           return false;
         }
       }
@@ -270,6 +272,15 @@
       if (!validateForm()) return;
       saving.value = true;
       var f = createForm.value;
+      var modelConfig = null;
+      if (f.source === 'blank') {
+        modelConfig = {
+          baseUrl: f.modelConfig.baseUrl.trim(),
+          apiKey: f.modelConfig.apiKey.trim(),
+          model: f.modelConfig.model.trim(),
+          providerName: f.modelConfig.providerName.trim()
+        };
+      }
       var expert = store.createExpert({
         slug: f.slug,
         name: f.name.trim(),
@@ -277,8 +288,7 @@
         avatar: f.avatar || undefined,
         expertise: f.expertise.slice(0, 3),
         tags: f.expertise.slice(0, 3),
-        model: f.source === 'blank' ? f.model : '',
-        provider: f.source === 'blank' ? f.provider : '',
+        modelConfig: modelConfig,
         source: f.source,
         cloneFrom: f.source === 'clone' ? f.cloneFrom : (f.source === 'default' ? 'default' : '')
       });
@@ -302,14 +312,11 @@
       clonePickerVisible: clonePickerVisible,
       cloneSearchQuery: cloneSearchQuery,
       selectCloneExpert: selectCloneExpert,
-      providerList: providerList,
-      modelList: modelList,
       isCloneMode: isCloneMode,
-      modelDisabled: modelDisabled,
+      modelFormDisabled: modelFormDisabled,
       onNameInput: onNameInput,
       onSlugInput: onSlugInput,
       onSourceChange: onSourceChange,
-      onProviderChange: onProviderChange,
       resetCreateForm: resetCreateForm,
       openCreateDialog: openCreateDialog,
       closeCreateDialog: closeCreateDialog,
@@ -343,14 +350,11 @@
         clonePickerVisible: w.clonePickerVisible,
         cloneSearchQuery: w.cloneSearchQuery,
         selectCloneExpert: w.selectCloneExpert,
-        providerList: w.providerList,
-        modelList: w.modelList,
         isCloneMode: w.isCloneMode,
-        modelDisabled: w.modelDisabled,
+        modelFormDisabled: w.modelFormDisabled,
         onNameInput: w.onNameInput,
         onSlugInput: w.onSlugInput,
         onSourceChange: w.onSourceChange,
-        onProviderChange: w.onProviderChange,
         resetCreateForm: w.resetCreateForm,
         openCreateDialog: w.openCreateDialog,
         closeCreateDialog: w.closeCreateDialog,
@@ -453,19 +457,23 @@
       '    </div>',
       '    <div class="create-model-row">',
       '      <el-form label-position="top" class="form-dialog-form create-model-form">',
-      '        <div class="create-model-form-row">',
-      '          <el-form-item label="Provider" :required="!isCloneMode" style="flex:1">',
-      '            <el-select v-model="createForm.provider" :disabled="isCloneMode" @change="onProviderChange" placeholder="选择 Provider" style="width:100%">',
-      '              <el-option v-for="p in providerList" :key="p.id" :label="p.name" :value="p.id" />',
-      '            </el-select>',
+      '        <div class="create-model-section-title">默认模型 <span class="create-model-section-required" v-if="!isCloneMode">*</span></div>',
+      '        <div class="create-model-fields" :class="{ \'create-model-fields-disabled\': modelFormDisabled }">',
+      '          <el-form-item label="Base URL" :required="!isCloneMode">',
+      '            <el-input v-model="createForm.modelConfig.baseUrl" :disabled="modelFormDisabled" placeholder="https://api.openai.com/v1" size="large" />',
       '          </el-form-item>',
-      '          <el-form-item label="模型" :required="!isCloneMode" style="flex:1">',
-      '            <el-select v-model="createForm.model" :disabled="modelDisabled" placeholder="选择模型" style="width:100%">',
-      '              <el-option v-for="m in modelList" :key="m.id" :label="m.name" :value="m.id" />',
-      '            </el-select>',
+      '          <el-form-item label="API Key" :required="!isCloneMode">',
+      '            <el-input v-model="createForm.modelConfig.apiKey" :disabled="modelFormDisabled" type="password" show-password placeholder="输入 API Key" size="large" />',
+      '          </el-form-item>',
+      '          <el-form-item label="模型名称" :required="!isCloneMode">',
+      '            <el-input v-model="createForm.modelConfig.model" :disabled="modelFormDisabled" placeholder="如：gpt-4o、deepseek-chat" size="large" />',
+      '          </el-form-item>',
+      '          <el-form-item label="Provider 名称（可选）">',
+      '            <el-input v-model="createForm.modelConfig.providerName" :disabled="modelFormDisabled" placeholder="留空则从 Base URL 自动生成" size="large" />',
       '          </el-form-item>',
       '        </div>',
-      '        <p v-if="isCloneMode" class="form-dialog-hint">模型/Provider 沿用自源 profile</p>',
+      '        <p v-if="isCloneMode" class="form-dialog-hint">默认模型沿用自源 profile</p>',
+      '        <p v-else class="form-dialog-hint">作为专家的默认模型，对话任务未选择其他模型时使用此模型</p>',
       '      </el-form>',
       '    </div>',
       '  </div>',

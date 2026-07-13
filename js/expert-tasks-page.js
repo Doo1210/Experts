@@ -417,7 +417,11 @@
       function syncTasksFromRemote(remote) {
         if (!remote) return;
         remoteError.value = '';
-        tasks.value = remote.filter(function (t) { return !t.archived; });
+        var list = remote.filter(function (t) { return !t.archived; });
+        list.sort(function (a, b) {
+          return store.resolveTaskLastActivityAt(b).localeCompare(store.resolveTaskLastActivityAt(a));
+        });
+        tasks.value = list;
       }
 
       function startTitlePoll(taskId) {
@@ -609,6 +613,11 @@
         var hours = String(d.getHours()).padStart(2, '0');
         var minutes = String(d.getMinutes()).padStart(2, '0');
         return month + '月' + day + '日 ' + hours + ':' + minutes;
+      }
+
+      function formatTaskLastActivity(task) {
+        if (!task) return '';
+        return formatTaskCreatedAt(store.resolveTaskLastActivityAt(task));
       }
 
       function isTaskRunning(t) {
@@ -1129,7 +1138,8 @@
         pendingFiles: chatFiles.pendingFiles, fileInputRef: chatFiles.fileInputRef,
         triggerFileUpload: chatFiles.triggerFileUpload, handleFileSelect: chatFiles.handleFileSelect,
         removePendingFile: chatFiles.removePendingFile, formatFileSize: chatFiles.formatFileSize,
-        formatTaskCreatedAt: formatTaskCreatedAt, isTaskRunning: isTaskRunning, taskStatusTip: taskStatusTip,
+        formatTaskCreatedAt: formatTaskCreatedAt, formatTaskLastActivity: formatTaskLastActivity,
+        isTaskRunning: isTaskRunning, taskStatusTip: taskStatusTip,
         selectTask: selectTask, newTask: newTask, send: send,
         editTask: editTask, deleteTaskItem: deleteTaskItem,
         handleTaskMenu: handleTaskMenu,
@@ -1271,7 +1281,7 @@
           :task-stats="taskStats"\
           :is-running-fn="isTaskRunning"\
           :task-status-tip-fn="taskStatusTip"\
-          :created-at-label-fn="formatTaskCreatedAt"\
+          :last-activity-label-fn="formatTaskLastActivity"\
           @select="selectTask"\
           @menu="handleTaskMenu"\
           @open-workspace="handleOpenWorkspaceFromTask" />\

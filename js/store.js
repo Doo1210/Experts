@@ -268,11 +268,13 @@
       cwd: cwd,
       titleSet: true,
       createdAt: createdAt,
-      updatedAt: createdAt
+      updatedAt: createdAt,
+      lastActivityAt: createdAt
     };
     state.tasks.unshift(task);
     var demoMessages = buildDemoMessages(def, createdAt, expertId);
     state.messages[task.id] = demoMessages;
+    task.lastActivityAt = syncTaskLastActivityAt(task);
     if (demoMessages.length) {
       task.updatedAt = demoMessages[demoMessages.length - 1].createdAt;
     }
@@ -343,6 +345,30 @@
     return (messages || []).some(function (m) { return m.role === 'user'; });
   }
 
+  /** 用户最近一条消息时间；无用户消息时返回 null */
+  function getLastUserMessageAt(taskId, messages) {
+    var list = messages || state.messages[taskId] || [];
+    for (var i = list.length - 1; i >= 0; i--) {
+      if (list[i].role === 'user' && list[i].createdAt) return list[i].createdAt;
+    }
+    return null;
+  }
+
+  /** last_activity_at：用户最近发言时间；新建未发言任务回退 createdAt */
+  function resolveTaskLastActivityAt(task) {
+    if (!task) return '';
+    var fromMsg = getLastUserMessageAt(task.id);
+    if (fromMsg) return fromMsg;
+    return task.createdAt || task.lastActivityAt || task.updatedAt || '';
+  }
+
+  function syncTaskLastActivityAt(task) {
+    if (!task) return '';
+    var at = getLastUserMessageAt(task.id) || task.createdAt || nowIso();
+    task.lastActivityAt = at;
+    return at;
+  }
+
   function shouldSyncDemoMessages(task, def, current, expected) {
     if (!expected.length) return false;
     if (taskHasUserActivity(task, current)) return false;
@@ -371,6 +397,7 @@
           var demoMessages = buildDemoMessages(def, baseIso, e.id);
           state.messages[task.id] = demoMessages;
           task.updatedAt = demoMessages[demoMessages.length - 1].createdAt;
+          task.lastActivityAt = syncTaskLastActivityAt(task);
           updated = true;
         }
         if (def.status && task.status !== def.status && !task.userTouched) {
@@ -887,7 +914,51 @@
     if (updated) persist();
   }
 
+  var PROVIDER_DEFAULTS = {
+    openai: { name: 'OpenAI', baseUrl: 'https://api.openai.com/v1' },
+    anthropic: { name: 'Anthropic', baseUrl: 'https://api.anthropic.com/v1' },
+    deepseek: { name: 'DeepSeek', baseUrl: 'https://api.deepseek.com/v1' },
+    qwen: { name: '通义千问', baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1' }
+  };
+
+  function buildModelConfigFromLegacy(model, provider) {
+    if (!model && !provider) return null;
+    var pid = provider || 'openai';
+    var defaults = PROVIDER_DEFAULTS[pid] || { name: pid, baseUrl: '' };
+    return {
+      providerSlug: pid,
+      providerName: defaults.name,
+      baseUrl: defaults.baseUrl,
+      apiKey: '',
+      model: model || ''
+    };
+  }
+
+  function slugifyProvider(name) {
+    var s = String(name || '').toLowerCase().trim();
+    s = s.replace(/[^a-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '').replace(/-{2,}/g, '-');
+    return s || 'custom';
+  }
+
+  function hostFromUrl(url) {
+    try {
+      return new URL(url).hostname.replace(/^www\./, '');
+    } catch (e) {
+      return '';
+    }
+  }
+
+  function resolveProviderSlug(providerName, baseUrl) {
+    if (providerName && providerName.trim()) return slugifyProvider(providerName);
+    if (baseUrl) {
+      var host = hostFromUrl(baseUrl);
+      if (host) return slugifyProvider(host);
+    }
+    return 'custom';
+  }
+
   function seedExpertToStateExpert(seed) {
+    var modelConfig = seed.modelConfig || buildModelConfigFromLegacy(seed.model, seed.provider);
     return {
       id: String(seed.id),
       slug: seed.slug || String(seed.id),
@@ -897,8 +968,9 @@
       expertise: (seed.expertise || seed.tags || []).slice(0, 10),
       tags: (seed.tags || seed.expertise || []).slice(0, 10),
       category: seed.category,
-      model: seed.model || 'gpt-4o',
-      provider: seed.provider || 'openai',
+      model: seed.model || (modelConfig ? modelConfig.model : 'gpt-4o'),
+      provider: seed.provider || (modelConfig ? modelConfig.providerSlug : 'openai'),
+      modelConfig: modelConfig,
       workspaceRoot: '~/.hermes/profiles/' + (seed.slug || seed.id) + '/workspace',
       visibility: 'public',
       status: 'active',
@@ -957,6 +1029,10 @@
         e.provider = seed.provider;
         updated = true;
       }
+      if (!e.modelConfig) {
+        e.modelConfig = seed.modelConfig || buildModelConfigFromLegacy(e.model, e.provider);
+        if (e.modelConfig) updated = true;
+      }
       if (seed.tags && !e.tags) {
         e.tags = seed.tags.slice();
         updated = true;
@@ -983,6 +1059,7 @@
     if (state.experts.length > 0) return;
 
     const seedExperts = (window.EXPERTS_DATA || []).map(function (e) {
+      var mc = e.modelConfig || buildModelConfigFromLegacy(e.model, e.provider);
       return {
         id: String(e.id),
         slug: e.slug || String(e.id),
@@ -992,8 +1069,9 @@
         expertise: (e.expertise || e.tags || []).slice(0, 10),
         tags: (e.tags || e.expertise || []).slice(0, 10),
         category: e.category,
-        model: e.model || 'gpt-4o',
-        provider: e.provider || 'openai',
+        model: e.model || (mc ? mc.model : 'gpt-4o'),
+        provider: e.provider || (mc ? mc.providerSlug : 'openai'),
+        modelConfig: mc,
         workspaceRoot: '~/.hermes/profiles/' + (e.slug || e.id) + '/workspace',
         visibility: 'public',
         status: 'active',
@@ -2150,6 +2228,19 @@
     persist();
   }
 
+  function migrateDialogueTaskLastActivity() {
+    var updated = false;
+    (state.tasks || []).forEach(function (t) {
+      if (t.type && t.type !== 'dialogue') return;
+      var expected = syncTaskLastActivityAt(t);
+      if (t.lastActivityAt !== expected) {
+        t.lastActivityAt = expected;
+        updated = true;
+      }
+    });
+    if (updated) persist();
+  }
+
   function migrateTaskDetailFields() {
     var SCHEMA = 7;
     if ((state.projectTaskSchemaVersion || 0) >= SCHEMA) return;
@@ -2387,6 +2478,7 @@
       migrateYieldProjectSeed();
       migrateSupplyProjectSeed();
       migrateTaskDetailFields();
+      migrateDialogueTaskLastActivity();
       migrateProjectFiles();
       migrateProjectMessageTypes();
       if (DEV_MOCK) {
@@ -2407,6 +2499,10 @@
         syncExpertsFromSidecar();
       }
     },
+    resolveProviderSlug: function (providerName, baseUrl) {
+      return resolveProviderSlug(providerName, baseUrl);
+    },
+
     getState: function () { return state; },
 
     getExperts: function () {
@@ -2435,6 +2531,17 @@
       return expert;
     },
     createExpert: function (payload) {
+      var modelConfig = null;
+      if (payload.modelConfig && payload.modelConfig.baseUrl) {
+        var pslug = resolveProviderSlug(payload.modelConfig.providerName, payload.modelConfig.baseUrl);
+        modelConfig = {
+          providerSlug: pslug,
+          providerName: (payload.modelConfig.providerName || '').trim(),
+          baseUrl: payload.modelConfig.baseUrl.trim(),
+          apiKey: payload.modelConfig.apiKey || '',
+          model: payload.modelConfig.model.trim()
+        };
+      }
       var expert = {
         id: payload.slug || uid(),
         slug: payload.slug || '',
@@ -2444,8 +2551,9 @@
         expertise: (payload.expertise || payload.tags || []).slice(0, 10),
         tags: (payload.tags || payload.expertise || []).slice(0, 10),
         category: payload.category || '工艺制造',
-        model: payload.model || '',
-        provider: payload.provider || '',
+        model: modelConfig ? modelConfig.model : (payload.model || ''),
+        provider: modelConfig ? modelConfig.providerSlug : (payload.provider || ''),
+        modelConfig: modelConfig,
         source: payload.source || 'blank',
         cloneFrom: payload.cloneFrom || '',
         workspaceRoot: payload.workspaceRoot || '~/.hermes/profiles/' + (payload.slug || 'expert') + '/workspace',
@@ -2944,9 +3052,10 @@
         if (!includeArchived && t.archived) return false;
         return true;
       }).sort(function (a, b) {
-        return (b.updatedAt || '').localeCompare(a.updatedAt || '');
+        return resolveTaskLastActivityAt(b).localeCompare(resolveTaskLastActivityAt(a));
       });
     },
+    resolveTaskLastActivityAt: resolveTaskLastActivityAt,
     fetchExpertDetailRemote: async function (expertId) {
       if (DEV_MOCK || !window.SidecarApi || !window.SidecarApi.getExpert) return null;
       var requestId = String(expertId);
@@ -2981,12 +3090,16 @@
           cwd: t.cwd || prevByExpert[t.id] || DEFAULT_TASK_CWD,
           titleSet: !!t.titleSet,
           createdAt: t.createdAt || nowIso(),
-          updatedAt: t.createdAt || nowIso()
+          updatedAt: t.createdAt || nowIso(),
+          lastActivityAt: t.lastActivityAt || t.last_activity_at || t.createdAt || nowIso()
         };
       });
       var expertKey = String(expertId);
       state.tasks = state.tasks.filter(function (t) { return String(t.expertId) !== expertKey; });
       mapped.forEach(function (t) { state.tasks.unshift(t); });
+      mapped.sort(function (a, b) {
+        return resolveTaskLastActivityAt(b).localeCompare(resolveTaskLastActivityAt(a));
+      });
       persist();
       return mapped;
     },
@@ -3005,7 +3118,8 @@
         archived: false,
         cwd: payload.cwd || DEFAULT_TASK_CWD,
         createdAt: nowIso(),
-        updatedAt: nowIso()
+        updatedAt: nowIso(),
+        lastActivityAt: nowIso()
       };
       state.tasks.unshift(task);
       state.messages[task.id] = [];
@@ -3027,7 +3141,8 @@
         cwd: remote.cwd || DEFAULT_TASK_CWD,
         titleSet: !!remote.titleSet,
         createdAt: remote.createdAt || nowIso(),
-        updatedAt: remote.createdAt || nowIso()
+        updatedAt: remote.createdAt || nowIso(),
+        lastActivityAt: remote.lastActivityAt || remote.last_activity_at || remote.createdAt || nowIso()
       };
       state.tasks.unshift(task);
       state.messages[task.id] = [];
@@ -3038,11 +3153,9 @@
       var t = state.tasks.find(function (x) { return x.id === taskId; });
       if (!t) return null;
       Object.assign(t, patch);
-      // 仅状态/标题变更视为任务活动，更新 updatedAt 以反映「最近活跃」排序；
-      // cwd 等会话级配置变更不应触发任务卡片重排
+      // 状态/标题变更不更新 lastActivityAt；最近活跃仅随用户发言变化
       if (patch.status !== undefined || patch.title !== undefined) {
         t.userTouched = true;
-        t.updatedAt = nowIso();
       }
       if (patch.title !== undefined) {
         t.titleSet = true;
@@ -3173,8 +3286,9 @@
       };
       state.messages[taskId].push(message);
       var task = state.tasks.find(function (t) { return t.id === taskId; });
-      if (task) {
-        task.updatedAt = nowIso();
+      if (task && msg.role === 'user') {
+        task.lastActivityAt = message.createdAt;
+        task.updatedAt = message.createdAt;
         task.userTouched = true;
       }
       if (DEV_MOCK && task && msg.role === 'user' && !task.titleSet) {

@@ -367,6 +367,13 @@ window.getProviderModels = function (providerId) {
   return p ? p.models : [];
 };
 
+window.PROVIDER_DEFAULTS_DETAIL = {
+  openai: { name: 'OpenAI', baseUrl: 'https://api.openai.com/v1' },
+  anthropic: { name: 'Anthropic', baseUrl: 'https://api.anthropic.com/v1' },
+  deepseek: { name: 'DeepSeek', baseUrl: 'https://api.deepseek.com/v1' },
+  qwen: { name: '通义千问', baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1' }
+};
+
 /** Hub 技能目录（Mock） */
 window.SKILLS_HUB_CATALOG = [
   { id: 'hub-lean-manufacturing', name: '精益生产分析', category: '工艺制造', description: '价值流图分析、七大浪费识别与改善方案' },

@@ -9,11 +9,17 @@
     var editAvatarInput = Vue.ref(null);
     var editExpertiseTagInput = Vue.ref('');
     var editingExpert = Vue.ref(null);
+    var editModelMode = Vue.ref('keep');
+    var editModelConfig = Vue.ref({ baseUrl: '', apiKey: '', model: '', providerName: '' });
+    var editModelCurrent = Vue.ref(null);
 
     function resetEditForm() {
       editForm.value = { name: '', description: '', avatar: '', expertise: [] };
       editExpertiseTagInput.value = '';
       editingExpert.value = null;
+      editModelMode.value = 'keep';
+      editModelConfig.value = { baseUrl: '', apiKey: '', model: '', providerName: '' };
+      editModelCurrent.value = null;
     }
 
     function openEdit(expert) {
@@ -26,6 +32,14 @@
         expertise: (expert.expertise || []).slice(0, 10)
       };
       editExpertiseTagInput.value = '';
+      var mc = expert.modelConfig || null;
+      editModelCurrent.value = mc ? {
+        model: mc.model || expert.model || '',
+        providerName: mc.providerName || '',
+        baseUrl: mc.baseUrl || ''
+      } : (expert.model ? { model: expert.model, providerName: '', baseUrl: '' } : null);
+      editModelMode.value = 'keep';
+      editModelConfig.value = { baseUrl: '', apiKey: '', model: '', providerName: '' };
       showEditDialog.value = true;
     }
 
@@ -78,15 +92,60 @@
         ElementPlus.ElMessage.warning('请填写专家名称和介绍');
         return;
       }
-      store.saveExpert(Object.assign({}, expert, {
+      var updatedModelConfig = expert.modelConfig || null;
+      if (editModelMode.value === 'new') {
+        var mc = editModelConfig.value;
+        if (!mc.baseUrl.trim()) {
+          ElementPlus.ElMessage.warning('请填写 Base URL');
+          return;
+        }
+        try { new URL(mc.baseUrl.trim()); }
+        catch (e) {
+          ElementPlus.ElMessage.warning('Base URL 格式不正确');
+          return;
+        }
+        if (!mc.apiKey.trim()) {
+          ElementPlus.ElMessage.warning('请填写 API Key');
+          return;
+        }
+        if (!mc.model.trim()) {
+          ElementPlus.ElMessage.warning('请填写模型名称');
+          return;
+        }
+        updatedModelConfig = {
+          baseUrl: mc.baseUrl.trim(),
+          apiKey: mc.apiKey.trim(),
+          model: mc.model.trim(),
+          providerName: mc.providerName.trim()
+        };
+      }
+      var updated = Object.assign({}, expert, {
         name: editForm.value.name.trim(),
         description: editForm.value.description.trim(),
         avatar: editForm.value.avatar || expert.avatar,
         expertise: editForm.value.expertise.slice(0, 10)
-      }));
+      });
+      if (editModelMode.value === 'new' && updatedModelConfig) {
+        if (store && store.resolveProviderSlug) {
+          updatedModelConfig.providerSlug = store.resolveProviderSlug(updatedModelConfig.providerName, updatedModelConfig.baseUrl);
+        } else {
+          updatedModelConfig.providerSlug = 'custom';
+        }
+        updated.modelConfig = updatedModelConfig;
+        updated.model = updatedModelConfig.model;
+        updated.provider = updatedModelConfig.providerSlug;
+      }
+      store.saveExpert(updated);
       closeEditDialog();
       if (options.onSaved) options.onSaved();
-      ElementPlus.ElMessage.success('专家信息已更新');
+      if (editModelMode.value === 'new' && expert.modelConfig) {
+        var count = (options.getRunningSessionCount && options.getRunningSessionCount()) || 0;
+        ElementPlus.ElMessage.success(count > 0
+          ? '已保存。该专家当前有 ' + count + ' 个运行中会话，修改将在新会话生效。'
+          : '已保存。修改将在新会话生效。');
+      } else {
+        ElementPlus.ElMessage.success('专家信息已更新');
+      }
     }
 
     return {
@@ -94,6 +153,9 @@
       editForm: editForm,
       editAvatarInput: editAvatarInput,
       editExpertiseTagInput: editExpertiseTagInput,
+      editModelMode: editModelMode,
+      editModelConfig: editModelConfig,
+      editModelCurrent: editModelCurrent,
       resetEditForm: resetEditForm,
       openEdit: openEdit,
       openEditDialog: function () {
@@ -117,9 +179,12 @@
       tagInput: { type: String, default: '' },
       headerTitle: { type: String, default: '编辑专家' },
       headerSubtitle: { type: String, default: '修改专家名称、介绍、头像与擅长领域' },
-      tagColors: { type: Array, default: function () { return window.TAG_COLORS || []; } }
+      tagColors: { type: Array, default: function () { return window.TAG_COLORS || []; } },
+      modelMode: { type: String, default: 'keep' },
+      modelConfig: { type: Object, default: null },
+      modelCurrent: { type: Object, default: null }
     },
-    emits: ['update:visible', 'update:tagInput', 'submit', 'closed', 'avatar-change', 'add-tag', 'remove-tag', 'tag-keydown'],
+    emits: ['update:visible', 'update:tagInput', 'update:modelMode', 'update:modelConfig', 'submit', 'closed', 'avatar-change', 'add-tag', 'remove-tag', 'tag-keydown'],
     setup: function (props, ctx) {
       var editAvatarInput = Vue.ref(null);
 
@@ -151,6 +216,10 @@
         ctx.emit('add-tag');
       }
 
+      function onModelModeChange(val) {
+        ctx.emit('update:modelMode', val);
+      }
+
       return {
         editAvatarInput: editAvatarInput,
         close: close,
@@ -159,7 +228,8 @@
         updateTagInput: updateTagInput,
         removeTag: removeTag,
         onTagKeydown: onTagKeydown,
-        addTag: addTag
+        addTag: addTag,
+        onModelModeChange: onModelModeChange
       };
     },
     template: '\
@@ -237,7 +307,38 @@
             </div>\
             <p class="form-dialog-hint expertise-tag-hint">可添加多个标签，如「SPC」「良率分析」「工艺优化」</p>\
           </div>\
-        </div>\
+                    <div v-if="modelCurrent" class="edit-model-section">\
+            <div class="create-model-section-title">默认模型</div>\
+            <div class="edit-model-current">\
+              <span class="edit-model-current-label">当前默认模型：</span>\
+              <span class="edit-model-current-value">{{ modelCurrent.model || "未配置" }}</span>\
+              <span v-if="modelCurrent.providerName" class="edit-model-current-url">via {{ modelCurrent.providerName }}</span>\
+              <span v-if="modelCurrent.baseUrl" class="edit-model-current-url">{{ modelCurrent.baseUrl }}</span>\
+            </div>\
+            <el-form label-position="top" class="form-dialog-form">\
+              <el-form-item label="修改默认模型？">\
+                <el-radio-group :model-value="modelMode" @update:model-value="onModelModeChange">\
+                  <el-radio label="keep">保持当前配置</el-radio>\
+                  <el-radio label="new">修改为新的配置</el-radio>\
+                </el-radio-group>\
+              </el-form-item>\
+              <div v-if="modelMode === \'new\'" class="edit-model-new-fields create-model-fields">\
+                <el-form-item label="Base URL" required>\
+                  <el-input :model-value="modelConfig.baseUrl" @update:model-value="modelConfig.baseUrl = $event" placeholder="https://api.openai.com/v1" size="large" />\
+                </el-form-item>\
+                <el-form-item label="API Key" required>\
+                  <el-input :model-value="modelConfig.apiKey" @update:model-value="modelConfig.apiKey = $event" type="password" show-password placeholder="输入 API Key" size="large" />\
+                </el-form-item>\
+                <el-form-item label="模型名称" required>\
+                  <el-input :model-value="modelConfig.model" @update:model-value="modelConfig.model = $event" placeholder="如：gpt-4o、deepseek-chat" size="large" />\
+                </el-form-item>\
+                <el-form-item label="Provider 名称（可选）">\
+                  <el-input :model-value="modelConfig.providerName" @update:model-value="modelConfig.providerName = $event" placeholder="留空则从 Base URL 自动生成" size="large" />\
+                </el-form-item>\
+              </div>\
+            </el-form>\
+          </div>\
+                </div>\
         <template #footer>\
           <div class="dialog-footer-custom">\
             <el-button @click="close">取消</el-button>\
@@ -258,6 +359,9 @@
         showEditDialog: props.edit.showEditDialog,
         editForm: props.edit.editForm,
         editExpertiseTagInput: props.edit.editExpertiseTagInput,
+        editModelMode: props.edit.editModelMode,
+        editModelConfig: props.edit.editModelConfig,
+        editModelCurrent: props.edit.editModelCurrent,
         resetEditForm: props.edit.resetEditForm,
         submitEdit: props.edit.submitEdit,
         handleEditAvatarChange: props.edit.handleEditAvatarChange,
@@ -275,6 +379,10 @@
         v-model:tag-input="editExpertiseTagInput"\
         :header-title="headerTitle"\
         :tag-colors="tagColors"\
+        :model-mode="editModelMode"\
+        :model-config="editModelConfig"\
+        :model-current="editModelCurrent"\
+        @update:model-mode="editModelMode = $event"\
         @submit="submitEdit"\
         @closed="resetEditForm"\
         @avatar-change="handleEditAvatarChange"\

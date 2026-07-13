@@ -6,11 +6,11 @@
 (function () {
   /**
    * 任务列表项
-   * props: { task, active, isRunning, statusTip, createdAtLabel }
+   * props: { task, active, isRunning, statusTip, lastActivityLabel }
    * emits: { select, menu, open-workspace }
    */
   var TaskListItem = {
-    props: ['task', 'active', 'isRunning', 'statusTip', 'createdAtLabel'],
+    props: ['task', 'active', 'isRunning', 'statusTip', 'lastActivityLabel'],
     emits: ['select', 'menu', 'open-workspace'],
     computed: {
       // 是否为根目录（cwd 为空）
@@ -54,7 +54,7 @@
               <svg class="task-item-meta-icon" viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2">\
                 <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>\
               </svg>\
-              <span>{{ createdAtLabel }}</span>\
+              <span>{{ lastActivityLabel }}</span>\
             </div>\
           </div>\
           <div class="task-item-toolbar">\
@@ -93,7 +93,7 @@
 
   /**
    * 任务列表容器
-   * props: { tasks, currentTaskId, taskStats, isRunning, taskStatusTip, createdAtLabel }
+   * props: { tasks, currentTaskId, taskStats, isRunning, taskStatusTip, lastActivityLabelFn }
    * emits: { select, menu, open-workspace }
    */
   var ChatTaskList = {
@@ -104,7 +104,7 @@
       taskStats: { type: Object, default: function () { return { total: 0, running: 0, ready: 0 }; } },
       isRunningFn: { type: Function, required: true },
       taskStatusTipFn: { type: Function, required: true },
-      createdAtLabelFn: { type: Function, required: true }
+      lastActivityLabelFn: { type: Function, required: true }
     },
     emits: ['select', 'menu', 'open-workspace'],
     template: '\
@@ -146,7 +146,7 @@
                 :active="currentTaskId === t.id"\
                 :is-running="isRunningFn(t)"\
                 :status-tip="taskStatusTipFn(t)"\
-                :created-at-label="createdAtLabelFn(t.createdAt)"\
+                :last-activity-label="lastActivityLabelFn(t)"\
                 @select="$emit(\'select\', t.id)"\
                 @menu="$emit(\'menu\', $event, t)"\
                 @open-workspace="$emit(\'open-workspace\', t)" />\

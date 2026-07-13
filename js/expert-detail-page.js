@@ -33,7 +33,8 @@
       var fileNameInput = Vue.ref('');
       var expertEdit = createExpertEditForm(store, {
         getExpert: function () { return expert.value; },
-        onSaved: function () { load(); }
+        onSaved: function () { load(); },
+        getRunningSessionCount: function () { return runningSessionCount.value; }
       });
       var runningSessionCount = Vue.ref(0);
       var workspaceRootPath = Vue.ref('');
@@ -677,8 +678,28 @@
         return !task || !task.type || task.type === 'dialogue';
       }
 
+      function isTaskTerminalStatus(status) {
+        return status === 'completed' || status === 'done' || status === 'archived' || status === 'failed';
+      }
+
+      function isTaskRunning(task) {
+        return !!task && !task.archived && task.status === 'running';
+      }
+
+      function taskTabStatusLabel(task) {
+        return isTaskRunning(task) ? '运行中' : '已就绪';
+      }
+
+      function taskTabStatusType(task) {
+        return isTaskRunning(task) ? 'primary' : 'info';
+      }
+
       var dialogueTasks = Vue.computed(function () {
-        return tasks.value.filter(isDialogueTask);
+        return tasks.value.filter(function (t) {
+          if (!isDialogueTask(t)) return false;
+          if (t.archived) return false;
+          return !isTaskTerminalStatus(t.status);
+        });
       });
 
       var filteredTasks = Vue.computed(function () {
@@ -691,12 +712,13 @@
           });
         }
         if (taskStatusFilter.value === 'running') {
-          list = list.filter(function (t) { return t.status === 'running'; });
+          list = list.filter(function (t) { return isTaskRunning(t); });
         } else if (taskStatusFilter.value === 'ready') {
-          list = list.filter(function (t) { return t.status !== 'running'; });
-        } else if (taskStatusFilter.value === 'completed') {
-          list = list.filter(function (t) { return t.status === 'completed' || t.status === 'done'; });
+          list = list.filter(function (t) { return !isTaskRunning(t); });
         }
+        list.sort(function (a, b) {
+          return store.resolveTaskLastActivityAt(b).localeCompare(store.resolveTaskLastActivityAt(a));
+        });
         return list;
       });
 
@@ -704,7 +726,7 @@
         var list = dialogueTasks.value;
         var counts = { total: list.length, running: 0, ready: 0 };
         list.forEach(function (t) {
-          if (t.status === 'running') counts.running++;
+          if (isTaskRunning(t)) counts.running++;
           else counts.ready++;
         });
         return counts;
@@ -775,9 +797,9 @@
         return s.split('.')[0].replace('T', ' ').replace(/Z$/i, '').replace(/[+-]\d{2}:\d{2}$/, '');
       }
 
-      function taskCreatedAtLabel(task) {
+      function taskLastActivityLabel(task) {
         if (!task) return '-';
-        return formatDateTimeToSeconds(task.createdAt || task.updatedAt);
+        return formatDateTimeToSeconds(store.resolveTaskLastActivityAt(task));
       }
 
       function archiveTaskItem(task) {
@@ -1727,6 +1749,30 @@
         };
       });
 
+      var defaultModelLabel = Vue.computed(function () {
+        var e = expert.value;
+        if (!e) return '';
+        if (e.modelConfig && e.modelConfig.model) return e.modelConfig.model;
+        if (e.model) return e.model;
+        return '';
+      });
+
+      var defaultModelTooltip = Vue.computed(function () {
+        var e = expert.value;
+        if (!e) return '';
+        var mc = e.modelConfig;
+        if (mc) {
+          var name = mc.providerName || mc.providerSlug || '';
+          var url = mc.baseUrl || '';
+          return name + (url ? (' · ' + url) : '');
+        }
+        if (e.provider) {
+          var defaults = (window.PROVIDER_DEFAULTS_DETAIL || {})[e.provider];
+          if (defaults) return (defaults.name || e.provider) + (defaults.baseUrl ? (' · ' + defaults.baseUrl) : '');
+        }
+        return e.provider || '';
+      });
+
       var filteredImSidebarChannels = Vue.computed(function () {
         var list = imChannels.value.slice();
         if (messagingSearchQuery.value.trim()) {
@@ -1934,8 +1980,9 @@
         expertEdit: expertEdit, openEditDialog: expertEdit.openEditDialog,
         skills: catalog.SKILLS_CATALOG, tools: catalog.TOOLS_CATALOG,
         tagColors: catalog.TAG_COLORS,
-        statusLabel: catalog.TASK_STATUS_LABEL, statusType: catalog.TASK_STATUS_TYPE,
-        taskCreatedAtLabel: taskCreatedAtLabel,
+        taskLastActivityLabel: taskLastActivityLabel,
+        taskTabStatusLabel: taskTabStatusLabel,
+        taskTabStatusType: taskTabStatusType,
         artifactTypeLabel: catalog.ARTIFACT_TYPE_LABEL,
         savePersona: savePersona, saveSkillBindings: saveSkillBindings, saveToolBindings: saveToolBindings,
         addMemory: addMemory, removeMemory: removeMemory, saveIm: saveIm, addMaterial: addMaterial,
@@ -2057,7 +2104,9 @@
         installHubSkill: installHubSkill,
         removeSkillBindingDynamic: removeSkillBindingDynamic,
         removeToolBindingDynamic: removeToolBindingDynamic,
-        unbindMcpServer: unbindMcpServer
+        unbindMcpServer: unbindMcpServer,
+        defaultModelLabel: defaultModelLabel,
+        defaultModelTooltip: defaultModelTooltip
       };
     },
     template: '\
@@ -2079,7 +2128,15 @@
               <img class="expert-basic-info-avatar" :src="expert.avatar" :alt="expert.name">\
             </div>\
             <div class="expert-basic-info-content">\
-              <h2 class="expert-basic-info-name">{{ expert.name }}<span v-if="runningSessionCount > 0" class="detail-running-indicator" @click="goToRunningTasks"><span class="detail-running-dot"></span>{{ runningSessionCount }} 个运行中会话</span></h2>\
+              <div class="expert-basic-info-head">\
+                <h2 class="expert-basic-info-name">{{ expert.name }}</h2>\
+                <el-tooltip v-if="defaultModelLabel" :content="defaultModelTooltip" placement="bottom" :show-after="300">\
+                  <span class="detail-model-tag">\
+                    <span class="detail-model-tag-label">默认模型</span>\
+                    <span class="detail-model-tag-value">{{ defaultModelLabel }}</span>\
+                  </span>\
+                </el-tooltip>\
+              </div>\
               <p v-if="expert.description" class="expert-basic-info-desc">{{ expert.description }}</p>\
               <div v-if="expert.expertise && expert.expertise.length" class="expert-basic-info-tags">\
                 <span v-for="(tag, idx) in expert.expertise.slice(0, 3)" :key="tag" class="expertise-tag" :class="tagColors[idx % tagColors.length]">{{ tag }}</span>\
@@ -2286,7 +2343,6 @@
                         <el-option label="全部" value="all" />\
                         <el-option label="运行中" value="running" />\
                         <el-option label="已就绪" value="ready" />\
-                        <el-option label="已完成" value="completed" />\
                       </el-select>\
                       <el-button type="primary" size="small" @click="openNewTaskDialog">+ 新建任务</el-button>\
                     </div>\
@@ -2300,13 +2356,13 @@
                     <el-table-column prop="id" label="任务ID" min-width="160" show-overflow-tooltip />\
                     <el-table-column prop="title" label="任务名称" min-width="200" show-overflow-tooltip />\
                     <el-table-column label="状态" width="88">\
-                      <template #default="{ row }"><el-tag :type="statusType[row.status]" size="small">{{ statusLabel[row.status] }}</el-tag></template>\
+                      <template #default="{ row }"><el-tag :type="taskTabStatusType(row)" size="small">{{ taskTabStatusLabel(row) }}</el-tag></template>\
                     </el-table-column>\
                     <el-table-column label="工作目录" width="120">\
                       <template #default="{ row }"><el-button link type="primary" size="small" @click="goToWorkspaceFromTask(row)">{{ getTaskCwdLabel(row) }}</el-button></template>\
                     </el-table-column>\
-                    <el-table-column label="创建时间" width="190">\
-                      <template #default="{ row }">{{ taskCreatedAtLabel(row) }}</template>\
+                    <el-table-column label="最近活跃" width="190">\
+                      <template #default="{ row }">{{ taskLastActivityLabel(row) }}</template>\
                     </el-table-column>\
                     <el-table-column label="操作" width="152" fixed="right" align="left" class-name="task-tab-action-cell">\
                       <template #default="{ row }">\
