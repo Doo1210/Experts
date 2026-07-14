@@ -696,7 +696,9 @@
         return {
           tasks: store.getTasksByExpert(expertId).length,
           projects: store.getProjectsByExpert(expertId).length,
-          skills: store.getSkillIds(expertId).length,
+          skills: store.getEnabledSkillCount
+            ? store.getEnabledSkillCount(expertId)
+            : store.getSkillIds(expertId).length,
           tools: store.getToolIds(expertId).length
         };
       }

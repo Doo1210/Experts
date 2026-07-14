@@ -8,13 +8,13 @@ Target: Hermes 项目协作空间 · 专家管理模块
 
 `project-kanban-mvp-prd.md` 定义了「项目 = Kanban Board、专家 = Hermes Profile、任务 = Kanban task」的结构。`task-session-mvp-prd.md` 定义了「任务上下文下用户与专家 profile 的对话体验」。两份 PRD 都把「专家」作为已存在的前置概念，但没有解决「专家本身如何被创建、配置和管理」的问题。
 
-本文档定义专家管理模块：用户可以可视化地创建、配置、管理自定义领域专家（Hermes Profile），并将专家的人设、技能、工具、记忆、IM 渠道等能力以 Tab 维度组织成统一管理界面。
+本文档定义专家管理模块：用户可以可视化地创建、配置、管理自定义领域专家（Hermes Profile），并将专家的人设、技能、工具、MCP、记忆、IM 渠道等能力以 Tab 维度组织成统一管理界面。
 
 ### 1.1 与已有 PRD 的关系
 
 - **kanban PRD** 定义「项目 — 任务 — 专家」结构，专家作为项目成员从 Hermes profiles 中选择。
 - **task-session PRD** 定义「任务对话页面」，一个任务对应一个 session；**工作目录** = session `cwd`（该任务 workspace，通常为工作空间根下子目录）；profile **工作空间根** = `terminal.cwd`（**所有 session 可访问**，见 `task-session-mvp-prd.md` §2.3）。
-- **本 PRD** 定义「专家本身的生命周期管理」：创建、配置、查看关联任务、编辑人设、绑定技能/工具。
+- **本 PRD** 定义「专家本身的生命周期管理」：创建、配置、查看关联任务、编辑人设、启停技能/工具。
 - 三份 PRD 互为补充：本 PRD 产出的专家，被 kanban PRD 选为项目成员，被 task-session PRD 用于任务对话。
 
 ### 1.2 设计动机
@@ -31,20 +31,21 @@ Hermes 的 profile 机制已经足够灵活（一个 profile = 一个完整 HERM
 **本 PRD 的关键简化**：
 
 - **单步向导**（弹窗一张表单）：用户填「来源 + 身份信息 + 模型」即可创建一个可用的专家壳。
-- **不在向导中配置人设/技能/工具/工作空间**：这些维度的精细化配置全部进入详情页对应 Tab。
+- **不在向导中配置人设/技能/工具/MCP/工作空间**：这些维度的精细化配置全部进入详情页对应 Tab。
   - 人设（SOUL.md）→ 默认留空，由用户在「人设」Tab 编辑。
-  - 技能 → 全部 seed 内置技能 + 默认全部启用，由用户在「技能」Tab 解绑或安装 hub 技能。
-  - 工具 → 默认继承 `_HERMES_CORE_TOOLS`，由用户在「工具」Tab 调整。
+  - 技能 → 全部 seed 内置技能 + 默认全部启用，由用户在「技能」Tab 用开关启停或安装 hub 技能。
+  - 工具 → 默认继承 `_HERMES_CORE_TOOLS`，由用户在「工具」Tab 以全部列表 + 开关调整。
+  - MCP → 「从零开始」不预置；「复制 default / 复制其他专家」沿用 Hermes `--clone`，**保留**源专家的 `mcp_servers`（产品层不 strip）。详情页「MCP」Tab 对缺密钥 / 连通失败显示红色状态。
   - 工作空间根 → 后端默认创建 `<HERMES_HOME>/workspace/`，（空目录，不预置子目录），由用户在「工作空间」Tab 更改路径。
 
 这使得创建向导成为完全同步的原子事务，并极大降低首次创建门槛（用户填一张表单即可拿到一个可用的专家壳）。
 
 ### 1.3 设计目标
 
-1. **轻量可视化创建专家**：单步向导引导用户完成身份信息 + 来源选择（从零 / 复制 default / 复制其他专家），其余配置（人设、技能、工具、工作空间）全部进入详情页。
-2. **全维度管理**：专家详情页以 Tab 结构展示人设、工作空间、任务、记忆、技能、工具、IM 渠道七个维度。
+1. **轻量可视化创建专家**：单步向导引导用户完成身份信息 + 来源选择（从零 / 复制 default / 复制其他专家），其余配置（人设、技能、工具、MCP、工作空间）全部进入详情页。
+2. **全维度管理**：专家详情页以 Tab 结构展示人设、工作空间、任务、记忆、技能、工具、MCP、IM 渠道八个维度。
 3. **复用 Hermes 原生能力**：不复刻 Hermes 已有的 profile/skills/tools 机制，而是把 Hermes 的文件系统和配置映射成 B 端用户能理解的 UI。
-4. **MVP 聚焦核心路径**：记忆 Tab MVP 只做只读展示；IM 渠道 Tab MVP 做企业微信、钉钉、飞书三个渠道的基础启用/凭据配置，消息路由、统计等高级管理放后续版本。
+4. **MVP 聚焦核心路径**：记忆 Tab MVP 只做只读展示；IM 渠道 Tab MVP 做企业微信（AI Bot + 自建应用回调两种形态）、钉钉、飞书的基础启用/凭据配置，消息路由、统计等高级管理放后续版本。
 
 ## 2. 产品定位
 
@@ -72,9 +73,9 @@ Hermes 的 profile 机制已经足够灵活（一个 profile = 一个完整 HERM
 
 4. **创建向导是原子事务**
    - 单步向导只做身份信息 + 来源选择，全部是同步文件写入，无异步操作。
-   - SOUL.md 默认留空，技能全部 seed 并默认启用，toolset 默认继承 `_HERMES_CORE_TOOLS`，工作空间根默认 `<HERMES_HOME>/workspace`。
+   - SOUL.md 默认留空，技能全部 seed 并默认启用，toolset 默认继承 `_HERMES_CORE_TOOLS`；MCP 在「从零开始」时不预置，「复制」时随 Hermes `--clone` 保留 `mcp_servers`；工作空间根默认 `<HERMES_HOME>/workspace`。
    - 提交时一次落盘，无需 PID 轮询、无需进度页。
-   - 上述各维度的精细化配置（人设编辑、hub 技能安装、toolset 调整、工作空间根更改）全部在详情页对应 Tab 完成。
+   - 上述各维度的精细化配置（人设编辑、hub 技能安装、toolset 调整、MCP 增删启停、工作空间根更改）全部在详情页对应 Tab 完成。
 
 5. **Profile 隔离，不做实时继承**
    - profile 之间不设计实时配置继承（AGENTS.md 明确）。
@@ -83,8 +84,9 @@ Hermes 的 profile 机制已经足够灵活（一个 profile = 一个完整 HERM
 
 6. **Prompt 缓存神圣不可破**
    - 系统提示词一次会话内字节稳定，只在上下文压缩时重建。
-   - 人设/技能/工具的修改**默认下次会话生效**，可选 `--now` 立即失效（会丢弃缓存）。
-   - 这是 Hermes 的核心成本约束，人设 Tab 的「保存」按钮必须遵循此规则。
+   - 人设（SOUL.md）/技能/工具（toolset）的修改**仅下次会话生效**（MVP 不提供「立即生效」）。UI 保存时必须提示用户。
+   - MCP 服务器的启用/配置变更影响工具发现与连接；MVP 以「新会话生效」为主，并在 UI 提示连接状态。
+   - 这是 Hermes 的核心成本约束（Prompt 缓存神圣不可破），人设 Tab 的「保存」必须明确提示「将在新会话生效」。
 
 ## 3. MVP 范围
 
@@ -98,18 +100,20 @@ Hermes 的 profile 机制已经足够灵活（一个 profile = 一个完整 HERM
 - 创建专家向导（**单步弹窗**）
   - 字段：来源（从零 / 复制 default / 复制其他专家）、头像、专家名称（中英文）、专家介绍、擅长领域（tag）、默认模型（Base URL + API Key + 模型名称）
   - 不在向导中配置人设（SOUL.md 默认留空，由用户进详情页「人设」Tab 编辑）
-  - 不在向导中配置技能（自动 seed 内置技能 + 全部启用，由用户在详情页「技能」Tab 调整）
-  - 不在向导中配置工具（默认继承 `_HERMES_CORE_TOOLS`，由用户在详情页「工具」Tab 调整）
+  - 不在向导中配置技能（自动 seed 内置技能 + 全部启用；详情页「技能」Tab 用开关启停 / Hub 安装）
+  - 不在向导中配置工具（默认继承 `_HERMES_CORE_TOOLS`；详情页「工具」Tab 全部可配置 + 开关）
+  - 不在向导中单独配置 MCP：「从零开始」无预置；「复制」时沿用 Hermes `--clone` 保留源 `mcp_servers`（不 strip），由用户在详情页「MCP」Tab 补密钥 / 启停 / 增删
   - 不在向导中配置工作空间根（后端默认创建 `<HERMES_HOME>/workspace/`，由用户在详情页「工作空间」Tab 调整）
 - 专家详情页
   - 顶部信息卡（头像、名称、简介、标签、编辑、发起任务、返回）
-  - Tab 导航（7 个，带数量角标）
+  - Tab 导航（8 个，带数量角标）
   - 人设 Tab：读写 SOUL.md，保存默认下次会话生效
   - 工作空间 Tab：展示 workspace_root 完整目录树；支持配置/变更工作空间根、上传文件
   - 任务 Tab：列出该专家的进行中/已就绪任务（含工作目录、最近活跃列），跳转任务对话页
-  - 技能 Tab：查看/解绑已绑定技能 + hub 技能安装入口
-  - 工具 Tab：查看/解绑 toolset + MCP 服务器管理
-  - IM 渠道 Tab：企业微信、钉钉、飞书三个渠道的启用/禁用 + 凭据配置 + 访问策略
+  - 技能 Tab：全部已安装技能 + 启用开关 + 用量（使用/补丁/最近使用）+ hub 安装入口
+  - 工具 Tab：全部可配置 toolset + 启用开关（复用 `/api/tools/toolsets`）；无「添加/解绑」
+  - MCP Tab：本模块内嵌轻量 CRUD；缺密钥或连通失败显示红色状态
+  - IM 渠道 Tab：企业微信（`wecom` + `wecom_callback`）、钉钉、飞书的启用/禁用 + 凭据配置 + 访问策略
 - 发起任务：从专家详情页或列表卡片的「发起任务」按钮跳转任务对话页
 
 ### 3.2 MVP 不包含
@@ -118,8 +122,11 @@ Hermes 的 profile 机制已经足够灵活（一个 profile = 一个完整 HERM
   - MVP 阶段记忆 Tab 只做只读展示 `memories/MEMORY.md` + `USER.md`。
   - provider 切换走 `hermes memory setup` 命令。
 - IM 渠道的高级管理（消息路由规则、群聊精细化策略、送达统计、消息模板）
-  - MVP 阶段 IM 渠道 Tab 只做企业微信、钉钉、飞书三个渠道的启用/禁用 + 凭据 + 基础访问策略。
+  - MVP 阶段 IM 渠道 Tab 做企业微信（AI Bot + 自建应用回调）、钉钉、飞书的启用/禁用 + 凭据 + 基础访问策略。
   - Telegram、Discord、Slack 等其他平台放后续版本。
+- MCP 的高级管理（Catalog 一键安装、OAuth 登录流、`tools.include/exclude` 细过滤、mTLS / 自定义 CA）
+  - MVP 阶段 MCP Tab 只做列表 + 启用/禁用 + HTTP/stdio 简化添加 + 删除 + 缺密钥/连通失败红点状态。
+  - 创建时**不** strip 源专家经 `--clone` 带来的 `mcp_servers`（对齐 Hermes 默认行为）。
 - 专家列表页的搜索和筛选
   - MVP 阶段专家数量预期 < 50，不做搜索。
 - 任务统计、专家画像分析
@@ -144,10 +151,10 @@ Hermes 的 profile 机制已经足够灵活（一个 profile = 一个完整 HERM
 | 工作目录 | session `cwd` | `<HERMES_HOME>/state.db` sessions 表 | 否（per session） | 任务对话页 `_set_session_cwd` |
 | 任务 | `SessionDB.sessions` + `kanban_db.tasks.session_id` | `<HERMES_HOME>/state.db` + 共享 kanban DB | sessions 是 / kanban 共享 | `hermes sessions` / `hermes kanban` |
 | 记忆 | `MemoryManager` + `MemoryProvider` ABC + `MEMORY.md`/`USER.md` | `<HERMES_HOME>/memories/` + provider 后端 | 是 | `hermes memory setup` |
-| 技能 | `skills/` 目录 + `tools/skills_hub.py` + `build_skills_system_prompt()` | `<HERMES_HOME>/skills/` (SKILL.md 文件) | 是 | `hermes skills install` |
-| 工具（toolset） | `TOOLSETS` dict + `_HERMES_CORE_TOOLS` + `tools.<platform>.enabled/disabled` | `config.yaml` (toolsets/tools 段) | 是 | `hermes tools` |
-| 工具（MCP） | `mcp_servers` config + `hermes mcp` | `config.yaml` `mcp_servers` 段 | 是 | `hermes mcp` |
-| IM 渠道 | `BasePlatformAdapter` + 各平台配置 + `acquire_scoped_lock` | `config.yaml` (wecom/dingtalk/feishu...) + `.env` (tokens) | 是 | `hermes setup gateway` |
+| 技能 | `skills/` + `skills.disabled` + `tools/skill_usage.py` + Hub | `<HERMES_HOME>/skills/` + `.usage.json` | 是 | `hermes skills` / `hermes skills install` |
+| 工具 | `CONFIGURABLE_TOOLSETS` + `platform_toolsets.cli` + `_HERMES_CORE_TOOLS` | `config.yaml` → `platform_toolsets` | 是 | `hermes tools` / `GET/PUT /api/tools/toolsets` |
+| MCP | `mcp_servers` config | `config.yaml` `mcp_servers` 段 + `.env`（凭据） | 是 | 产品层 API 读写；底层兼容 `hermes mcp` |
+| IM 渠道 | `BasePlatformAdapter` + 各平台配置 + `acquire_scoped_lock` | `config.yaml` (`wecom` / `wecom_callback` / `dingtalk` / `feishu`…) + `.env` (tokens) | 是 | `hermes setup gateway` / Dashboard Channels |
 | 活动状态（活跃/待命） | session `status='running'` + `gateway.pid` PID 存活 | `<HERMES_HOME>/state.db` sessions 表 + `gateway.pid` | 是 | 观察值，非开关 |
 
 ### 4.0 活动状态（非启用/停用）
@@ -193,7 +200,7 @@ tags:                            # 领域标签，自由文本
 2. 领域标签是用户在创建向导中主动填的自由文本，天然用于分类和检索。
 3. 设计稿内容匹配领域标签。
 
-技能的真实数量在专家详情页 Tab 角标展示（如 `技能(2)`）。
+技能 Tab 角标展示**已启用**技能数（不在 `skills.disabled` 中的数量）。
 
 ### 4.3 工作空间与工作目录（本模块职责边界）
 
@@ -244,8 +251,9 @@ tags:                            # 领域标签，自由文本
    ├─ 任务 Tab
    ├─ 记忆 Tab（P1，MVP 只读）
    ├─ 技能 Tab
-   ├─ 工具 Tab
-   └─ IM 渠道 Tab（企业微信 / 钉钉 / 飞书，MVP 基础配置）
+   ├─ 工具 Tab（Hermes 内置 toolset）
+   ├─ MCP Tab（外部 MCP 服务，本模块内嵌轻量 CRUD）
+   └─ IM 渠道 Tab（企业微信两种 + 钉钉 / 飞书，MVP 基础配置）
 ```
 
 ### 5.2 页面跳转关系
@@ -268,7 +276,7 @@ tags:                            # 领域标签，自由文本
 
 - **任务对话页**：由 `task-session-mvp-prd.md` 定义。本 PRD 的「发起任务」和「任务 Tab 点击任务行」都跳转到该页面。
 - **项目看板**：由 `project-kanban-mvp-prd.md` 定义。本 PRD 不涉及项目结构，专家作为项目成员被 kanban PRD 引用。
-- **技能管理页 / 工具管理页**：本 PRD 的「技能」Tab 和「工具」Tab 是单专家维度的绑定管理，不替代全局的技能/工具管理页。
+- **技能管理页 / 工具管理页 / MCP 管理页**：本 PRD 的「技能」「工具」「MCP」Tab 是单专家维度的启停与配置入口。技能对齐 Hermes `skills.disabled`（opt-out）；工具对齐 `platform_toolsets.cli`（opt-in 列表 + 开关 UI），不另造「绑定」表。本产品**不依赖** Hermes Dashboard（如 `/mcp` McpPage）；MCP 的增删启停在专家详情「MCP」Tab 内完成。工具列表/启停优先复用 Dashboard 已有 `/api/tools/toolsets`。
 
 ## 6. 专家列表页
 
@@ -412,7 +420,7 @@ MVP 阶段不弹出任务表单，直接进入空白对话页，用户在对话�
 
 创建向导采用**单步弹窗**流程：用户在一张表单内完成「来源 + 身份信息 + 模型」三组配置，点击「创建并进入」提交。
 
-**设计动机**：四步向导在「创建专家」这个动作上太重。用户的真实使用路径是「先创建占位，进详情页边用边配置」。把人设/技能/工具/工作空间的精细化配置全部挪到详情页，弹窗只保留「让专家能被建出来并可工作」的最低字段。
+**设计动机**：四步向导在「创建专家」这个动作上太重。用户的真实使用路径是「先创建占位，进详情页边用边配置」。把人设/技能/工具/MCP/工作空间的精细化配置全部挪到详情页，弹窗只保留「让专家能被建出来并可工作」的最低字段。
 
 通用规则：
 
@@ -425,8 +433,9 @@ MVP 阶段不弹出任务表单，直接进入空白对话页，用户在对话�
 **弹窗内不出现**的字段（由详情页对应 Tab 接管）：
 
 - 人设（SOUL.md）→ 详情页「人设」Tab，默认留空。
-- 技能启用/解绑 → 详情页「技能」Tab，创建时全部 seed 并默认启用。
-- 工具集（toolset）、MCP 服务器 → 详情页「工具」Tab，默认继承 `_HERMES_CORE_TOOLS`。
+- 技能启停 → 详情页「技能」Tab（全部列表 + 开关），创建时全部 seed 并默认启用。
+- 工具集（toolset）→ 详情页「工具」Tab（全部可配置 + 开关），默认继承 `_HERMES_CORE_TOOLS`。
+- MCP 服务器 → 详情页「MCP」Tab。「从零开始」无预置；「复制」时保留 Hermes `--clone` 带来的 `mcp_servers`（产品层不 strip），缺密钥 / 连通失败用红色状态提示。
 - 工作空间根路径 → 详情页「工作空间」Tab，后端默认创建 `<HERMES_HOME>/workspace/`，（空目录，不预置子目录）。
 
 ### 7.2 弹窗字段
@@ -555,15 +564,22 @@ MVP 阶段不弹出任务表单，直接进入空白对话页，用户在对话�
    - 「从零开始」：不创建 `memories/MEMORY.md` / `USER.md`，目录保持空。
    - 「复制 default」/「复制其他专家」：若 `--clone` 已把源 profile 的 `memories/` 复制过来，产品层**清空**这两份文件（删除文件或清空内容，保留 `memories/` 空目录）。
    - 理由：MEMORY.md 是「专家经验」、USER.md 是「专家对该用户的认知」，属专家个人沉淀；A 专家的经验不应作为 B 专家的起点，否则会污染新专家的判断。这与 SOUL.md（人设，可继承）语义不同。
+8. 技能用量初始化（见 §8.9.6）：
+   - 「从零开始」：seed 后无用量记录 → 全部 0 / 「—」。
+   - 「复制 default」/「复制其他专家」：若 `--clone` 已拷贝源 profile 的 `skills/.usage.json`，产品层**删除或清空**该文件。
+   - 理由：用量是本专家自己的使用热度（per-profile），不应继承源专家。
 ```
 
 所有步骤同步执行，无 PID 轮询。任一步骤失败回滚（删除已创建的 profile 目录）。
 
 #### 7.7.2 技能与工具的默认行为
 
-- **技能**：创建时调用 `seed_profile_skills()`（已存在于 `hermes_cli/profiles.py`），把内置技能包（built-in + optional）全部 seed 到 `<HERMES_HOME>/skills/`，并默认**全部启用**（不写入 `disabled` 列表）。用户进详情页「技能」Tab 可逐项解绑或安装 hub 技能。
-- **工具（toolset）**：不显式写入 `tools.<platform>.enabled/disabled`，由 `_HERMES_CORE_TOOLS` 默认继承（`toolsets.py`）。用户进详情页「工具」Tab 可调整。
-- **MCP 服务器**：不在创建时配置。沿用 default profile 的 `mcp_servers` 不复制（MCP 服务器的 token / 凭据在 .env 中，跨 profile 共享存在安全风险）。用户进详情页「工具」Tab 单独配置。
+- **技能**：创建时调用 `seed_profile_skills()`（已存在于 `hermes_cli/profiles.py`），把内置技能包（built-in + optional）全部 seed 到 `<HERMES_HOME>/skills/`，并默认**全部启用**（不写入 `disabled` 列表）。用户进详情页「技能」Tab 以「全部 + 开关」启停，或从 Hub 安装；复制来源时清空 `.usage.json`（§8.9.6）。
+- **工具（toolset）**：创建时默认继承 `_HERMES_CORE_TOOLS`（不强制写满 `platform_toolsets.cli`）。用户进详情页「工具」Tab 以「全部可配置 + 开关」启停可选 toolset（落盘 `_save_platform_tools` / `platform_toolsets.cli`）。
+- **MCP 服务器**：
+  - 「从零开始」：不预置 `mcp_servers`。
+  - 「复制 default / 复制其他专家」：沿用 Hermes `hermes profile create --clone` / `--clone-from` 行为，**完整保留**源 profile `config.yaml` 中的 `mcp_servers`；产品层**不**再 strip。`--clone` 同时会复制 `.env`（Hermes 原生），产品层也不额外清除 MCP 相关密钥，以尽量不偏离 Hermes。
+  - 用户进详情页「MCP」Tab 查看 / 补密钥 / 启停 / 增删。若条目存在但缺必要密钥，或连通探测失败，UI 显示红色状态（见 §8.11.3）。
 
 #### 7.7.3 完成跳转
 
@@ -595,7 +611,7 @@ MVP 阶段建议扩展 `ProfileCreate` API（参考 §9.2），将单步向导�
 
 ### 8.1 定位
 
-专家详情页是单个专家的全维度管理界面，以 Tab 结构展示人设、工作空间、任务、记忆、技能、工具、IM 渠道七个维度。
+专家详情页是单个专家的全维度管理界面，以 Tab 结构展示人设、工作空间、任务、记忆、技能、工具、MCP、IM 渠道八个维度。
 
 ### 8.2 页面结构
 
@@ -606,7 +622,7 @@ MVP 阶段建议扩展 `ProfileCreate` API（参考 §9.2），将单步向导�
 │      与机器人编程调试的丰富项目经验。                               │
 │      [协作机器人应用] [AGV调度策略] [柔性产线布局]      (编辑)       │
 ├──────────────────────────────────────────────────────────────────────┤
-│ [人设] [工作空间] [任务·3] [记忆] [技能·2] [工具·1] [IM渠道·1]    │
+│ [人设] [工作空间] [任务·3] [记忆] [技能·2] [工具·1] [MCP·0] [IM渠道·1] │
 ├──────────────────────────────────────────────────────────────────────┤
 │                                                                      │
 │                       当前 Tab 内容区                                │
@@ -687,8 +703,9 @@ Tab 顺序及角标：
 | 工作空间 | 无角标 | P0 |
 | 任务 | 进行中 + 已就绪的任务数 | P0 |
 | 记忆 | 无角标 | P1（MVP 只读） |
-| 技能 | 已绑定技能数 | P0 |
-| 工具 | 已绑定 toolset 数 | P0 |
+| 技能 | 已启用技能数（∉ `skills.disabled`） | P0 |
+| 工具 | 已启用 toolset 数 | P0 |
+| MCP | 已启用 MCP 服务器数；若存在缺密钥/连通失败项，角标旁可加小红点 | P0 |
 | IM 渠道 | 已启用渠道数 | P0 |
 
 默认打开「人设」Tab。
@@ -725,19 +742,17 @@ Tab 顺序及角标：
 人设内容修改后点击「保存」：
 
 1. 写入 `<HERMES_HOME>/SOUL.md`。
-2. **默认下次会话生效**：当前正在运行的 session 不受影响，新 session 加载新的人设。
-3. 保存成功 toast 提示（根据运行中会话数动态展示）：
-   - 有运行中会话（N > 0）：「已保存。该专家当前有 N 个运行中会话，修改将在新会话生效。」
-   - 无运行中会话（N = 0）：「已保存。修改将在新会话生效。」
-4. 可选「立即生效」：勾选后丢弃所有运行中会话的 prompt 缓存，强制下次 API 调用重建系统提示词。确认弹窗文案：
-   - 有运行中会话（N > 0）：「立即生效会丢弃所有 N 个运行中会话的 prompt 缓存，增加成本。是否继续？」
-   - 无运行中会话（N = 0）：不需要额外确认（下次 API 调用自然重建）。
+2. **仅下次会话生效**（MVP **不提供**「立即生效」）：当前正在运行的 session 不受影响，只有新建 / 之后打开的 session 才会加载新人设。
+3. 保存成功后 **必须提示**用户生效时机（根据运行中会话数动态展示）：
+   - 有运行中会话（N > 0）：「已保存。修改将在**新会话**生效；该专家当前有 N 个运行中会话，仍使用旧人设。」
+   - 无运行中会话（N = 0）：「已保存。修改将在**新会话**生效。」
+4. 编辑器顶部常驻提示（保存前后均可见）：「人设变更默认在新会话生效，不影响已打开的对话。」
 
 此规则遵循 AGENTS.md 的「Prompt 缓存神圣不可破」约束。系统提示词一次会话内字节稳定，只在上下文压缩时重建。运行中会话数来源：`GET /api/profiles/<name>/sessions?status=running`。
 
 #### 8.5.5 模块说明
 
-顶部展示说明文字：「人设：定义专家的核心职责、工作流程与行为准则」。
+顶部展示说明文字：「人设：定义专家的核心职责、工作流程与行为准则。保存后默认在新会话生效。」
 
 ### 8.6 工作空间 Tab
 
@@ -878,14 +893,13 @@ P1 阶段补全：
 
 **手动编辑的生效规则（遵循 §10.1 prompt 缓存约束）**：
 
-手动新增/编辑/删除记忆等价于修改 `MEMORY.md` / `USER.md` 文件。`MemoryStore` 内容在会话启动时被快照进系统提示词 volatile 层（`agent/system_prompt.py`），会话内修改文件不影响已运行会话，新会话加载新内容。因此 P1 的手动编辑必须遵循与 §8.5.4 人设保存完全相同的规则：
+手动新增/编辑/删除记忆等价于修改 `MEMORY.md` / `USER.md` 文件。`MemoryStore` 内容在会话启动时被快照进系统提示词 volatile 层（`agent/system_prompt.py`），会话内修改文件不影响已运行会话，新会话加载新内容。因此 P1 的手动编辑与人设保存一致，**仅下次会话生效**（不提供「立即生效」）：
 
-1. **默认下次会话生效**：当前正在运行的 session 不受影响，新 session 加载新的记忆。
+1. **仅下次会话生效**：当前正在运行的 session 不受影响，新 session 加载新的记忆。
 2. 保存成功 toast 根据运行中会话数动态展示（文案同 §8.5.4）：
-   - 有运行中会话（N > 0）：「已保存。该专家当前有 N 个运行中会话，修改将在新会话生效。」
-   - 无运行中会话（N = 0）：「已保存。修改将在新会话生效。」
-3. 可选「立即生效」：勾选后丢弃所有运行中会话的 prompt 缓存，强制下次 API 调用重建系统提示词。确认弹窗文案同 §8.5.4。
-4. 运行中会话数来源：`GET /api/profiles/<name>/sessions?status=running`。
+   - 有运行中会话（N > 0）：「已保存。修改将在**新会话**生效；该专家当前有 N 个运行中会话，仍使用旧记忆。」
+   - 无运行中会话（N = 0）：「已保存。修改将在**新会话**生效。」
+3. 运行中会话数来源：`GET /api/profiles/<name>/sessions?status=running`。
 
 #### 8.8.3 架构约束
 
@@ -896,196 +910,452 @@ P1 阶段补全：
 
 #### 8.9.1 定位
 
-技能 Tab 管理该专家绑定的技能列表，支持查看、解绑、从 hub 安装新技能。
+技能 Tab 管理**该专家 profile 下已安装技能**的启停、用量观察与 Hub 安装。对齐 Hermes 原生模型，**不发明「绑定」概念**：
 
-#### 8.9.2 已绑定技能列表
+| Hermes 概念 | 产品表达 | 落盘 |
+|---|---|---|
+| 磁盘上有 `SKILL.md` | 已安装 | `<HERMES_HOME>/skills/`（+ optional / hub / external_dirs） |
+| 不在 `skills.disabled` | 已启用 | `config.yaml` → `skills.disabled`（**opt-out**） |
+| 在 `skills.disabled` | 已禁用 | 同上；**不删文件** |
+
+创建专家时 `seed_profile_skills()` 会装入内置技能并默认全部启用；本 Tab 的默认视图是 **全部已安装技能 + 启用开关**（与 Dashboard SkillsPage / `hermes skills` 一致），用户按需关闭不需要的技能，或从 Hub 安装新技能。
+
+#### 8.9.2 列表布局
 
 ```text
 技能
-管理专家绑定的业务技能
+管理本专家已安装的技能（启停 / 用量 / Hub 安装）
 
-已绑定 2 项技能                              [+ 添加技能]  [从 Hub 安装]
+已安装 N 项 · 已启用 M 项          [搜索]  [分类 ▾]  [从 Hub 安装]
 
-| 技能名              | 描述                | 类别     | 操作  |
-|---------------------|--------------------|----------|-------|
-| hermes-agent-dev    | Hermes 开发技能     | 开发     | 解绑  |
-| kanban              | 看板任务管理        | 生产力   | 解绑  |
+| 启用 | 技能名           | 描述              | 分类            | 使用 | 补丁 | 最近使用 | 来源    |
+|------|------------------|-------------------|-----------------|------|------|----------|---------|
+| [✓]  | plan             | Create…           | software-dev…   | 12   | 0    | 2 小时前 | bundled |
+| [✓]  | github-code-…   | Review PRs…       | github          | 3    | 1    | 昨天     | bundled |
+| [ ]  | apple-notes      | Manage Notes…     | apple           | 0    | 0    | —        | bundled |
 ```
 
-#### 8.9.3 添加技能（从已安装池）
+**默认视图**：全部已安装 + 每行启用开关（不默认只显示已启用）。支持：
 
-点击「+ 添加技能」弹出技能选择浮层：
+- 按名称 / 描述搜索。
+- 按**目录分类**筛选（见 §8.9.3）；「未分类」对应无 category 目录的技能。
+- 可选筛选：全部 / 仅已启用 / 仅已禁用。
+- 排序：默认按分类再按名称（对齐 `_sort_skills`）；可选按「最近使用」降序（从未使用沉底）。
 
-- 展示当前 profile 已安装但未绑定的技能列表。
-- 多选，确认后写入 `config.yaml` skills 段。
+Tab 角标：已启用数 `M`（不在 `skills.disabled` 中的数量）。
 
-#### 8.9.4 从 Hub 安装（异步）
+#### 8.9.3 字段来源（复用 Hermes，不另造元数据）
 
-点击「从 Hub 安装」打开 hub 技能搜索界面：
+| 列 | 来源 | 说明 |
+|---|---|---|
+| 技能名 | `SKILL.md` frontmatter `name`，缺省用目录名 | `_find_all_skills()` |
+| 描述 | frontmatter `description`；缺省取正文首行非标题文字；仍空则 UI 显示「暂无描述」 | **不**维护产品侧中文文案库 |
+| 分类 | 目录路径 `skills/<category>/<name>/SKILL.md` → `category`；无中间目录 → 未分类 | `_get_category_from_path()`；MVP 直接展示目录名（如 `github`、`productivity`），不做第二套分类树；后续可加薄显示名映射 |
+| 启用 | `name ∉ skills.disabled` | `get_disabled_skills` / `PUT …/toggle` |
+| 使用次数 | `<HERMES_HOME>/skills/.usage.json` → `use_count` | `tools/skill_usage.py`；**per-profile** |
+| 补丁次数 | 同上 → `patch_count` | `skill_manage` 编辑时 bump |
+| 最近使用 | 同上 → `last_used_at` | **仅**真正使用（`bump_use`）；不用 `latest_activity_at`（后者含 view/patch）。从未使用 → 「—」 |
+| 来源 | `hub` / `bundled` / `agent` | 与 Dashboard `GET /api/skills` 的 `provenance` 一致；用于角标与权限暗示（如 bundled 不可删） |
+
+**用量与 profile 绑定**：`.usage.json` 位于该专家自己的 `HERMES_HOME/skills/`，专家之间互不可见。Dashboard 现有 `GET /api/skills` 只返回折叠的 `usage = activity_count`（use+view+patch 之和）；本 Tab 需要拆开字段时，在 profile 作用域 API 上展开 `use_count` / `patch_count` / `last_used_at`（仍读同一 sidecar，不另建统计库）。`view_count` MVP 不展示。
+
+#### 8.9.4 启用 / 禁用
+
+行内开关切换启用状态：
+
+- **关闭**：把技能名写入 `config.yaml` → `skills.disabled`（不删除 `skills/` 下文件）。
+- **打开**：从 `skills.disabled` 移除。
+
+对齐现有 `PUT /api/skills/toggle`。操作遵循 prompt 缓存约束（§10.1），**仅下次会话生效**。toast：
+
+- 有运行中会话（N > 0）：「已启用/已禁用。该专家当前有 N 个运行中会话，修改将在新会话生效。」
+- 无运行中会话（N = 0）：「已启用/已禁用。修改将在新会话生效。」
+
+运行中会话数来源：`GET /api/profiles/<name>/sessions?status=running`。
+
+#### 8.9.5 从 Hub 安装（异步）
+
+点击「从 Hub 安装」打开 hub 技能搜索界面（复用现有 SkillsPage 异步安装 + 进度组件）：
 
 - 搜索 hub 上的技能。
-- 选中后调用 `hermes -p <profile> skills install <id>`（子进程，因为 `tools/skills_hub.py` 在模块导入时绑定 `SKILLS_DIR`，HERMES_HOME override 对已导入的全局变量无效）。
+- 选中后调用 `hermes -p <profile> skills install <id>`（子进程；`tools/skills_hub.py` 在模块导入时绑定 `SKILLS_DIR`，HERMES_HOME override 对已导入全局无效）。
 - 立即返回 PID，UI 展示安装进度。
-- 安装完成后技能自动绑定到当前专家。
+- 安装完成后技能出现在本列表，**默认启用**（不在 `disabled` 中）；用量从 0 / 「—」起算。
 
-此流程复用现有 SkillsPage 的异步安装 + 进度展示组件。
+MVP **不**提供「从已安装池多选绑定」浮层——已安装技能已在默认列表中，用开关启用/禁用即可。
 
-#### 8.9.5 解绑技能
+#### 8.9.6 创建 / 复制时的用量初始化
 
-点击「解绑」移除该技能的绑定（不删除技能文件，仅从 `config.yaml` skills 段移除启用标记）。操作完成后 toast 提示运行中会话状态：
+与记忆清空同理（§7.7.1）：用量是**本专家自己的使用热度**，不应继承源专家。
 
-- 有运行中会话（N > 0）：「已解绑。该专家当前有 N 个运行中会话，修改将在新会话生效。」
-- 无运行中会话（N = 0）：「已解绑。修改将在新会话生效。」
+- 「从零开始」：seed 后无 `.usage.json` 或为空 → 全部 0 / 「—」。
+- 「复制 default / 复制其他专家」：若 `--clone` 已拷贝源 profile 的 `skills/.usage.json`，产品层**删除或清空**该文件，避免继承源专家的 `use_count` / `last_used_at`。
 
-技能绑定/解绑遵循 prompt 缓存约束（§10.1），默认下次会话生效。运行中会话数来源：`GET /api/profiles/<name>/sessions?status=running`。
+技能文件本身（SKILL.md）按 Hermes seed / clone 规则保留；仅清用量 sidecar。
+
+#### 8.9.7 架构约束
+
+- **复用优先**：列表元数据走 `_find_all_skills`；启停走 `skills.disabled` + toggle API；用量走 `skill_usage.load_usage`；Hub 走现有子进程安装。不新建绑定表、不新建分类树、不新建用量库。
+- 启停 / 安装后的会话生效规则见 §10.1；Hub 异步性见 §10.3。
 
 ### 8.10 工具 Tab
 
 #### 8.10.1 定位
 
-工具 Tab 管理该专家可调用的 toolset 和 MCP 服务器。
+工具 Tab 管理该专家可调用的 **Hermes 内置 / 插件工具集（toolset）**。不包含外部 MCP 服务（见 §8.11）。
 
-#### 8.10.2 布局
+对齐 Dashboard / `hermes tools`：**列出全部可配置 toolset + 行内启用开关**，不发明「绑定 / 解绑」心智。
+
+| Hermes 概念 | 产品表达 | 落盘 |
+|---|---|---|
+| `_get_effective_configurable_toolsets()` 中的项 | 可配置工具集（含插件 toolset） | — |
+| 在 `platform_toolsets.cli` 中 | 已启用 | `config.yaml` → `platform_toolsets.cli`（**opt-in 列表**） |
+| 不在该列表中 | 已禁用 | 同上；不删除 toolset 实现 |
+| `_HERMES_CORE_TOOLS` | 核心工具（始终可用基线） | 创建时默认继承；本 Tab「额外启用数」为 0 时专家仍有核心能力 |
+
+与技能的差异（写进 PRD 以免混用）：技能是 `skills.disabled` **opt-out**；工具是 `platform_toolsets.cli` **opt-in**。UI 都用「全部 + 开关」，但落盘路径不同。
+
+工具与 MCP 对照：
+
+| | 工具（本 Tab） | MCP（§8.11） |
+|---|---|---|
+| 是什么 | Hermes 内置 / 插件能力包 | 外部 MCP 服务暴露的工具 |
+| 配置键 | `platform_toolsets.cli`（经 `_save_platform_tools`） | `mcp_servers.<name>` |
+| 操作形态 | 全部列表 + 开关（+ 缺密钥时配置） | 增删服务器 + 启停 + 连接 |
+| 用量统计 | **无**（不做 use_count / 最近使用） | — |
+
+#### 8.10.2 列表布局
 
 ```text
 工具
-管理专家可调用的工具集与外部服务
+管理本专家可调用的 Hermes 内置工具集
+当前有 N 个运行中会话，变更将在新会话生效
 
-已配给 1 个 toolset                            [+ 添加工具]
+已启用 M / 共 K 个                              [搜索]
 
-| 工具集              | 描述                | 工具数 | 操作  |
-|---------------------|--------------------|--------|-------|
-| terminal            | 终端执行            | 5      | 解绑  |
-
-MCP 服务器
-| 服务器名            | 状态   | 操作          |
-|---------------------|--------|---------------|
-| filesystem          | 已连接 | 管理 解绑     |
+| 启用 | 工具集            | 描述              | 工具数 | 就绪     | 操作 |
+|------|-------------------|-------------------|--------|----------|------|
+| [✓]  | Terminal          | Terminal/command… | 5      | 🟢       | 详情 |
+| [ ]  | Browser           | Browser automati… | 12     | 🟢       | 详情 |
+| [✓]  | Web               | Web research…     | 2      | 🔴 缺密钥 | 配置 |
 ```
 
-#### 8.10.3 添加工具
+**默认视图**：全部可配置 toolset + 每行启用开关（与 `GET /api/tools/toolsets` / Dashboard 一致）。支持按名称 / 描述 / label 搜索；可选筛选全部 / 仅已启用 / 仅已禁用。
 
-点击「+ 添加工具」弹出工具选择浮层：
+Tab 角标：已启用数 `M`（`platform_toolsets.cli` 中的可配置 toolset 数）。
 
-- 展示 `TOOLSETS` dict 中所有可用 toolset。
-- 多选，确认后写入 `config.yaml` toolsets 段。
+顶部说明必须讲清核心基线：
 
-#### 8.10.4 MCP 服务器管理
+> 未额外开启可选工具集时，专家仍可使用默认核心工具（`_HERMES_CORE_TOOLS`：文件、终端、搜索等）。本列表用于开启 browser、vision、web 等可选能力。
 
-- 展示当前 profile 已配置的 MCP 服务器列表。
-- 「管理」跳转 `hermes mcp` 命令的对应 UI（MVP 不在专家详情页内做 MCP 配置表单）。
-- 「解绑」从 `config.yaml` `mcp_servers` 段移除该服务器引用（不删除服务器配置）。
+**不做**「+ 添加工具」浮层、「解绑」操作——已列出全部项，开关即启停。
 
-#### 8.10.5 架构约束
+#### 8.10.3 字段来源（复用 Hermes，不另造元数据）
 
-- **Footprint Ladder**（AGENTS.md）：工具能力扩展优先级为 extend existing code → CLI+skill → service-gated tool → plugin → MCP server → new core tool（last resort）。工具 Tab 应优先暴露 MCP 服务器和插件，不发明新的 core tool。
-- 工具集变更遵循 prompt 缓存约束：默认下次会话生效。
-- 工具添加/解绑后 toast 提示运行中会话状态：
-  - 有运行中会话（N > 0）：「已添加/已解绑。该专家当前有 N 个运行中会话，修改将在新会话生效。」
-  - 无运行中会话（N = 0）：「已添加/已解绑。修改将在新会话生效。」
-  - 运行中会话数来源：`GET /api/profiles/<name>/sessions?status=running`。
+数据优先复用现有 `GET /api/tools/toolsets?profile=<name>`（或专家模块等价封装），字段来自 `_get_effective_configurable_toolsets` + `resolve_toolset` + `_toolset_has_keys`：
 
-### 8.11 IM 渠道 Tab
+| 列 | 来源 | 说明 |
+|---|---|---|
+| 启用 | `enabled`（name ∈ `platform_toolsets.cli`） | 行内开关 |
+| 工具集 | `label` 为主标题，`name` 为次要 ID | `gui_toolset_label`；**禁止**主副标题同文案重复堆叠 |
+| 描述 | `description` | TOOLSETS / 可配置表自带文案；空则「暂无描述」。不维护产品侧第二套中文库（MVP） |
+| 工具数 | `len(tools)` | `resolve_toolset(name)`；可点开「详情」展开 `tools[]` 名单 |
+| 就绪 | `configured` | 需密钥的 toolset：齐全 🟢 / 缺密钥 🔴「缺密钥」；无需密钥则 🟢 或不展示 |
+| 操作 | 详情 / 配置 | 缺密钥时「配置」打开配置抽屉（复用 Dashboard `ToolsetConfigDrawer` 能力：provider / env） |
+
+**明确不做**：toolset 级使用次数、最近使用——Hermes 无对应 sidecar，不另建统计。
+
+#### 8.10.4 启用 / 禁用
+
+行内开关：
+
+- **打开**：把 toolset name 加入 `platform_toolsets.cli`（经 `_save_platform_tools`，与 `hermes tools` / `PUT /api/tools/toolsets/{name}` 同路径）。
+- **关闭**：从该列表移除（不删除工具实现代码）。
+
+遵循 prompt 缓存约束（§10.1），**仅下次会话生效**。toast：
+
+- 有运行中会话（N > 0）：「已启用/已禁用。该专家当前有 N 个运行中会话，修改将在新会话生效。」
+- 无运行中会话（N = 0）：「已启用/已禁用。修改将在新会话生效。」
+
+运行中会话数来源：`GET /api/profiles/<name>/sessions?status=running`。
+
+#### 8.10.5 缺密钥配置（P1 可做，MVP 至少红点）
+
+- MVP：列表展示 `configured` 红点 +「缺密钥」文案，引导用户补全。
+- 推荐同步复用现有 toolset config API（`GET/PUT /api/tools/toolsets/{name}/config|env|provider`）在本 Tab 内打开配置抽屉，避免跳转 CLI。
+- 配置变更同样提示新会话生效。
+
+#### 8.10.6 架构约束
+
+- **复用优先**：列表 / 启停 / 密钥状态走 Dashboard tools API + `hermes_cli/tools_config.py`，不新建绑定表、不另造描述库、不做用量统计。
+- **Footprint Ladder**（AGENTS.md）：本 Tab **不发明新 core tool**；外部能力走 MCP（§8.11）。
+- 列表范围 = 可配置 toolset（`CONFIGURABLE_TOOLSETS` + 插件 toolset），不含平台聚合包（如整包 `cli` / `messaging`）的二次暴露，除非已出现在可配置表中。
+- 启停生效规则见 §10.1。
+
+### 8.11 MCP Tab
 
 #### 8.11.1 定位
 
-IM 渠道 Tab 让专家能通过 IM 平台被用户触达。MVP 阶段支持**企业微信、钉钉、飞书**三个渠道的启用/禁用 + 凭据配置 + 基础访问策略。专家配置好 IM 渠道后，用户在 IM 端 @机器人或私聊即可与该专家对话（由 gateway 路由到对应 profile 的 session）。
+MCP Tab 管理该专家连接的 **外部 MCP 服务**（Model Context Protocol）。配置落在本 profile 的 `config.yaml` → `mcp_servers`，凭据进 `.env`。
 
-三个渠道均已在 Hermes 中实现为 `plugins/platforms/` 下的平台适配器，本 Tab 是这些适配器配置的可视化入口，不重做底层机制。
+本产品**不依赖** Hermes Web Dashboard 的 `McpPage`（`/mcp`），也不要求用户跳转 CLI。MCP 的增删启停在本 Tab **内嵌轻量完成**（方案 B）。
 
 #### 8.11.2 MVP 范围
 
-- 支持三个渠道：**企业微信（wecom）**、**钉钉（dingtalk）**、**飞书（feishu）**。
-- 左栏：渠道列表，每个渠道一张卡片，展示渠道图标 + 名称 + 启用开关 + 连接状态。
-- 右栏：选中渠道的配置区，按渠道展示对应凭据字段 + 基础访问策略 + 保存按钮 + 设置指南链接。
-- 启用/禁用开关：开启后该渠道纳入 gateway 启动加载的平台列表；关闭后 gateway 不加载该渠道。
-- 凭据保存后提示「需重启 gateway 生效」，并提供「重启 gateway」按钮（调用 `hermes -p <profile> gateway restart`）。
-- Telegram、Discord、Slack 等其他平台放后续版本，MVP 不在 UI 暴露（仍可通过 `hermes setup gateway` CLI 配置）。
+MVP 包含：
 
-MVP 不做：消息路由规则、群聊精细化策略（per-group allowlist/blacklist UI 编辑）、送达统计、消息模板、AI Card 模板配置。
+- 已配置服务器列表（名称、传输类型、启用状态、连接/密钥状态）
+- 启用 / 禁用（写 `mcp_servers.<name>.enabled`）
+- 添加服务器（简化表单：HTTP 或 stdio）
+- 删除服务器（从 `mcp_servers` 移除条目；**不删除** `.env` 中可能残留的凭据，避免误伤）
+- **状态红点**：缺必要 API Key / 密钥，或连通探测失败时显示红色状态，引导用户补全或修复
 
-#### 8.11.3 渠道列表布局
+MVP 不包含（放入 v1.1）：
+
+- Catalog / 官方目录一键安装
+- OAuth 登录流（`hermes mcp login`）
+- `tools.include` / `tools.exclude` 细粒度过滤
+- mTLS、自定义 CA、`ssl_verify` 高级 TLS
+- 完整连接诊断面板
+
+#### 8.11.3 布局与状态模型
+
+```text
+MCP
+接入外部 MCP 服务，扩展专家可调用的外部工具
+
+已启用 2 台 · 其中 1 台需处理                     [+ 添加]
+
+| 服务器名     | 类型  | 状态              | 操作              |
+|--------------|-------|-------------------|-------------------|
+| filesystem   | stdio | 🟢 正常           | 禁用  删除        |
+| github-api   | HTTP  | 🔴 未配置密钥     | 填写密钥  禁用 删除 |
+| legacy-fs    | stdio | 🔴 连接失败       | 重试  禁用  删除  |
+| old-svc      | HTTP  | — 已禁用          | 启用  删除        |
+
+(空状态)
+尚未接入外部 MCP 服务。MCP 用于连接 GitHub、数据库、文件系统等外部工具。
+点击「添加」配置一台服务。
+```
+
+**状态约定（MVP）：**
+
+| 状态 | 条件 | UI |
+|---|---|---|
+| 🟢 正常 | `enabled: true`，必要密钥已具备，且连通探测成功（或 MVP 暂不做探测时：密钥齐全即视为正常） | 绿色 |
+| 🔴 未配置密钥 | `mcp_servers` 有条目，但所需 API Key / token / 必要 env 缺失或为空 | 红色 + 文案「未配置密钥」；提供「填写密钥」入口 |
+| 🔴 连接失败 | 密钥齐全但连通探测失败（路径无效、服务不可达、命令错误等） | 红色 + 简短错误摘要；提供「重试」 |
+| — 已禁用 | `enabled: false` | 灰色；**不计入** Tab 角标「已启用数」 |
+
+**缺密钥判定（启发式，产品层）：**
+
+- `mcp_servers.<name>.env` 中引用的变量在 `.env` 中不存在或值为空。
+- HTTP 类服务器声明了需要 Authorization / API Key，但 headers / `.env` 对应键缺失。
+- 用户手动「添加」时勾选了密钥字段却未填写。
+
+复制来源创建后：Hermes `--clone` 会同时复制 `config.yaml`（含 `mcp_servers`）与 `.env`。若密钥已随 `.env` 拷贝齐全，条目可直接为 🟢；若源配置本身就不完整，或 stdio `args` 中的绝对路径对新专家无效，则显示 🔴，由用户在本 Tab 修复——**产品层不因此删除 `mcp_servers`**。
+
+Tab 角标：已启用服务器数（`enabled: true`）；可选在角标旁用小红点表示「存在需处理项」（缺密钥或连接失败），避免角标数字被污染。
+
+#### 8.11.4 添加服务器（简化表单）
+
+点击「+ 添加」弹出表单：
+
+| 字段 | 必填 | 说明 |
+|---|---|---|
+| 名称 | 是 | 写入 `mcp_servers` 的 key；`^[a-z0-9][a-z0-9_-]{0,63}$`；不可与已有重名 |
+| 类型 | 是 | `HTTP` 或 `本地命令（stdio）` |
+| URL | 类型=HTTP 时必填 | 写入 `url` |
+| Command | 类型=stdio 时必填 | 写入 `command` |
+| Args | 否 | 空格/逗号分隔，写入 `args` 列表 |
+| Env | 否 | 多行 `KEY=VALUE`；非密钥可写 `mcp_servers.<name>.env`，密钥建议写入 `.env`（产品层按 key 名启发式或用户勾选「作为密钥」） |
+| 启用 | 默认开 | 写入 `enabled: true/false` |
+
+提交后同步写入本 profile 的 `config.yaml`。不调用 Dashboard API；由本模块后端（HERMES_HOME override 或 profile-scoped API）落盘。若必填密钥未填，保存后该行立即显示 🔴 未配置密钥。
+
+#### 8.11.5 启用 / 禁用 / 删除
+
+- **启用/禁用**：切换 `mcp_servers.<name>.enabled`。
+- **填写密钥**：针对 🔴 未配置密钥，弹出密钥表单，写入 `.env`（或更新 `env`），保存后重新判定状态。
+- **删除**：从 `mcp_servers` 删除该 key；二次确认「确定删除 MCP 服务『xxx』？删除后专家将无法调用该服务暴露的工具。」；不自动清理 `.env`。
+- 变更后 toast：默认提示「将在新会话生效」；若有运行中会话，附带 N 的说明（同工具 Tab）。
+
+#### 8.11.6 与创建向导 / Hermes clone 的关系
+
+原则：**尽量不改 Hermes 原有行为**。
+
+| 创建来源 | `mcp_servers` | `.env`（含 MCP 密钥） | 产品层动作 |
+|---|---|---|---|
+| 从零开始 | 空 | 新建空/占位 `.env` | 不预置 MCP |
+| 复制 default / 复制其他专家 | **保留**（随 `--clone` 拷贝 `config.yaml`） | **保留**（随 `--clone` 拷贝 `.env`） | **不 strip** `mcp_servers`，不额外清 MCP 密钥 |
+
+- 用户在 MCP Tab 看到从源专家继承的服务器列表；缺密钥或连通失败用红色状态引导修复，而不是创建时静默丢掉配置。
+- 工作空间根仍按产品策略重写为 `<HERMES_HOME>/workspace/`（与 MCP 无关）；stdio `args` 若含源专家绝对路径，可能表现为 🔴 连接失败，文案提示检查路径。
+
+#### 8.11.7 架构约束
+
+- 落盘格式对齐 Hermes `mcp_servers` 原生结构，保证 CLI `hermes -p <name> mcp` 与产品 UI 读写同一份配置。
+- 创建路径对齐 Hermes `--clone`：**不**在产品层删除已 clone 的 `mcp_servers`。
+- 不发明新的 core tool；外部能力优先走 MCP（Footprint Ladder）。
+- 本 Tab 是专家管理模块的自建 UI，**不是**对 Hermes Dashboard `McpPage` 的嵌入或跳转。
+
+### 8.12 IM 渠道 Tab
+
+#### 8.12.1 定位
+
+IM 渠道 Tab 让专家能通过 IM 平台被用户触达。MVP 阶段支持以下平台的启用/禁用 + 凭据配置 + 基础访问策略：
+
+| platform id | 产品名 | Hermes 适配器 |
+|---|---|---|
+| `wecom` | 企业微信 · AI Bot | `plugins/platforms/wecom` → `WeComAdapter`（WebSocket） |
+| `wecom_callback` | 企业微信 · 自建应用 | 同插件 → `WecomCallbackAdapter`（HTTP 回调） |
+| `dingtalk` | 钉钉 | `plugins/platforms/dingtalk` |
+| `feishu` | 飞书 / Lark | `plugins/platforms/feishu` |
+
+专家配置好 IM 渠道后，用户在 IM 端 @机器人或私聊即可与该专家对话（由 gateway 路由到对应 profile 的 session）。本 Tab 是上述已注册适配器的可视化配置入口，不重做底层机制。优先复用 Dashboard `ChannelsPage` / `GET|PUT /api/messaging/platforms?profile=`（MVP 过滤上述四个 id）。
+
+> **为什么企业微信要拆成两项**：Hermes 将两种接入方式注册为**两个独立 platform**（不同凭据、不同连接模型、不同 `platforms.<name>.enabled`）。产品层左栏须分开展示，避免用户把「智能机器人 Bot ID」填进「自建应用 Corp ID」表单。同一专家可以只开其中一种，也可以两种都开（互不替代）。
+
+#### 8.12.2 MVP 范围
+
+- 支持四个渠道条目：**企业微信 AI Bot（wecom）**、**企业微信自建应用（wecom_callback）**、**钉钉（dingtalk）**、**飞书（feishu）**。
+- 左栏：渠道列表，每条展示图标 + 名称 + 启用开关 + 连接状态（建议对齐 Hermes messaging `state`：`connected` / `disabled` / `not_configured` / `pending_restart` / `gateway_stopped` / `fatal` 等）。
+- 右栏：选中渠道的配置区，按渠道展示对应凭据字段 + 基础访问策略 + 保存 / 测试连接 / 设置指南；保存后「重启 gateway」。
+- 启用/禁用开关：写入 `platforms.<name>.enabled`；关闭后 gateway 不加载该适配器。
+- 凭据保存后提示「需重启 gateway 生效」（`pending_restart`），并提供「重启 gateway」按钮（`hermes -p <profile> gateway restart` 或 Dashboard 等价 API）。
+- Telegram、Discord、Slack、个人微信（`weixin`）等其他平台放后续版本，MVP 不在 UI 暴露（仍可通过 `hermes setup gateway` / Dashboard Channels 全量页配置）。
+
+MVP 不做：消息路由规则、群聊精细化策略（per-group allowlist/blacklist UI 编辑）、送达统计、消息模板、AI Card 模板配置；`wecom_callback` 的多应用 `apps[]` 高级编排（MVP 只做单应用扁平凭据）。
+
+#### 8.12.3 渠道列表布局
 
 ```text
 IM 渠道
-配置专家可被触达的 IM 渠道（企业微信 / 钉钉 / 飞书）
+配置专家可被触达的 IM 渠道（企业微信两种形态 / 钉钉 / 飞书）
 
-┌────────────────────────┐  ┌──────────────────────────────────────┐
-│ 渠道                    │  │ 企业微信 (WeCom)                      │
-│                        │  │ 💼 连接中 · 已启用                     │
-│ 💼 企业微信    [开] 🟢  │  │                                        │
-│ 🐳 钉钉       [关] —  │  │ 凭据配置                              │
-│ 🪽 飞书       [开] 🟢  │  │  Bot ID:    [****************]        │
-│                        │  │  Secret:    [****************]        │
-│ (MVP 仅以上 3 个)       │  │                                        │
-│                        │  │ 访问策略                              │
-│                        │  │  DM 策略: [配对模式 ▾]                │
-│                        │  │  允许用户: [user_id_1, ...]          │
-│                        │  │                                        │
-│                        │  │  [设置指南 ↗]       [保存]            │
-│                        │  │  ⚠ 保存后需重启 gateway 生效          │
-└────────────────────────┘  └──────────────────────────────────────┘
+┌────────────────────────────┐  ┌──────────────────────────────────────┐
+│ 渠道                        │  │ 企业微信 · AI Bot                     │
+│                            │  │ 💼 WebSocket · 已启用 · 待重启        │
+│ 💼 企业微信 · AI Bot  [开] │  │                                        │
+│ 💼 企业微信 · 自建应用 [关] │  │ 凭据配置                              │
+│ 🐳 钉钉             [关] │  │  Bot ID / Secret …                     │
+│ 🪽 飞书             [开] │  │                                        │
+│                            │  │ 访问策略（折叠）                       │
+│ (MVP 仅以上 4 个)           │  │  [设置指南] [测试连接] [保存] [重启]   │
+└────────────────────────────┘  └──────────────────────────────────────┘
 ```
 
 渠道卡片元素：
 
 | 卡片元素 | 数据来源 | 说明 |
 |---|---|---|
-| 渠道图标 | 平台 `emoji`（注册时声明） | 企业微信 💼、钉钉 🐳、飞书 🪽 |
-| 渠道名称 | 平台 `label` | 「企业微信 (WeCom)」「钉钉 (DingTalk)」「飞书 (Feishu/Lark)」 |
-| 启用开关 | `config.yaml` `platforms.<name>.enabled` | 开/关，对应 gateway 是否加载该平台 |
-| 连接状态 | 平台 `is_connected(config)` + gateway 运行时探测 | 🟢 连接中 / 🔴 未连接 / — 已禁用 |
+| 渠道图标 | 平台 `emoji` | 企业微信两种均为 💼；钉钉 🐳；飞书 🪽 |
+| 渠道名称 | 平台 `label` | 「企业微信 · AI Bot」「企业微信 · 自建应用」「钉钉」「飞书」 |
+| 启用开关 | `platforms.<name>.enabled` | 开/关 |
+| 连接状态 | messaging API `state` + runtime | 见 §8.12.2；勿仅用蓝/灰两点掩盖 `pending_restart` / `not_configured` |
 
-连接状态判定：
+#### 8.12.4 各渠道凭据与配置详情
 
-- **已禁用**：`platforms.<name>.enabled != true` → 显示「—」。
-- **连接中** 🟢：已启用 + gateway 进程存活 + 平台 `is_connected()` 返回 true（凭据已配置且适配器握手成功）。
-- **未连接** 🔴：已启用但凭据缺失、gateway 未运行、或适配器握手失败。
+四个渠道条目的凭据 / 访问策略均对齐 Hermes 已有适配器与 messaging catalog。凭据写入 `<HERMES_HOME>/.env`，行为配置写入 `<HERMES_HOME>/config.yaml` 的 `platforms.<name>` 段。
 
-#### 8.11.4 各渠道凭据与配置详情
+##### 8.12.4.1 企业微信 · AI Bot（`wecom`）
 
-三个渠道的凭据字段、访问策略字段均对齐 Hermes 已有适配器实现。凭据写入 `<HERMES_HOME>/.env`，行为配置写入 `<HERMES_HOME>/config.yaml` 的 `platforms.<name>` 段。
-
-##### 8.11.4.1 企业微信（wecom）
-
-企业微信 AI Bot 走 WebSocket 长连接，**无需公网回调端点**，适合内网/本地部署。
+企业微信 **智能机器人 / AI Bot** 走 WebSocket 长连接（`WeComAdapter`），**无需公网回调端点**，适合内网/本地部署。
 
 **凭据（写入 `.env`）：**
 
 | 字段 | 环境变量 | 必填 | 说明 |
 |---|---|---|---|
-| Bot ID | `WECOM_BOT_ID` | 是 | 企业微信 AI Bot 的 bot_id |
+| Bot ID | `WECOM_BOT_ID` | 是 | 智能机器人 bot_id |
 | Secret | `WECOM_SECRET` | 是 | 对应 secret |
 
-获取方式：企业微信管理后台 → 应用工作台 → 智能机器人 → 创建智能机器人 → 选 API 模式，复制 Bot ID 和 Secret。Hermes CLI 的 `hermes setup gateway` 已支持扫码自动获取（`qr_scan_for_bot_info()`），本 Tab 提供等价的「扫码获取」入口（跳转到一个扫码引导浮层或调用 `hermes -p <profile> gateway setup wecom` 子进程）。
+获取方式：企业微信管理后台 → 应用工作台 → 智能机器人 → 创建智能机器人 → 选 API 模式，复制 Bot ID 和 Secret。Hermes CLI 已支持扫码自动获取（`qr_scan_for_bot_info()`）；MVP 可先手动填写，P1 再提供扫码浮层 / `hermes -p <profile> gateway setup wecom` 子进程。
 
-**访问策略（写入 `.env`，作为基础策略）：**
+**访问策略（写入 `.env`）：**
 
 | 字段 | 环境变量 | 默认 | 选项 | 说明 |
 |---|---|---|---|---|
 | DM 策略 | `WECOM_DM_POLICY` | `pairing` | `open` / `allowlist` / `pairing` / `disabled` | 私聊准入策略 |
-| 允许用户 | `WECOM_ALLOWED_USERS` | 空 | 逗号分隔 user_id 列表 | `allowlist` 模式下生效 |
+| 允许用户 | `WECOM_ALLOWED_USERS` | 空 | 逗号分隔 user_id | `allowlist` 模式下生效 |
 | 开放访问 | `WECOM_ALLOW_ALL_USERS` | 空 | `true`/`false` | `open` 模式下需设为 true |
 | Home 渠道 | `WECOM_HOME_CHANNEL` | 空 | chat_id | cron/通知默认投递渠道 |
 
-> 群聊策略（`group_policy`、`group_allow_from`、per-group `groups` 配置）属高级管理，MVP 不在 UI 暴露，走 `config.yaml` `platforms.wecom.extra` 手动配置或 `hermes setup gateway`。
+> 群聊策略（`group_policy`、`group_allow_from`、per-group `groups`）属高级管理，MVP 不在 UI 暴露。
 
-**config.yaml 结构（启用开关 + extra 行为配置）：**
+**config.yaml：**
 
 ```yaml
 platforms:
   wecom:
     enabled: true
     extra:
-      bot_id: "..."          # 可选：与 WECOM_BOT_ID env 二选一，env 优先级更高
-      secret: "..."          # 可选：与 WECOM_SECRET env 二选一
+      bot_id: "..."          # 可选：与 WECOM_BOT_ID env 二选一，env 优先
+      secret: "..."
       websocket_url: "wss://openws.work.weixin.qq.com"
-      dm_policy: "pairing"   # 可选：与 WECOM_DM_POLICY env 二选一
+      dm_policy: "pairing"
 ```
 
-**连接检查**：`is_connected` = `extra.bot_id` 已配置 或 `WECOM_BOT_ID` env 已设置。
+**连接检查**：`WECOM_BOT_ID`（及 Secret）已配置；runtime `state=connected` 表示 WebSocket 握手成功。
 
-##### 8.11.4.2 钉钉（dingtalk）
+##### 8.12.4.2 企业微信 · 自建应用回调（`wecom_callback`）
+
+企业微信 **自建应用** 走 HTTP 回调（`WecomCallbackAdapter`），gateway 在本机监听回调端口，**需要企业微信能访问到该回调地址**（公网或内网穿透）。与 AI Bot 是不同 platform，凭据命名空间完全独立（`WECOM_CALLBACK_*`）。
+
+**凭据（写入 `.env`）：**
+
+| 字段 | 环境变量 | 必填 | 说明 |
+|---|---|---|---|
+| Corp ID | `WECOM_CALLBACK_CORP_ID` | 是 | 企业 ID |
+| Corp Secret | `WECOM_CALLBACK_CORP_SECRET` | 是 | 应用 Secret |
+| Agent ID | `WECOM_CALLBACK_AGENT_ID` | 是 | 应用 AgentId |
+| Token | `WECOM_CALLBACK_TOKEN` | 建议 | 回调 URL 校验 Token（与企微后台一致） |
+| EncodingAESKey | `WECOM_CALLBACK_ENCODING_AES_KEY` | 建议 | 回调加解密密钥 |
+
+获取方式：企业微信管理后台 → 应用管理 → 自建应用 → 复制 CorpId / Secret / AgentId；在「接收消息」里配置回调 URL，并填写 Token / EncodingAESKey。
+
+**连接相关（写入 `.env` 或 `platforms.wecom_callback.extra`）：**
+
+| 字段 | 环境变量 / extra | 默认 | 说明 |
+|---|---|---|---|
+| 监听 Host | `WECOM_CALLBACK_HOST` / `extra.host` | 适配器默认 | 回调服务绑定地址 |
+| 监听 Port | `WECOM_CALLBACK_PORT` / `extra.port` | 适配器默认（如 8645） | 须在企微后台回调 URL 中可达；端口占用会导致启动失败 |
+
+MVP UI：展示 Host/Port（只读或可编辑）+ 提示「须保证企业微信服务器能访问到该回调地址」；多应用 `extra.apps[]` 编排放 v1.1。
+
+**访问策略（写入 `.env`）：**
+
+| 字段 | 环境变量 | 默认 | 说明 |
+|---|---|---|---|
+| 允许用户 | `WECOM_CALLBACK_ALLOWED_USERS` | 空 | 逗号分隔 user_id；`*` = 任意 |
+| 开放访问 | `WECOM_CALLBACK_ALLOW_ALL_USERS` | 空 | `true`/`false` |
+
+**config.yaml：**
+
+```yaml
+platforms:
+  wecom_callback:
+    enabled: true
+    extra:
+      corp_id: "..."
+      corp_secret: "..."
+      agent_id: "..."
+      token: "..."
+      encoding_aes_key: "..."
+      host: "0.0.0.0"
+      port: 8645
+      path: "/wecom/callback"   # 若适配器支持 path，与企微后台 URL 路径一致
+```
+
+**连接检查**：`corp_id`（或 `extra.apps`）已配置且回调服务监听成功；缺公网可达性时可能表现为 `startup_failed` / `disconnected`，UI 应用 `error_message` 提示。
+
+**与 `wecom` 的选用指引（设置指南 / 空状态文案）：**
+
+| 场景 | 建议 |
+|---|---|
+| 内网部署、不想暴露公网端口、用智能机器人 | 选 **AI Bot（`wecom`）** |
+| 已有自建应用、需要经典回调模式、可暴露回调 URL | 选 **自建应用（`wecom_callback`）** |
+
+##### 8.12.4.3 钉钉（`dingtalk`）
 
 钉钉走 Stream Mode（`dingtalk-stream` SDK 的 WebSocket 长连接），**无需公网回调端点**。
 
@@ -1123,7 +1393,7 @@ platforms:
 
 **连接检查**：`DINGTALK_CLIENT_ID` 和 `DINGTALK_CLIENT_SECRET` env 均已设置。
 
-##### 8.11.4.3 飞书（feishu）
+##### 8.12.4.4 飞书（`feishu`）
 
 飞书支持 WebSocket 和 Webhook 两种连接模式，**WebSocket 模式无需公网端点**（默认推荐）。
 
@@ -1173,7 +1443,7 @@ platforms:
 
 **连接检查**：`FEISHU_APP_ID` 和 `FEISHU_APP_SECRET` env 均已设置。
 
-#### 8.11.5 启用/禁用与生效流程
+#### 8.12.5 启用/禁用与生效流程
 
 1. 用户在渠道卡片切换「启用」开关。
 2. 若开启：右栏凭据表单变为可编辑，用户填写凭据 + 访问策略，点击「保存」。
@@ -1187,32 +1457,34 @@ platforms:
 
 > **为什么需要重启 gateway**：Gateway 在启动时根据 `platforms.<name>.enabled` 加载平台适配器并建立长连接（WebSocket/Stream）。运行时增删平台涉及连接生命周期管理，MVP 不做热加载，统一走重启。这与 §10.9「Gateway 运行时配置变更需重启 gateway 进程才生效」一致。
 
-#### 8.11.6 凭据互斥校验
+#### 8.12.6 凭据互斥校验
 
-保存凭据时，后端调用 `acquire_scoped_lock()`（AGENTS.md 规定的 platform adapter 锁机制）校验凭据唯一性：
+保存凭据时，后端校验凭据唯一性（连接时由适配器 `acquire_scoped_lock()` 强制；产品层保存前也应预检，避免配完才发现冲突）：
 
-- 企业微信：以 `bot_id` 作为锁标识。
+- 企业微信 AI Bot（`wecom`）：以 `bot_id`（`WECOM_BOT_ID`）作为锁标识。
+- 企业微信自建应用（`wecom_callback`）：以 `corp_id`（`WECOM_CALLBACK_CORP_ID`，可含 agent 维度）作为锁标识。
 - 钉钉：以 `client_id` 作为锁标识。
 - 飞书：以 `app_id` 作为锁标识（`_app_lock_identity = self._app_id`）。
 
-若凭据已被其他 profile 占用，保存失败并报错：「该凭据（<标识>）正被 profile `<X>` 使用，不能复用。请为当前专家单独创建机器人/应用。」这是为了避免两个 profile 的 gateway 同时用同一凭据连接导致消息串台。
+若凭据已被其他 profile 占用，保存失败并报错：「该凭据（<标识>）正被 profile `<X>` 使用，不能复用。请为当前专家单独创建机器人/应用。」这是为了避免两个 profile 的 gateway 同时用同一凭据连接导致消息串台。`wecom` 与 `wecom_callback` 使用不同凭据命名空间，互不冲突；但同一形态下跨专家仍不可复用。
 
-#### 8.11.7 设置指南
+#### 8.12.7 设置指南
 
 每个渠道配置区底部提供「设置指南 ↗」链接，跳转到 Hermes 官方文档对应章节（或 `hermes setup gateway` 的等价引导）。指南内容覆盖：
 
 - 如何在对应平台开发者后台创建应用/机器人。
 - 所需权限点（如飞书 IM 消息收发、群聊读取等 scope）。
 - 凭据复制位置。
-- WebSocket vs Webhook 模式选择建议（飞书）。
-- 常见错误（errcode 含义、token 失效等）排查。
+- WebSocket（AI Bot / 钉钉 / 飞书默认）vs 回调（`wecom_callback` / 飞书 webhook）选型建议。
+- 常见错误（errcode 含义、token 失效、回调端口占用等）排查。
 
-#### 8.11.8 架构约束
+#### 8.12.8 架构约束
 
-- **凭据互斥**（AGENTS.md `acquire_scoped_lock`）：两个 profile 不能共用同一个 bot token / client_id / app_id。保存时校验，见 §8.11.6。
-- **凭据进 `.env`，行为配置进 `config.yaml`**（AGENTS.md）：Bot ID、Secret、Client ID/Secret、App ID/Secret 等密钥写入 `.env`；启用状态、require_mention、dm_policy、websocket_url 等写入 `config.yaml`。
-- **不新增 `HERMES_*` 环境变量承载非密配置**：所有行为设置走 `config.yaml` 或平台已定义的 `WECOM_*` / `DINGTALK_*` / `FEISHU_*` env（这些是 Hermes 既有约定，本 PRD 不新增）。
-- **渠道来源为 `plugins/platforms/` 已注册适配器**：企业微信（`plugins/platforms/wecom/`）、钉钉（`plugins/platforms/dingtalk/`）、飞书（`plugins/platforms/feishu/`）。本 Tab 不实现新平台适配器，只做配置 UI。
+- **凭据互斥**（AGENTS.md `acquire_scoped_lock`）：两个 profile 不能共用同一个 bot token / corp_id / client_id / app_id。保存时校验，见 §8.12.6。
+- **凭据进 `.env`，行为配置进 `config.yaml`**（AGENTS.md）：Bot ID、Secret、Corp 凭据、Client ID/Secret、App ID/Secret 等密钥写入 `.env`；启用状态、require_mention、dm_policy、websocket_url、回调 host/port 等写入 `config.yaml`。
+- **不新增 `HERMES_*` 环境变量承载非密配置**：所有行为设置走 `config.yaml` 或平台已定义的 `WECOM_*` / `WECOM_CALLBACK_*` / `DINGTALK_*` / `FEISHU_*` env（这些是 Hermes 既有约定，本 PRD 不新增）。
+- **渠道来源为 `plugins/platforms/` 已注册适配器**：企业微信（`plugins/platforms/wecom/` 同时注册 `wecom` + `wecom_callback`）、钉钉、飞书。本 Tab 不实现新平台适配器，只做配置 UI；优先复用 `/api/messaging/platforms`。
+- **企业微信两项分开展示**：不得合并成一个「企业微信」再在内部切换模式；与 Hermes 双 platform 注册一致。
 - **Profile-safe**：所有路径用 `get_hermes_home()`，凭据写入 profile 自己的 `.env`，不跨 profile 共享。
 - **重启生效**：平台增删/凭据变更需重启 gateway 进程，MVP 不做热加载（§10.9）。
 
@@ -1266,13 +1538,37 @@ class ProfileCreate(BaseModel):
 ### 9.3 SOUL.md 读写
 
 - 读：`GET /api/profiles/<name>/soul` → 返回 SOUL.md 文本内容。
-- 写：`PUT /api/profiles/<name>/soul` → 写入 SOUL.md，返回生效状态（`next_session` / `immediate`）。
+- 写：`PUT /api/profiles/<name>/soul` → 写入 SOUL.md，返回 `{ "ok": true, "effective": "next_session" }`。
 
-写入时遵循 prompt 缓存约束：默认 `next_session` 生效，可选 `immediate` 强制失效（前端弹窗确认）。
+写入**仅** `next_session` 生效。MVP **不**支持 `immediate` / 强制丢弃 prompt 缓存。前端保存后必须 toast / 常驻提示「将在新会话生效」。
 
-### 9.4 技能安装 PID 轮询
+### 9.4 技能列表 / 启停 / Hub 安装
 
-hub 技能安装走子进程：
+**列表（复用 Dashboard 路径，展开用量字段）**：
+
+```text
+GET /api/skills?profile=<name>
+```
+
+或专家模块等价封装 `GET /api/profiles/<name>/skills`。每条技能至少返回：
+
+- `name`, `description`, `category`（来自 `_find_all_skills`）
+- `enabled`（∉ `skills.disabled`）
+- `provenance`（`hub` / `bundled` / `agent`）
+- `use_count`, `patch_count`, `last_used_at`（来自该 profile 的 `skills/.usage.json`；缺省 0 / null）
+
+相对现有 Dashboard `GET /api/skills`：保留其扫描与 provenance 逻辑；将折叠的 `usage: activity_count` **展开**为上述三字段（`view_count` 可不返回）。不另建用量存储。
+
+**启停**：
+
+```text
+PUT /api/skills/toggle
+Body: { "name": "<skill>", "enabled": true|false, "profile": "<name>" }
+```
+
+写入 `config.yaml` → `skills.disabled`；返回 `{ "ok": true, "effective": "next_session" }`。
+
+**Hub 安装**走子进程：
 
 ```python
 _spawn_hermes_action(["-p", profile, "skills", "install", identifier], "skills-install")
@@ -1323,30 +1619,81 @@ Body: { "path": "D:\\workspace" }
 
 `source` / `artifact_session_id` 为产品层字段，Hermes 核心不维护。
 
-### 9.7 IM 渠道配置
+### 9.7 工具（toolset）配置
+
+**优先复用 Dashboard 现有 API**（profile 作用域）：
+
+```text
+GET  /api/tools/toolsets?profile=<name>
+PUT  /api/tools/toolsets/{name}
+Body: { "enabled": true|false, "profile": "<name>" }
+```
+
+- GET 返回全部可配置 toolset：`name`、`label`、`description`、`enabled`、`configured`、`tools[]`（与 `_get_effective_configurable_toolsets` + `resolve_toolset` 一致）。
+- PUT 经 `_save_platform_tools` 写入 `platform_toolsets.cli`；返回 `{ "ok": true, "effective": "next_session" }`。
+- 缺密钥配置（P1 / MVP 可选）：复用 `GET/PUT /api/tools/toolsets/{name}/config|env|provider` 等现有端点。
+
+若专家模块需要统一路径前缀，可薄封装为 `GET/PUT /api/profiles/<name>/toolsets`，但**语义与落盘必须与上述 Dashboard API 一致**，禁止另造「绑定列表」读写模型。不涉及 MCP。
+
+### 9.8 MCP 服务器配置
+
+```text
+GET    /api/profiles/<name>/mcp/servers
+POST   /api/profiles/<name>/mcp/servers
+Body: {
+  "name": "filesystem",
+  "transport": "stdio",          // "http" | "stdio"
+  "url": null,
+  "command": "npx",
+  "args": ["-y", "@modelcontextprotocol/server-filesystem", "/path"],
+  "env": {},
+  "enabled": true
+}
+PATCH  /api/profiles/<name>/mcp/servers/<server_name>
+Body: { "enabled": false }       // 或其它可编辑字段
+DELETE /api/profiles/<name>/mcp/servers/<server_name>
+```
+
+- 读写本 profile 的 `config.yaml` `mcp_servers`。
+- POST 按 transport 写入 `url` 或 `command`/`args`/`env`。
+- DELETE 只删 `mcp_servers` 条目，不清理 `.env`。
+- 本 API 由专家管理模块自建；**不依赖** Hermes Dashboard `/api/mcp/*`，但落盘格式与 Hermes 原生 `mcp_servers` 对齐，便于 CLI 互通。
+
+### 9.9 IM 渠道配置
 
 ```text
 GET /api/profiles/<name>/im-channels
 ```
 
-返回该 profile 的三个 IM 渠道状态，字段：
+返回该 profile 的四个 IM 渠道状态（或直接复用 `GET /api/messaging/platforms?profile=` 后过滤），字段示例：
 
 ```json
 {
   "channels": [
     {
       "platform": "wecom",
-      "label": "企业微信 (WeCom)",
+      "label": "企业微信 · AI Bot",
       "emoji": "💼",
       "enabled": true,
-      "connected": true,
+      "state": "pending_restart",
+      "connected": false,
       "credentials_configured": true,
       "credentials": {"bot_id": "xxx", "secret": "<masked>"},
       "policy": {"dm_policy": "pairing", "allowed_users": ["user1"]},
       "home_channel": "..."
     },
-    {"platform": "dingtalk", "label": "钉钉 (DingTalk)", "emoji": "🐳", "enabled": false, "connected": false, ...},
-    {"platform": "feishu", "label": "飞书 (Feishu/Lark)", "emoji": "🪽", "enabled": true, "connected": false, ...}
+    {
+      "platform": "wecom_callback",
+      "label": "企业微信 · 自建应用",
+      "emoji": "💼",
+      "enabled": false,
+      "state": "disabled",
+      "credentials_configured": false,
+      "credentials": {"corp_id": null, "agent_id": null},
+      "callback": {"host": "0.0.0.0", "port": 8645}
+    },
+    {"platform": "dingtalk", "label": "钉钉", "emoji": "🐳", "enabled": false, "state": "disabled", ...},
+    {"platform": "feishu", "label": "飞书", "emoji": "🪽", "enabled": true, "state": "not_configured", ...}
   ]
 }
 ```
@@ -1363,11 +1710,12 @@ Body: {
 }
 ```
 
-- `platform` ∈ `wecom` / `dingtalk` / `feishu`。
-- 凭据写入 `<HERMES_HOME>/.env` 对应环境变量（见 §8.11.4）。
+- `platform` ∈ `wecom` / `wecom_callback` / `dingtalk` / `feishu`。
+- 凭据写入 `<HERMES_HOME>/.env` 对应环境变量（见 §8.12.4；`wecom_callback` 使用 `WECOM_CALLBACK_*`）。
 - 行为配置 + `enabled` 写入 `<HERMES_HOME>/config.yaml` `platforms.<platform>` 段。
-- 保存前校验凭据互斥（`acquire_scoped_lock`），冲突时返回 409 + `{"conflict_profile": "<X>"}`。
+- 保存前校验凭据互斥（见 §8.12.6），冲突时返回 409 + `{"conflict_profile": "<X>"}`。
 - 保存成功返回 `{"restart_required": true}`，前端据此提示重启 gateway。
+- **优先**：语义对齐 `PUT /api/messaging/platforms/{platform_id}?profile=`；专家模块路径可为薄封装。
 
 ```text
 POST /api/profiles/<name>/gateway/restart
@@ -1383,10 +1731,11 @@ POST /api/profiles/<name>/gateway/restart
 
 **对本 PRD 的影响**：
 
-- 人设 Tab 的「保存」默认下次会话生效，可选「立即生效」（弹窗确认丢弃缓存）。
-- 技能 Tab 的「添加/解绑」默认下次会话生效。
-- 工具 Tab 的「添加/解绑 toolset」默认下次会话生效。
-- 所有涉及系统提示词变更的操作 UI 必须提示「下次会话生效」。
+- 人设 Tab 的「保存」**仅下次会话生效**；MVP 不提供「立即生效」。保存后必须 toast，并常驻提示「人设变更默认在新会话生效」。
+- 技能 Tab 的「启停」默认下次会话生效。
+- 工具 Tab 的「启停」默认下次会话生效。
+- MCP Tab 的「添加/启停/删除」默认新会话生效；UI 提示连接状态（best-effort）。
+- 所有涉及系统提示词 / 工具 schema 变更的操作 UI 必须提示「下次会话生效」。
 
 ### 10.2 Profile 隔离，不做实时继承
 
@@ -1415,7 +1764,7 @@ POST /api/profiles/<name>/gateway/restart
 
 - IM 渠道 Tab（MVP）保存配置时校验凭据唯一性。
 - 凭据被占用时报错「该凭据正被 profile X 使用」。
-- 校验标识：企业微信 `bot_id`、钉钉 `client_id`、飞书 `app_id`（见 §8.11.6）。
+- 校验标识：`wecom` → `bot_id`；`wecom_callback` → `corp_id`；钉钉 `client_id`；飞书 `app_id`（见 §8.12.6）。
 
 ### 10.5 凭据进 `.env`，行为配置进 `config.yaml`
 
@@ -1423,7 +1772,8 @@ POST /api/profiles/<name>/gateway/restart
 
 **对本 PRD 的影响**：
 
-- IM 渠道配置：bot token、Client secret → `.env`；启用状态、超时 → `config.yaml`。
+- IM 渠道配置：bot token、Corp Secret、Client secret → `.env`；启用状态、回调 host/port、超时 → `config.yaml`。
+- MCP 配置：服务器连接定义 → `config.yaml` `mcp_servers`；密钥类 env → `.env`。
 - 不新增 `HERMES_*` 环境变量承载非密配置。
 
 ### 10.6 不新增 in-tree memory provider，MVP 默认内置 only
@@ -1451,7 +1801,8 @@ POST /api/profiles/<name>/gateway/restart
 
 **对本 PRD 的影响**：
 
-- 工具 Tab 优先暴露 MCP 服务器和插件，不发明新 core tool。
+- 工具 Tab 管理全部可配置 toolset（含插件）+ 开关，不发明新 core tool；外部能力走 MCP。
+- MCP Tab 承接外部能力扩展；落盘对齐 `mcp_servers`，不依赖 Dashboard。
 - 专家管理模块本身是产品层 UI，不增加 Hermes core schema footprint。
 
 ### 10.8 Profile-safe 代码
@@ -1470,10 +1821,10 @@ POST /api/profiles/<name>/gateway/restart
 
 **对本 PRD 的影响**：
 
-- **人设/技能/工具集的修改**：不涉及进程停止，走缓存失效路径（§10.1）。UI 需提示运行中会话数量，让用户知道修改对它们不可见（§8.5.4、§8.9.5、§8.10.5）。
+- **人设/技能/工具集/MCP 的修改**：不涉及进程停止，走缓存失效 / 新会话生效路径（§10.1）。UI 需提示运行中会话数量（§8.5.4、§8.9.4、§8.10.4、§8.11.5）。
 - **删除 profile**：后端 `delete_profile()` 会先停 gateway + Desktop 后端进程（`_stop_gateway_process` + `_stop_profile_backends`），再 rmtree。UI 层需在确认弹窗中要求输入专家名确认，有运行中会话时额外警告会被强制终止（§6.5.3）。
 - **重命名 profile**：同样先停 gateway 再改目录名（`rename_profile` 已实现）。
-- **Gateway 运行时配置变更**（端口、平台 token、IM 渠道启用/凭据）：需重启 gateway 进程才生效（§8.11 IM 渠道 Tab 范围，MVP 统一走重启，不做热加载）。
+- **Gateway 运行时配置变更**（端口、平台 token、IM 渠道启用/凭据）：需重启 gateway 进程才生效（§8.12 IM 渠道 Tab 范围，MVP 统一走重启，不做热加载）。
 - **活动状态来源**：列表页 / 详情页的活动状态来自 `GET /api/profiles/<name>/sessions?status=running` 计数。有运行中 session 显示 🟢 + 数量；无运行中 session 不显示状态点。
 
 ### 10.10 cron 任务的记忆隔离
@@ -1541,6 +1892,7 @@ POST /api/profiles/<name>/gateway/restart
 - 专家列表页筛选（按标签）
 - 专家列表页排序（按创建时间/最近使用）
 - 记忆 Tab 完整管理（手动增删改查记忆卡片）
+- MCP Catalog 一键安装、OAuth 登录、`tools.include/exclude` 细过滤、高级 TLS
 - IM 渠道 Tab 高级配置（消息路由规则、群聊精细化策略、送达统计、消息模板、AI Card 模板）
 - IM 渠道扩展更多平台（Telegram、Discord、Slack 等）
 - 工作空间 Tab 文件编辑
@@ -1581,8 +1933,9 @@ POST /api/profiles/<name>/gateway/restart
 - 必填项（来源、专家名称、slug、专家介绍、Base URL、API Key、模型名称）校验生效。
 - 头像可上传预览；领域标签可添加移除。
 - 不在向导中配置人设（SOUL.md 默认留空，由用户在详情页「人设」Tab 编辑）。
-- 不在向导中配置技能（自动 seed + 全部启用，由用户在详情页「技能」Tab 调整）。
-- 不在向导中配置工具（默认继承 `_HERMES_CORE_TOOLS`，由用户在详情页「工具」Tab 调整）。
+- 不在向导中配置技能（自动 seed + 全部启用；详情页「技能」Tab 全部列表 + 开关 + 用量）。
+- 不在向导中配置工具（默认继承 `_HERMES_CORE_TOOLS`；详情页「工具」Tab 全部可配置 + 开关）。
+- 不在向导中单独配置 MCP：「从零开始」无预置；「复制」时沿用 Hermes `--clone` 保留源 `mcp_servers`（及 `.env`），产品层不 strip；由用户在详情页「MCP」Tab 查看状态 / 补密钥 / 启停 / 增删。
 - 不在向导中配置工作空间根（后端默认创建 `<HERMES_HOME>/workspace/`（空目录，不预置子目录），由用户在详情页「工作空间」Tab 调整）。
 - 取消时弹出二次确认。
 - 提交后创建 profile 目录、写入 `profile.yaml` 扩展字段、写入 `config.yaml` 的 `providers.` 段 + `model` 段（默认模型）+ `terminal.cwd`、写入 `.env` 的 API Key、创建 workspace 物理目录。
@@ -1593,7 +1946,7 @@ POST /api/profiles/<name>/gateway/restart
 - 顶部信息卡展示头像、名称、默认模型标签、简介、领域标签、编辑按钮、发起任务按钮、返回按钮。
 - 顶部信息卡专家名称右侧显示默认模型标签（如 `[gpt-4o]`），来自 `config.yaml` `model.default`；点击可展开 tooltip 显示 provider 名称和 base_url。
 - 顶部信息卡默认模型标签右侧显示活动状态：有运行中 session 时显示 🟢 + 「N 个运行中会话」（可点击跳转任务 Tab 筛选进行中）；无运行中 session 时不显示。
-- Tab 导航展示 7 个 Tab，带数量角标。
+- Tab 导航展示 8 个 Tab，带数量角标（人设、工作空间、任务、记忆、技能、工具、MCP、IM 渠道）。
 - 默认打开「人设」Tab。
 - 「发起任务」按钮可跳转任务对话页并新建 session。
 - 「返回」按钮可返回专家列表页。
@@ -1606,9 +1959,10 @@ POST /api/profiles/<name>/gateway/restart
 
 - 左右分栏编辑器 + 预览。
 - 可导入/导出 soul.md。
-- 「保存」按钮默认下次会话生效，可选「立即生效」（弹窗确认）。
+- 「保存」按钮**仅下次会话生效**（无「立即生效」选项）。
+- 编辑器顶部常驻提示：「人设变更默认在新会话生效，不影响已打开的对话。」
 - 保存后 SOUL.md 文件内容更新。
-- 保存成功 toast 提示运行中会话状态：有运行中会话时显示「该专家当前有 N 个运行中会话，修改将在新会话生效」。
+- 保存成功 toast 提示运行中会话状态：有运行中会话时显示「修改将在新会话生效；当前有 N 个运行中会话仍使用旧人设」。
 
 ### 工作空间 Tab
 
@@ -1630,21 +1984,35 @@ POST /api/profiles/<name>/gateway/restart
 
 ### 技能 Tab
 
-- 展示已绑定技能列表。
-- 「添加技能」可从已安装技能池多选绑定。
-- 「从 Hub 安装」可搜索 hub 技能并异步安装。
-- hub 安装展示进度。
-- 「解绑」可移除技能绑定。
-- 解绑后 toast 提示运行中会话状态：有运行中会话时显示「该专家当前有 N 个运行中会话，修改将在新会话生效」。
+- 默认展示**全部已安装**技能，每行带启用开关（对齐 `skills.disabled` opt-out）。
+- 列：描述（Hermes frontmatter/fallback）、分类（目录）、使用次数（`use_count`）、补丁次数（`patch_count`）、最近使用（`last_used_at`）、来源（provenance）。
+- 支持按名称/描述搜索、按目录分类筛选；角标为已启用数。
+- 「从 Hub 安装」可搜索 hub 技能并异步安装；安装后默认启用，用量从 0 起算。
+- **无**「从已安装池多选绑定」浮层；启停即开关。
+- 启停后 toast 提示运行中会话状态：有运行中会话时显示「该专家当前有 N 个运行中会话，修改将在新会话生效」。
+- 创建/复制专家后 `skills/.usage.json` 为空（复制来源时产品层清空），用量不继承源专家。
 
 ### 工具 Tab
 
-- 展示已绑定 toolset 列表。
-- 展示已配置 MCP 服务器列表。
-- 「添加工具」可从 TOOLSETS 多选绑定。
-- 「解绑」可移除 toolset 绑定。
-- MCP 服务器「管理」可跳转 `hermes mcp` UI。
-- 添加/解绑后 toast 提示运行中会话状态：有运行中会话时显示「该专家当前有 N 个运行中会话，修改将在新会话生效」。
+- 默认展示**全部可配置** toolset，每行带启用开关（对齐 `platform_toolsets.cli` opt-in；UI 形态与技能 Tab「全部 + 开关」一致）。
+- 列：label（主）+ name（次）、description、工具数（`len(tools)`）、就绪（`configured`）；禁止主副标题同文案重复。
+- **无**「+ 添加工具」浮层与「解绑」；启停即开关。
+- 顶部说明核心工具基线（`_HERMES_CORE_TOOLS`）：额外启用数为 0 时专家仍有核心能力。
+- 不做 toolset 使用次数 / 最近使用。
+- 启停后 toast 提示运行中会话状态：有运行中会话时显示「该专家当前有 N 个运行中会话，修改将在新会话生效」。
+- 列表/启停复用 `GET/PUT /api/tools/toolsets`（或语义等价封装）。
+
+### MCP Tab
+
+- 展示本专家已配置的 MCP 服务器列表（名称、类型 HTTP/stdio、状态）。
+- 「添加」弹出简化表单（名称 + HTTP URL 或 stdio command/args/env + 启用）。
+- 支持启用/禁用（写 `mcp_servers.<name>.enabled`）。
+- 「删除」二次确认后从 `mcp_servers` 移除条目，不清理 `.env`。
+- **状态红点**：缺必要 API Key / 密钥显示 🔴「未配置密钥」并提供「填写密钥」；密钥齐全但连通失败显示 🔴「连接失败」；正常 🟢；已禁用灰色。
+- 「复制」创建的专家：列表中可见源专家经 `--clone` 保留的 `mcp_servers`；产品层不 strip；若密钥已随 `.env` 拷贝则可为 🟢，否则红点引导修复。
+- 不依赖 Hermes Dashboard / McpPage；由本模块 API 落盘，格式对齐 Hermes 原生 `mcp_servers`。
+- MVP 不做 Catalog、OAuth、`tools.include/exclude`、高级 TLS。
+- 变更后 toast 提示新会话生效；有运行中会话时附带 N 的说明。
 
 ### 记忆 Tab（MVP 只读）
 
@@ -1656,42 +2024,45 @@ POST /api/profiles/<name>/gateway/restart
 
 ### IM 渠道 Tab
 
-- Tab 角标展示已启用渠道数（企业微信 / 钉钉 / 飞书 中已 `enabled: true` 的数量）。
-- 左栏列出三个渠道卡片，每张卡片展示图标、名称、启用开关、连接状态（🟢 连接中 / 🔴 未连接 / — 已禁用）。
-- 右栏展示选中渠道的凭据字段 + 基础访问策略 + 设置指南链接。
-- 企业微信：可填写 Bot ID + Secret（写入 `.env` 的 `WECOM_BOT_ID` / `WECOM_SECRET`），可选 DM 策略 + 允许用户。
-- 钉钉：可填写 Client ID + Client Secret（写入 `DINGTALK_CLIENT_ID` / `DINGTALK_CLIENT_SECRET`），可选 require_mention + 允许用户。
-- 飞书：可填写 App ID + App Secret（写入 `FEISHU_APP_ID` / `FEISHU_APP_SECRET`），可选域名（feishu/lark）、连接模式、require_mention。
+- Tab 角标展示已启用渠道数（`wecom` / `wecom_callback` / `dingtalk` / `feishu` 中已 `enabled: true` 的数量）。
+- 左栏列出**四个**渠道卡片（企业微信 AI Bot、企业微信自建应用、钉钉、飞书），每张卡片展示图标、名称、启用开关、连接状态（对齐 Hermes messaging `state`，至少区分已禁用 / 未配置 / 待重启 / 已连接 / 错误）。
+- 右栏展示选中渠道的凭据字段 + 基础访问策略 + 设置指南；提供保存、测试连接、重启 Gateway。
+- 企业微信 · AI Bot（`wecom`）：可填写 Bot ID + Secret（`WECOM_BOT_ID` / `WECOM_SECRET`），可选 DM 策略 + 允许用户；文案标明 WebSocket、无需公网回调。
+- 企业微信 · 自建应用（`wecom_callback`）：可填写 Corp ID / Corp Secret / Agent ID / Token / EncodingAESKey（`WECOM_CALLBACK_*`），可选 Host/Port；文案标明需回调 URL 可达。
+- 钉钉：可填写 Client ID + Client Secret，可选 require_mention + 允许用户。
+- 飞书：可填写 App ID + App Secret，可选域名（feishu/lark）、连接模式、require_mention。
 - 启用开关切换写入 `config.yaml` `platforms.<name>.enabled`。
-- 保存凭据时校验凭据互斥：若 bot_id / client_id / app_id 已被其他 profile 占用，报错「该凭据正被 profile X 使用」。
+- 保存凭据时校验凭据互斥：若 bot_id / corp_id / client_id / app_id 已被其他 profile 占用，报错「该凭据正被 profile X 使用」。
 - 保存成功后提示「需重启 gateway 生效」，并提供「重启 gateway」按钮。
-- 重启后连接状态实时更新为 🟢 或 🔴。
+- 重启后连接状态按 messaging `state` 更新。
+- 企业微信两项分开展示，不合并为单一「企业微信」入口。
 
 ## 14. 关键决策总结
 
 1. **专家 = Hermes Profile**：复用 Hermes profile 机制，每个专家是一个独立 HERMES_HOME 目录，不新增核心数据模型。
 2. **人设 = SOUL.md**：直接读写 `<HERMES_HOME>/SOUL.md`，作为系统提示词 stable 层的第一个组成部分。
-3. **创建向导是单步原子事务**：弹窗只做「来源 + 身份信息 + 模型」，全部同步文件写入。人设/技能/工具/工作空间的精细化配置全部进详情页对应 Tab，hub 技能安装推「技能」Tab。
+3. **创建向导是单步原子事务**：弹窗只做「来源 + 身份信息 + 模型」，全部同步文件写入。人设/技能/工具/MCP/工作空间的精细化配置全部进详情页对应 Tab，hub 技能安装推「技能」Tab。
 4. **卡片标签 = 领域标签**：列表页卡片和详情页头部展示 `profile.yaml` `tags`（自由文本），不展示技能名（技术 ID）。
 5. **默认模型在弹窗必填（自定义模式）**：专家必须有默认模型配置才能运行。「从零开始」时用户填写 Base URL + API Key + 模型名称（+ 可选 Provider 名称），配置写入新 profile 的 `config.yaml` `providers.` 段 + `.env`，遵循 Hermes 原生格式；「复制」时沿用源 profile 的模型配置。默认模型是对话任务的起点模型，对话中可通过模型下拉切换其他模型（Hermes per-session `model_override`）。MVP 不提供 provider 预设和模型清单，后续版本对接独立的「模型管理」功能。
 6. **发起任务 = 跳任务对话页**：新建 session（默认工作目录 = 工作空间根）后跳转任务对话页，不弹出任务表单。
 7. **删除 = 硬删除 + 输入名称确认**：走 `hermes profile delete`，不做软删除。删除弹窗统一要求输入专家 `display_name` 确认；有运行中会话时额外警告会被强制终止，按钮文案为「强制删除」。
-8. **人设修改默认下次会话生效**：遵循 prompt 缓存约束，可选「立即生效」强制失效。保存 toast 根据运行中会话数动态提示。
+8. **人设（SOUL.md）仅下次会话生效**：遵循 prompt 缓存约束，MVP **不提供**「立即生效」。保存 toast + 编辑器常驻提示「将在新会话生效」；有运行中会话时额外提示仍使用旧人设。
 9. **工作空间根 vs 工作目录**：profile `terminal.cwd` = **所有 session 共享**的文件树根；session `cwd` = 该任务 workspace（通常为根下子目录，不等于缩小工作空间）。
 10. **工作空间 Tab 展示工作空间根**；★ 高亮当前 session 工作目录；切换工作目录在任务对话页。
 11. **创建专家时初始化**：写 `terminal.cwd`，创建空工作空间目录（不预置子目录）；SOUL 约定产物须在工作目录内。
 12. **记忆 Tab MVP 只读**：P1 补全手动管理，不新增 in-tree memory provider。
-13. **IM 渠道 Tab MVP 做企业微信 / 钉钉 / 飞书**：三渠道的启用/禁用 + 凭据配置 + 基础访问策略。凭据进 `.env`（`WECOM_*` / `DINGTALK_*` / `FEISHU_*`），行为配置进 `config.yaml` `platforms.<name>` 段。保存后重启 gateway 生效，MVP 不做热加载。凭据互斥校验（`acquire_scoped_lock`，标识为 bot_id / client_id / app_id）。其他平台（Telegram、Discord、Slack 等）和高级管理放 v1.1。
+13. **IM 渠道 Tab MVP 做四个条目**：企业微信 AI Bot（`wecom`）、企业微信自建应用回调（`wecom_callback`）、钉钉、飞书。两项企业微信分开展示（不同凭据与连接模型）。凭据进 `.env`（`WECOM_*` / `WECOM_CALLBACK_*` / `DINGTALK_*` / `FEISHU_*`），行为配置进 `config.yaml` `platforms.<name>`。优先复用 Dashboard messaging platforms API。保存后重启 gateway 生效，MVP 不做热加载。凭据互斥校验（`bot_id` / `corp_id` / `client_id` / `app_id`）。其他平台（Telegram、Discord、Slack、`weixin` 等）和高级管理放 v1.1。
 14. **profile.yaml 新增 display_name/avatar/tags**：产品层元数据，Hermes 核心不依赖。
-15. **hub 技能安装走子进程**：`hermes -p <profile> skills install <id>`，复用 SkillsPage 异步进度。
-16. **工具 Tab 优先 MCP/plugin**：遵循 Footprint Ladder，不发明新 core tool。
+15. **技能 Tab = 全部已安装 + 开关 + 用量观察**：对齐 Hermes `skills.disabled`（opt-out），不发明「绑定」表。描述/分类分别来自 SKILL.md frontmatter（含正文 fallback）与目录路径；用量来自该 profile 的 `skills/.usage.json`（`use_count` / `patch_count` / `last_used_at`，per-profile）。Hub 安装走子进程，复用 SkillsPage 异步进度。创建/复制时清空 `.usage.json`，不继承源专家热度。
+16. **工具 Tab = 全部可配置 + 开关（无绑定/解绑）**：对齐 `platform_toolsets.cli`（opt-in）与 Dashboard `/api/tools/toolsets`；展示 label/description/工具数/`configured`；不做用量统计。与技能 UI 同形（全部 + 开关）但落盘不同（技能为 opt-out）。MCP 仍分 Tab 内嵌轻量 CRUD；创建对齐 Hermes：`--clone` 保留 `mcp_servers`（及 `.env`），产品层不 strip；MCP Tab 对缺密钥 / 连通失败显示红色状态。不依赖 Dashboard/McpPage；外部能力走 MCP，不发明新 core tool。
 17. **本 PRD 的关键架构约束**：hub 技能安装必须用子进程（`tools/skills_hub.py` 在模块导入时绑定 `SKILLS_DIR`，HERMES_HOME override 无效），创建向导不包含 hub 安装。
 18. **活动状态（非启用/停用）**：Profile 没有「启用/停用」开关，产品层展示活动状态（活跃/待命）作为观察值。有运行中 session 时卡片/详情页显示 🟢 + 数量；无运行中 session 时不显示状态点。不设计「离线/上线」概念。
-19. **进程生命周期（§10.9）**：人设/技能/工具修改走缓存失效路径，不停进程；删除/重命名 profile 后端自动停 gateway + 后端进程；Gateway 运行时配置变更（含 IM 渠道启用/凭据）需重启 gateway（MVP，不做热加载）。
+19. **进程生命周期（§10.9）**：人设/技能/工具/MCP 修改走缓存失效或新会话生效路径，不停进程；删除/重命名 profile 后端自动停 gateway + 后端进程；Gateway 运行时配置变更（含 IM 渠道启用/凭据）需重启 gateway（MVP，不做热加载）。
 20. **记忆语义（§4.4）**：`MEMORY.md` = **专家经验**（专家在历次任务中沉淀的方法论、项目背景、约定），`USER.md` = **用户画像**（专家对该用户的认知）。两者均为专家**主动写入**（模型调用 `memory` 工具或用户在对话中说「记住：……」），非对话自动录制。`memory_enabled` 默认 `True` 只代表工具被注入，不代表自动有内容。
 21. **创建专家时强制清空 memories**：无论来源（从零 / 复制 default / 复制其他专家），创建后 `memories/MEMORY.md`、`USER.md` 均为空。复制来源时若 `--clone` 已带入源 profile 的 memories，产品层强制清空。理由：MEMORY.md/USER.md 是专家个人沉淀，A 专家的经验不应作为 B 专家的起点（与 SOUL.md 人设可继承的语义不同）。
-22. **MVP 默认 `memory.provider: ""`（内置 only）**：创建向导不配置 `memory.provider`，沿用 Hermes 默认空值。理由：内置 only 时记忆 Tab 展示的就是全部记忆，MVP「只读展示」承诺成立；启用外部 provider 后记忆散落在后端，记忆 Tab 只读内置文件会误导用户。P1 补 provider 切换时必须同步展示外部记忆摘要。
-23. **记忆 Tab MVP 增强只读字段**：每张记忆卡片展示容量指示（字符数 / `memory_char_limit` 或 `user_char_limit`）、上次更新时间（文件 mtime）、来源说明；两份文件都为空时展示空状态引导卡片（支持 `memory_onboarded: true` 标记关闭）。讲清楚「主动写入」语义，避免「聊过就有记忆」的错误预期。
-24. **P1 手动编辑记忆遵循缓存约束**：手动新增/编辑/删除记忆等价于修改 `MEMORY.md`/`USER.md`，遵循与 §8.5.4 人设保存相同的「下次会话生效 / 立即生效」规则，toast 文案根据运行中会话数动态展示。
-25. **cron 任务的记忆隔离（§10.10）**：专家被 cron 调度执行的任务默认不写入记忆（Hermes cron sessions 默认 `skip_memory=True`）。产品层不改变此默认行为，但在文档/帮助中显式说明；如需积累经验用户需在 cron job 级别显式开启。
-26. **跨专家记忆共享 = v2**：MVP/v1.1 不做。profile 隔离导致同一项目里专家 A 学到的项目背景专家 B 不知道，v2 通过「项目级共享记忆（kanban board 级 memory）」解决（§12）。
+22. **创建专家时强制清空技能用量**：无论来源，创建后 `skills/.usage.json` 为空（复制来源时产品层删除/清空）。用量与 profile 绑定，不继承源专家热度（§8.9.6）。
+23. **MVP 默认 `memory.provider: ""`（内置 only）**：创建向导不配置 `memory.provider`，沿用 Hermes 默认空值。理由：内置 only 时记忆 Tab 展示的就是全部记忆，MVP「只读展示」承诺成立；启用外部 provider 后记忆散落在后端，记忆 Tab 只读内置文件会误导用户。P1 补 provider 切换时必须同步展示外部记忆摘要。
+24. **记忆 Tab MVP 增强只读字段**：每张记忆卡片展示容量指示（字符数 / `memory_char_limit` 或 `user_char_limit`）、上次更新时间（文件 mtime）、来源说明；两份文件都为空时展示空状态引导卡片（支持 `memory_onboarded: true` 标记关闭）。讲清楚「主动写入」语义，避免「聊过就有记忆」的错误预期。
+25. **P1 手动编辑记忆遵循缓存约束**：手动新增/编辑/删除记忆等价于修改 `MEMORY.md`/`USER.md`，与人设一致**仅下次会话生效**（不提供「立即生效」），toast 文案根据运行中会话数动态展示。
+26. **cron 任务的记忆隔离（§10.10）**：专家被 cron 调度执行的任务默认不写入记忆（Hermes cron sessions 默认 `skip_memory=True`）。产品层不改变此默认行为，但在文档/帮助中显式说明；如需积累经验用户需在 cron job 级别显式开启。
+27. **跨专家记忆共享 = v2**：MVP/v1.1 不做。profile 隔离导致同一项目里专家 A 学到的项目背景专家 B 不知道，v2 通过「项目级共享记忆（kanban board 级 memory）」解决（§12）。

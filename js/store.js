@@ -71,12 +71,190 @@
     return params;
   }
 
+  /** 将目录项转为已安装技能记录（Hermes opt-out：enabled 默认 true） */
+  function catalogEntryToInstalled(entry, opts) {
+    opts = opts || {};
+    var clearUsage = !!opts.clearUsage;
+    var usage = opts.usage || {};
+    return {
+      skillId: entry.id || entry.skillId,
+      name: entry.name || entry.id || entry.skillId,
+      description: entry.description || '',
+      category: entry.category || '',
+      enabled: opts.enabled !== false,
+      useCount: clearUsage ? 0 : (usage.useCount != null ? usage.useCount : (entry.useCount || 0)),
+      patchCount: clearUsage ? 0 : (usage.patchCount != null ? usage.patchCount : (entry.patchCount || 0)),
+      lastUsedAt: clearUsage ? null : (usage.lastUsedAt !== undefined ? usage.lastUsedAt : (entry.lastUsedAt || null)),
+      provenance: entry.provenance || 'bundled',
+      params: getDefaultSkillParams(entry.id || entry.skillId)
+    };
+  }
+
+  /** 创建时 seed：全部内置技能已安装 + 默认启用；用量清空 */
+  function seedInstalledSkills(opts) {
+    opts = opts || {};
+    var catalog = window.SKILLS_CATALOG || [];
+    var demoUsage = opts.withDemoUsage
+      ? {
+          plan: { useCount: 12, patchCount: 0, lastUsedAt: new Date(Date.now() - 2 * 3600 * 1000).toISOString() },
+          'github-code-review': { useCount: 3, patchCount: 1, lastUsedAt: new Date(Date.now() - 26 * 3600 * 1000).toISOString() },
+          'skill-yield': { useCount: 8, patchCount: 2, lastUsedAt: new Date(Date.now() - 5 * 3600 * 1000).toISOString() },
+          'skill-spc': { useCount: 5, patchCount: 0, lastUsedAt: new Date(Date.now() - 48 * 3600 * 1000).toISOString() },
+          'apple-notes': { useCount: 0, patchCount: 0, lastUsedAt: null }
+        }
+      : {};
+    var disabledIds = opts.demoDisabled || [];
+    return catalog.map(function (s) {
+      var usage = demoUsage[s.id] || {};
+      return catalogEntryToInstalled(s, {
+        clearUsage: !opts.withDemoUsage,
+        enabled: disabledIds.indexOf(s.id) < 0,
+        usage: usage
+      });
+    });
+  }
+
+  function clearSkillUsageFields(skill) {
+    return Object.assign({}, skill, {
+      useCount: 0,
+      patchCount: 0,
+      lastUsedAt: null
+    });
+  }
+
+  function normalizeInstalledSkillRecord(b) {
+    if (typeof b === 'string') {
+      var cat = (window.SKILLS_CATALOG || []).find(function (s) { return s.id === b; });
+      if (cat) return catalogEntryToInstalled(cat, { clearUsage: true, enabled: true });
+      return {
+        skillId: b,
+        name: b,
+        description: '',
+        category: '',
+        enabled: true,
+        useCount: 0,
+        patchCount: 0,
+        lastUsedAt: null,
+        provenance: 'bundled',
+        params: getDefaultSkillParams(b)
+      };
+    }
+    var sid = String(b.skillId || b.id || b.canonicalName || b.name || '').trim();
+    if (!sid) return null;
+    return {
+      skillId: sid,
+      name: b.name || sid,
+      description: b.description || '',
+      category: b.category || '',
+      enabled: b.enabled !== false,
+      useCount: b.useCount || 0,
+      patchCount: b.patchCount || 0,
+      lastUsedAt: b.lastUsedAt || null,
+      provenance: b.provenance || 'bundled',
+      params: b.params || getDefaultSkillParams(sid)
+    };
+  }
+
+  /** 保证 DEV_MOCK 下展示「全部已安装」：合并目录缺失项 */
+  function ensureFullInstalledSkills(rawList) {
+    var byId = {};
+    (rawList || []).forEach(function (b) {
+      var rec = normalizeInstalledSkillRecord(b);
+      if (rec) byId[rec.skillId] = rec;
+    });
+    if (DEV_MOCK && window.SKILLS_CATALOG) {
+      window.SKILLS_CATALOG.forEach(function (s) {
+        if (!byId[s.id]) {
+          byId[s.id] = catalogEntryToInstalled(s, { clearUsage: true, enabled: true });
+        } else {
+          byId[s.id].name = byId[s.id].name || s.name;
+          byId[s.id].description = byId[s.id].description || s.description || '';
+          byId[s.id].category = byId[s.id].category || s.category || '';
+          byId[s.id].provenance = byId[s.id].provenance || s.provenance || 'bundled';
+        }
+      });
+    }
+    return Object.keys(byId).map(function (k) { return byId[k]; }).sort(function (a, b) {
+      var ca = (a.category || '').localeCompare(b.category || '');
+      if (ca !== 0) return ca;
+      return (a.name || a.skillId).localeCompare(b.name || b.skillId);
+    });
+  }
+
   function getDefaultToolConfig(toolId) {
     var schema = (window.TOOL_PARAM_SCHEMAS || {})[toolId];
-    if (!schema) return {};
+    if (!schema || !schema.length) return {};
     var config = {};
     schema.forEach(function (s) { config[s.key] = s.default !== undefined ? s.default : ''; });
     return config;
+  }
+
+  function cloneJson(value) {
+    return JSON.parse(JSON.stringify(value == null ? null : value));
+  }
+
+  function normalizeMcpServer(raw) {
+    var s = raw || {};
+    var name = String(s.name || s.id || '').trim();
+    var type = (s.type === 'http' || s.type === 'HTTP') ? 'http' : 'stdio';
+    var enabled = s.enabled !== false;
+    var missingEnv = Array.isArray(s.missingEnv) ? s.missingEnv.slice() : [];
+    var env = s.env && typeof s.env === 'object' ? Object.assign({}, s.env) : {};
+    Object.keys(env).forEach(function (k) {
+      if (env[k] === '' || env[k] === null || env[k] === undefined) {
+        if (missingEnv.indexOf(k) < 0) missingEnv.push(k);
+      }
+    });
+    var status = s.status;
+    if (!enabled) status = 'disabled';
+    else if (missingEnv.length) status = 'missing_secret';
+    else if (status === 'connection_failed' || status === 'error') status = 'connection_failed';
+    else status = 'ok';
+    return {
+      id: name,
+      name: name,
+      type: type,
+      url: s.url || '',
+      command: s.command || '',
+      args: Array.isArray(s.args)
+        ? s.args.slice()
+        : (typeof s.args === 'string' && s.args.trim() ? s.args.trim().split(/[\s,]+/) : []),
+      env: env,
+      enabled: enabled,
+      status: status,
+      missingEnv: missingEnv,
+      errorSummary: s.errorSummary || '',
+      secretsFilled: !!s.secretsFilled
+    };
+  }
+
+  function syncMcpServersToDetailMeta(expertId, list) {
+    var key = String(expertId);
+    var prev = (state.expertDetailMeta && state.expertDetailMeta[key]) || {};
+    var toolsDetail = Object.assign({}, prev.toolsDetail || {}, { mcpServers: list });
+    mergeExpertDetailMeta(key, { toolsDetail: toolsDetail });
+  }
+
+  function setMcpServersInternal(expertId, list) {
+    var key = String(expertId);
+    var normalized = (list || []).map(normalizeMcpServer).filter(function (s) { return !!s.name; });
+    if (!state.mcpServers) state.mcpServers = {};
+    state.mcpServers[key] = normalized;
+    syncMcpServersToDetailMeta(key, normalized);
+    return normalized;
+  }
+
+  function defaultMcpServersForClone() {
+    return (window.DEFAULT_MCP_SERVERS || []).map(normalizeMcpServer);
+  }
+
+  /** DEV_MOCK MCP 演示种子版本； bump 后会对「空列表」专家补种一次（不覆盖已有配置） */
+  var MCP_DEMO_SEED_VERSION = 4;
+
+  function demoMcpServersForSeed(index) {
+    var byIndex = window.DEMO_MCP_SERVERS_BY_INDEX || {};
+    var list = byIndex[index] || byIndex[String(index)] || [];
+    return (list || []).map(normalizeMcpServer);
   }
 
   function addMinutesIso(baseIso, minutes) {
@@ -88,13 +266,27 @@
 
   function getExpertDemoCapabilities(expertId) {
     var skillIds = state.skillBindings[expertId] || [];
-    var toolIds = state.toolBindings[expertId] || [];
+    var toolIds = normalizeToolIds(state.toolBindings[expertId] || []);
     var skill = (window.SKILLS_CATALOG || []).find(function (s) { return s.id === skillIds[0]; });
     var tool = (window.TOOLS_CATALOG || []).find(function (t) { return t.id === toolIds[0]; });
     return {
       skill: skill ? skill.name : '专业分析',
-      tool: tool ? tool.name : '数据查询'
+      tool: tool ? (tool.label || tool.name || tool.id) : '数据查询'
     };
+  }
+
+  function getToolsetConfigOverride(expertId, toolId) {
+    var map = (state.toolsetConfigs || {})[String(expertId)] || {};
+    return map[String(toolId)] || null;
+  }
+
+  function setToolsetConfigOverride(expertId, toolId, patch) {
+    var key = String(expertId);
+    var tid = String(toolId || '').trim();
+    if (!tid) return;
+    if (!state.toolsetConfigs) state.toolsetConfigs = {};
+    if (!state.toolsetConfigs[key]) state.toolsetConfigs[key] = {};
+    state.toolsetConfigs[key][tid] = Object.assign({}, state.toolsetConfigs[key][tid] || {}, patch || {});
   }
 
   /** 给旧版 action 消息补全 summary/params，使其可在 ActivityItem 中展开 */
@@ -417,6 +609,8 @@
       personas: {},
       skillBindings: {},
       toolBindings: {},
+      toolsetConfigs: {},
+      mcpServers: {},
       memories: [],
       tasks: [],
       messages: {},
@@ -433,7 +627,8 @@
       taskArtifacts: [],
       expertDetailMeta: {},
       demoSyncVersion: null,
-      projectTaskSchemaVersion: null
+      projectTaskSchemaVersion: null,
+      mcpDemoSeedVersion: null
     };
   }
 
@@ -462,6 +657,7 @@
     if (!DEV_MOCK) {
       snap.skillBindings = {};
       snap.toolBindings = {};
+      snap.mcpServers = {};
       snap.expertDetailMeta = {};
     }
     (snap.projectFiles || []).forEach(function (f) {
@@ -562,21 +758,28 @@
   }
 
   function applySkillsApiResponse(expertId, data) {
-    if (!data || !Array.isArray(data.assigned)) return;
+    if (!data) return;
+    var list = Array.isArray(data.skills)
+      ? data.skills
+      : (Array.isArray(data.assigned) ? data.assigned : null);
+    if (!list) return;
     mergeExpertDetailMeta(expertId, {
-      skillsDetail: data.assigned,
+      skillsDetail: list,
       skillsCatalog: data.catalog || []
     });
-    state.skillBindings[expertId] = data.assigned.map(function (s) {
-      return {
-        skillId: s.skillId,
-        params: {},
+    state.skillBindings[expertId] = list.map(function (s) {
+      return normalizeInstalledSkillRecord({
+        skillId: s.skillId || s.name || s.id,
         name: s.name,
         description: s.description,
         category: s.category || '',
-        useCount: s.useCount || 0
-      };
-    });
+        enabled: s.enabled !== false,
+        useCount: s.useCount || 0,
+        patchCount: s.patchCount || 0,
+        lastUsedAt: s.lastUsedAt || null,
+        provenance: s.provenance || 'bundled'
+      });
+    }).filter(Boolean);
     persist();
     bumpCapabilityRev(expertId);
     window.dispatchEvent(new CustomEvent('app-store-updated', { detail: { expertId: String(expertId) } }));
@@ -584,7 +787,11 @@
 
   function applyToolsApiResponse(expertId, data) {
     if (!data) return;
-    var assignedBlock = data.assigned || {};
+    var assignedBlock = Object.assign({}, data.assigned || {});
+    var key = String(expertId);
+    if (!assignedBlock.mcpServers && state.mcpServers && state.mcpServers[key]) {
+      assignedBlock.mcpServers = state.mcpServers[key];
+    }
     mergeExpertDetailMeta(expertId, {
       toolsDetail: assignedBlock,
       toolsCatalog: (data.catalog && data.catalog.toolsets) || []
@@ -600,6 +807,9 @@
         config: getDefaultToolConfig(tid)
       };
     });
+    if (Array.isArray(assignedBlock.mcpServers)) {
+      setMcpServersInternal(key, assignedBlock.mcpServers);
+    }
     persist();
     bumpCapabilityRev(expertId);
     window.dispatchEvent(new CustomEvent('app-store-updated', { detail: { expertId: String(expertId) } }));
@@ -638,13 +848,34 @@
   function sidecarPutSkills(expertId, assignedIds) {
     return window.SidecarApi.putExpertSkills(String(expertId), { assigned: assignedIds })
       .then(function (data) {
-        if (!data || !Array.isArray(data.assigned)) {
+        if (!data || (!Array.isArray(data.assigned) && !Array.isArray(data.skills))) {
           var err = window.SidecarApi.getLastError && window.SidecarApi.getLastError();
-          return Promise.reject(new Error((err && err.message) || '保存技能配给失败'));
+          return Promise.reject(new Error((err && err.message) || '保存技能配置失败'));
         }
         applySkillsApiResponse(String(expertId), data);
         return data;
       });
+  }
+
+  function sidecarToggleSkill(expertId, skillId, enabled) {
+    if (window.SidecarApi && window.SidecarApi.toggleExpertSkill) {
+      return window.SidecarApi.toggleExpertSkill(String(expertId), skillId, enabled)
+        .then(function (data) {
+          if (data && (Array.isArray(data.skills) || Array.isArray(data.assigned))) {
+            applySkillsApiResponse(String(expertId), data);
+          }
+          return data;
+        });
+    }
+    var enabledIds = (state.skillBindings[expertId] || [])
+      .filter(function (b) {
+        var id = bindingSkillId(b);
+        if (id === skillId) return !!enabled;
+        return typeof b === 'string' ? true : b.enabled !== false;
+      })
+      .map(bindingSkillId)
+      .filter(Boolean);
+    return sidecarPutSkills(expertId, enabledIds);
   }
 
   function sidecarPutTools(expertId, assignedIds) {
@@ -685,24 +916,36 @@
     }
     if (!skipCapabilities) {
       if (detail && e.skillsDetail !== undefined) {
-        state.skillBindings[expertId] = e.skillsDetail.map(function (s) {
+        state.skillBindings[expertId] = ensureFullInstalledSkills(e.skillsDetail.map(function (s) {
           return {
             skillId: s.skillId,
             params: {},
             name: s.name,
             description: s.description,
             category: s.category || '',
-            useCount: s.useCount || 0
+            enabled: s.enabled !== false,
+            useCount: s.useCount || 0,
+            patchCount: s.patchCount || 0,
+            lastUsedAt: s.lastUsedAt || null,
+            provenance: s.provenance || 'bundled'
           };
-        });
+        }));
       } else if (DEV_MOCK && Array.isArray(e.skills) && !detail) {
-        state.skillBindings[expertId] = e.skills.map(function (sid) {
+        state.skillBindings[expertId] = ensureFullInstalledSkills(e.skills.map(function (sid) {
           return { skillId: sid, enabled: true, params: getDefaultSkillParams(sid) };
-        });
+        }));
       } else if (detail && e.skillBindings && e.skillBindings.length) {
-        state.skillBindings[expertId] = e.skillBindings.map(function (b) {
-          return { skillId: b.skillId, enabled: b.enabled !== false, params: b.params || {} };
-        });
+        state.skillBindings[expertId] = ensureFullInstalledSkills(e.skillBindings.map(function (b) {
+          return {
+            skillId: b.skillId,
+            enabled: b.enabled !== false,
+            params: b.params || {},
+            useCount: b.useCount || 0,
+            patchCount: b.patchCount || 0,
+            lastUsedAt: b.lastUsedAt || null,
+            provenance: b.provenance || 'bundled'
+          };
+        }));
       }
       if (detail && e.toolsDetail !== undefined && Array.isArray(e.toolsDetail.toolsets)) {
         state.toolBindings[expertId] = e.toolsDetail.toolsets.map(function (t) {
@@ -844,6 +1087,8 @@
     }
     if (!state.skillBindings[expertId]) state.skillBindings[expertId] = [];
     if (!state.toolBindings[expertId]) state.toolBindings[expertId] = [];
+    if (!state.mcpServers) state.mcpServers = {};
+    if (state.mcpServers[expertId] === undefined) state.mcpServers[expertId] = [];
   }
 
   async function syncExpertsFromSidecar() {
@@ -851,6 +1096,7 @@
     if (!window.SidecarApi || !window.SidecarApi.listExperts) return;
     state.skillBindings = {};
     state.toolBindings = {};
+    state.mcpServers = {};
     state.expertDetailMeta = {};
     if (window.SidecarApi.provisionBundledProfiles) {
       await window.SidecarApi.provisionBundledProfiles();
@@ -1084,15 +1330,21 @@
       return window.EXPERTS_DATA[i] && window.EXPERTS_DATA[i].favorited;
     }).map(function (e) { return e.id; });
 
-    seedExperts.forEach(function (e) {
+    seedExperts.forEach(function (e, idx) {
       state.personas[e.id] = {
         coreDutyMd: '## 核心职责\n\n负责「' + e.name + '」职责范围内的专业咨询与方案输出。',
         workflowMd: '## 工作流程\n\n1. 理解需求\n2. 收集数据\n3. 分析诊断\n4. 输出建议',
         behaviorMd: '## 行为准则\n\n- 基于事实与数据\n- 结论清晰可执行\n- 主动确认关键假设'
       };
-      state.skillBindings[e.id] = [window.SKILLS_CATALOG[0].id];
-      if (window.SKILLS_CATALOG[1]) state.skillBindings[e.id].push(window.SKILLS_CATALOG[1].id);
-      state.toolBindings[e.id] = [window.TOOLS_CATALOG[0].id];
+      state.skillBindings[e.id] = seedInstalledSkills({
+        withDemoUsage: true,
+        demoDisabled: idx === 0 ? ['apple-notes'] : []
+      });
+      // platform_toolsets.cli opt-in：演示默认开启 browser；web 仍缺密钥便于展示红点
+      state.toolBindings[e.id] = idx === 0 ? ['browser', 'web'] : ['browser'];
+      if (!state.mcpServers) state.mcpServers = {};
+      state.mcpServers[e.id] = demoMcpServersForSeed(idx);
+      syncMcpServersToDetailMeta(e.id, state.mcpServers[e.id]);
       state.memories.push({
         id: uid(),
         expertId: e.id,
@@ -1158,6 +1410,39 @@
     });
 
     persist();
+  }
+
+  /** 已有本地数据时补种 MCP 示例（仅 DEV_MOCK；种子版本 bump 时刷新有演示配置的专家） */
+  function ensureMcpDemoSeed() {
+    if (!DEV_MOCK) return;
+    if (!state.mcpServers) state.mcpServers = {};
+    var forceReseed = state.mcpDemoSeedVersion !== MCP_DEMO_SEED_VERSION;
+    var updated = false;
+    state.experts.forEach(function (e, idx) {
+      var key = String(e.id);
+      var existing = state.mcpServers[key];
+      var seeded = demoMcpServersForSeed(idx);
+      var isMissing = existing === undefined;
+      var isEmpty = Array.isArray(existing) && existing.length === 0;
+      // 有演示配置：版本 bump 时覆盖；否则仅补缺失/空列表
+      if (seeded.length) {
+        if (!forceReseed && !isMissing && !isEmpty) return;
+        state.mcpServers[key] = seeded;
+        syncMcpServersToDetailMeta(key, seeded);
+        updated = true;
+        return;
+      }
+      if (isMissing) {
+        state.mcpServers[key] = [];
+        syncMcpServersToDetailMeta(key, []);
+        updated = true;
+      }
+    });
+    if (state.mcpDemoSeedVersion !== MCP_DEMO_SEED_VERSION) {
+      state.mcpDemoSeedVersion = MCP_DEMO_SEED_VERSION;
+      updated = true;
+    }
+    if (updated) persist();
   }
 
   function migrateProjectsVisibility() {
@@ -2432,6 +2717,85 @@
     if (updated) persist();
   }
 
+  function migrateSkillOptOutModel() {
+    if (!DEV_MOCK) return false;
+    var updated = false;
+    (state.experts || []).forEach(function (e, idx) {
+      var id = String(e.id);
+      var raw = state.skillBindings[id];
+      if (!raw) {
+        state.skillBindings[id] = seedInstalledSkills({
+          withDemoUsage: true,
+          demoDisabled: idx === 0 ? ['apple-notes'] : []
+        });
+        updated = true;
+        return;
+      }
+      var looksLegacy = raw.length > 0 && raw.every(function (b) {
+        return typeof b === 'string' || (b && b.skillId && b.enabled === undefined && b.useCount === undefined && b.provenance === undefined);
+      });
+      var tooFew = Array.isArray(raw) && (window.SKILLS_CATALOG || []).length > 0 && raw.length < (window.SKILLS_CATALOG || []).length;
+      if (looksLegacy || tooFew) {
+        // 旧「绑定子集」→ 全量已安装 + 默认启用（对齐 seed）；保留显式 disabled
+        var seeded = seedInstalledSkills({
+          withDemoUsage: true,
+          demoDisabled: []
+        });
+        raw.forEach(function (b) {
+          if (typeof b === 'object' && b && b.enabled === false) {
+            var sid = bindingSkillId(b);
+            seeded.forEach(function (s) {
+              if (s.skillId === sid) s.enabled = false;
+            });
+          }
+        });
+        state.skillBindings[id] = seeded;
+        updated = true;
+      } else {
+        var normalized = ensureFullInstalledSkills(raw);
+        if (normalized.length !== raw.length) {
+          state.skillBindings[id] = normalized;
+          updated = true;
+        }
+      }
+    });
+    return updated;
+  }
+
+  /** 旧「绑定子集 / 仅 terminal」→ platform_toolsets.cli opt-in 演示数据 */
+  function migrateToolOptInModel() {
+    if (!DEV_MOCK) return false;
+    var updated = false;
+    if (!state.toolsetConfigs) {
+      state.toolsetConfigs = {};
+      updated = true;
+    }
+    (state.experts || []).forEach(function (e, idx) {
+      var id = String(e.id);
+      var raw = state.toolBindings[id];
+      if (raw === undefined) {
+        state.toolBindings[id] = idx === 0 ? ['browser', 'web'] : ['browser'];
+        updated = true;
+        return;
+      }
+      var ids = normalizeToolIds(raw);
+      var onlyLegacyTerminal = ids.length === 1 && ids[0] === 'terminal';
+      if (onlyLegacyTerminal) {
+        state.toolBindings[id] = idx === 0 ? ['browser', 'web'] : ['browser'];
+        updated = true;
+        return;
+      }
+      // 规范化为 id 列表（去掉旧 binding 对象形态）
+      var changed = !Array.isArray(raw) || raw.length !== ids.length ||
+        raw.some(function (b, i) { return typeof b !== 'string' || b !== ids[i]; });
+      if (changed) {
+        state.toolBindings[id] = ids;
+        updated = true;
+      }
+    });
+    return updated;
+  }
+
   var DEMO_DATA_VERSION = window.DEMO_DATA_VERSION || 1;
 
   /**
@@ -2460,12 +2824,15 @@
     init: function () {
       if (DEV_MOCK) {
         seedIfEmpty();
+        ensureMcpDemoSeed();
       }
       migrateExpertRoleNames();
       if (sanitizeLegacyConversationMessages(state.messages)) persist();
       else if (normalizeLegacyActionMessages(state.messages)) persist();
       if (DEV_MOCK) {
         migrateSeedExpertProfiles();
+        if (migrateSkillOptOutModel()) persist();
+        if (migrateToolOptInModel()) persist();
       }
       migrateProjectIds();
       seedDemoProjectsIfEmpty();
@@ -2563,8 +2930,42 @@
       };
       state.experts.unshift(expert);
       state.personas[expert.id] = { soulMd: '', onboarded: false };
-      state.skillBindings[expert.id] = payload.skillIds || [];
-      state.toolBindings[expert.id] = payload.toolIds || [];
+      // 技能：seed 全部已安装并默认启用；复制来源时清空 .usage.json（不继承热度）
+      if (payload.source === 'clone' && payload.cloneFrom && state.skillBindings[String(payload.cloneFrom)]) {
+        state.skillBindings[expert.id] = (state.skillBindings[String(payload.cloneFrom)] || [])
+          .map(normalizeInstalledSkillRecord)
+          .filter(Boolean)
+          .map(clearSkillUsageFields);
+        state.skillBindings[expert.id] = ensureFullInstalledSkills(state.skillBindings[expert.id])
+          .map(clearSkillUsageFields);
+      } else if (payload.skillIds && payload.skillIds.length) {
+        // 兼容旧调用：仅传 id 列表时仍 seed 全量，列表内视为启用提示（其余也启用）
+        state.skillBindings[expert.id] = seedInstalledSkills({ clearUsage: true });
+      } else {
+        state.skillBindings[expert.id] = seedInstalledSkills({ clearUsage: true });
+      }
+      // 工具：创建默认不写满 platform_toolsets.cli（继承 _HERMES_CORE_TOOLS）；复制时带走源专家 opt-in 列表
+      if (payload.toolIds && payload.toolIds.length) {
+        state.toolBindings[expert.id] = payload.toolIds.slice();
+      } else if (payload.source === 'clone' && payload.cloneFrom && payload.cloneFrom !== 'default') {
+        state.toolBindings[expert.id] = normalizeToolIds(state.toolBindings[String(payload.cloneFrom)] || []).slice();
+        if (state.toolsetConfigs && state.toolsetConfigs[String(payload.cloneFrom)]) {
+          if (!state.toolsetConfigs) state.toolsetConfigs = {};
+          state.toolsetConfigs[expert.id] = cloneJson(state.toolsetConfigs[String(payload.cloneFrom)]);
+        }
+      } else {
+        state.toolBindings[expert.id] = [];
+      }
+      if (!state.mcpServers) state.mcpServers = {};
+      // 对齐 Hermes --clone：复制来源保留 mcp_servers；从零开始不预置
+      if (payload.source === 'default' || (payload.source === 'clone' && payload.cloneFrom === 'default')) {
+        setMcpServersInternal(expert.id, defaultMcpServersForClone());
+      } else if (payload.source === 'clone' && payload.cloneFrom) {
+        var srcList = (state.mcpServers && state.mcpServers[String(payload.cloneFrom)]) || [];
+        setMcpServersInternal(expert.id, cloneJson(srcList));
+      } else {
+        setMcpServersInternal(expert.id, []);
+      }
       persist();
       if (!DEV_MOCK && window.SidecarApi && window.SidecarApi.createExpert) {
         window.SidecarApi.createExpert({
@@ -2606,6 +3007,15 @@
               state.toolBindings[newId] = state.toolBindings[oldId];
               delete state.toolBindings[oldId];
             }
+            if (state.toolsetConfigs && state.toolsetConfigs[oldId]) {
+              state.toolsetConfigs[newId] = state.toolsetConfigs[oldId];
+              delete state.toolsetConfigs[oldId];
+            }
+            if (state.mcpServers && state.mcpServers[oldId]) {
+              state.mcpServers[newId] = state.mcpServers[oldId];
+              delete state.mcpServers[oldId];
+              syncMcpServersToDetailMeta(newId, state.mcpServers[newId]);
+            }
             if (state.imChannels[oldId]) {
               state.imChannels[newId] = state.imChannels[oldId];
               delete state.imChannels[oldId];
@@ -2642,6 +3052,9 @@
       delete state.personas[id];
       delete state.skillBindings[id];
       delete state.toolBindings[id];
+      if (state.toolsetConfigs) delete state.toolsetConfigs[id];
+      if (state.mcpServers) delete state.mcpServers[id];
+      if (state.expertDetailMeta) delete state.expertDetailMeta[id];
       state.favorites = state.favorites.filter(function (f) { return f !== id; });
       persist();
       if (window.SidecarApi && window.SidecarApi.deleteExpert) {
@@ -2725,7 +3138,8 @@
             skillId: s.id,
             name: s.name,
             description: s.description || '',
-            category: s.category || ''
+            category: s.category || '',
+            provenance: s.provenance || 'bundled'
           };
         });
       }
@@ -2741,13 +3155,45 @@
         return window.TOOLS_CATALOG.map(function (t) {
           return {
             toolset: t.id,
-            label: t.name,
+            name: t.name || t.id,
+            label: t.label || t.name || t.id,
             description: t.description || '',
-            configured: true
+            toolCount: t.toolCount != null ? t.toolCount : (t.tools ? t.tools.length : 0),
+            tools: t.tools || [],
+            configured: t.configured !== false
           };
         });
       }
       return [];
+    },
+    /** 全部可配置 toolset + enabled（对齐 platform_toolsets.cli opt-in） */
+    getConfigurableToolsets: function (expertId) {
+      var key = String(expertId);
+      var enabledSet = {};
+      normalizeToolIds(state.toolBindings[key] || []).forEach(function (id) {
+        enabledSet[id] = true;
+      });
+      return this.getToolsCatalog(key).map(function (t) {
+        var id = t.toolset || t.name || t.id;
+        var override = getToolsetConfigOverride(key, id);
+        var configured = override && override.configured != null
+          ? !!override.configured
+          : t.configured !== false;
+        return {
+          toolset: id,
+          name: t.name || id,
+          label: t.label || t.name || id,
+          description: t.description || '',
+          toolCount: t.toolCount != null ? t.toolCount : ((t.tools && t.tools.length) || 0),
+          tools: t.tools || [],
+          configured: configured,
+          enabled: !!enabledSet[id],
+          config: (override && override.config) || t.config || getDefaultToolConfig(id)
+        };
+      });
+    },
+    getEnabledToolCount: function (expertId) {
+      return normalizeToolIds(state.toolBindings[expertId] || []).length;
     },
     getMemoryMeta: function (expertId) {
       return this.getExpertDetailMeta(expertId).memoryMeta || {};
@@ -2800,94 +3246,118 @@
     },
 
     getSkillIds: function (expertId) {
-      return normalizeSkillIds(state.skillBindings[expertId] || []);
+      // 已启用技能 id（∉ skills.disabled）
+      return this.getSkillBindings(expertId)
+        .filter(function (b) { return b.enabled !== false; })
+        .map(function (b) { return b.skillId; });
+    },
+    getEnabledSkillCount: function (expertId) {
+      return this.getSkillIds(expertId).length;
+    },
+    getInstalledSkillCount: function (expertId) {
+      return this.getSkillBindings(expertId).length;
     },
     getSkillBindings: function (expertId) {
       var raw = state.skillBindings[expertId] || [];
-      return raw.map(function (b) {
-        if (typeof b === 'string') {
-          return { skillId: b, enabled: true, params: getDefaultSkillParams(b) };
-        }
-        var sid = bindingSkillId(b);
-        return Object.assign({}, b, { skillId: sid });
-      }).filter(function (b) { return !!b.skillId; });
+      return ensureFullInstalledSkills(raw);
     },
     setSkillBindings: function (expertId, bindings) {
       var key = String(expertId);
-      state.skillBindings[key] = bindings;
-      persist();
-      var assigned = normalizeSkillIds(bindings);
-      if (!DEV_MOCK && window.SidecarApi && window.SidecarApi.putExpertSkills) {
-        bumpCapabilityRev(key);
-        return sidecarPutSkills(key, assigned);
-      }
-      return Promise.resolve({ assigned: state.skillBindings[key] });
-    },
-    addSkillBinding: function (expertId, skillId) {
-      return this.addSkillBindings(expertId, [skillId]);
-    },
-    addSkillBindings: function (expertId, skillIds) {
-      var key = String(expertId);
-      if (!state.skillBindings[key]) state.skillBindings[key] = [];
-      var catalog = this.getSkillsCatalog(key);
-      var catalogById = {};
-      catalog.forEach(function (s) { catalogById[s.skillId] = s; });
-      (skillIds || []).forEach(function (skillId) {
-        if (!skillId) return;
-        var sid = String(skillId).trim();
-        if (state.skillBindings[key].some(function (b) { return bindingSkillId(b) === sid; })) return;
-        var meta = catalogById[sid] || {};
-        state.skillBindings[key].push({
-          skillId: sid,
-          params: getDefaultSkillParams(sid),
-          name: meta.name || sid,
-          description: meta.description || '',
-          category: meta.category || ''
-        });
-      });
+      state.skillBindings[key] = ensureFullInstalledSkills(bindings || []);
       persist();
       var assigned = this.getSkillIds(key);
       if (!DEV_MOCK && window.SidecarApi && window.SidecarApi.putExpertSkills) {
         bumpCapabilityRev(key);
         return sidecarPutSkills(key, assigned);
       }
-      return Promise.resolve({ assigned: state.skillBindings[key] });
+      return Promise.resolve({ skills: state.skillBindings[key] });
     },
-    removeSkillBinding: function (expertId, skillId) {
+    addSkillBinding: function (expertId, skillId) {
+      return this.addSkillBindings(expertId, [skillId]);
+    },
+    addSkillBindings: function (expertId, skillIds) {
+      // 兼容：将技能标记为已安装并启用（不再是「绑定」语义）
       var key = String(expertId);
-      if (!state.skillBindings[key]) return Promise.resolve(null);
-      var target = String(skillId || '').trim();
-      var next = (state.skillBindings[key] || []).filter(function (b) {
-        return bindingSkillId(b) !== target;
+      var list = this.getSkillBindings(key);
+      var byId = {};
+      list.forEach(function (s) { byId[s.skillId] = s; });
+      var catalog = this.getSkillsCatalog(key);
+      var catalogById = {};
+      catalog.forEach(function (s) { catalogById[s.skillId] = s; });
+      (skillIds || []).forEach(function (skillId) {
+        if (!skillId) return;
+        var sid = String(skillId).trim();
+        if (byId[sid]) {
+          byId[sid].enabled = true;
+          return;
+        }
+        var meta = catalogById[sid] || { id: sid, skillId: sid, name: sid };
+        byId[sid] = catalogEntryToInstalled(meta, { clearUsage: true, enabled: true });
       });
-      var assigned = normalizeSkillIds(next);
+      state.skillBindings[key] = Object.keys(byId).map(function (k) { return byId[k]; });
+      persist();
+      var assigned = this.getSkillIds(key);
       if (!DEV_MOCK && window.SidecarApi && window.SidecarApi.putExpertSkills) {
         bumpCapabilityRev(key);
         return sidecarPutSkills(key, assigned);
       }
-      state.skillBindings[key] = next;
+      return Promise.resolve({ skills: state.skillBindings[key] });
+    },
+    removeSkillBinding: function (expertId, skillId) {
+      // 兼容旧 API：改为禁用（不删文件 / 不从已安装列表移除）
+      return this.toggleSkillEnabled(expertId, skillId, false);
+    },
+    toggleSkillEnabled: function (expertId, skillId, enabled) {
+      var key = String(expertId);
+      var list = this.getSkillBindings(key);
+      var target = String(skillId || '').trim();
+      var found = false;
+      state.skillBindings[key] = list.map(function (b) {
+        if (b.skillId !== target) return b;
+        found = true;
+        return Object.assign({}, b, { enabled: !!enabled });
+      });
+      if (!found) return Promise.resolve(null);
       persist();
-      return Promise.resolve({ assigned: state.skillBindings[key] });
+      bumpCapabilityRev(key);
+      window.dispatchEvent(new CustomEvent('app-store-updated', { detail: { expertId: key } }));
+      if (!DEV_MOCK && window.SidecarApi) {
+        return sidecarToggleSkill(key, target, !!enabled);
+      }
+      return Promise.resolve({ ok: true, effective: 'next_session', skills: state.skillBindings[key] });
+    },
+    installHubSkill: function (expertId, skill) {
+      var key = String(expertId);
+      var list = this.getSkillBindings(key);
+      var sid = String((skill && (skill.id || skill.skillId)) || '').trim();
+      if (!sid) return Promise.reject(new Error('无效的 Hub 技能'));
+      if (list.some(function (s) { return s.skillId === sid; })) {
+        return this.toggleSkillEnabled(key, sid, true);
+      }
+      var entry = catalogEntryToInstalled({
+        id: sid,
+        name: (skill && skill.name) || sid,
+        description: (skill && skill.description) || '',
+        category: (skill && skill.category) || '',
+        provenance: 'hub'
+      }, { clearUsage: true, enabled: true });
+      list.push(entry);
+      state.skillBindings[key] = list;
+      persist();
+      bumpCapabilityRev(key);
+      window.dispatchEvent(new CustomEvent('app-store-updated', { detail: { expertId: key } }));
+      if (!DEV_MOCK && window.SidecarApi && window.SidecarApi.putExpertSkills) {
+        return sidecarPutSkills(key, this.getSkillIds(key));
+      }
+      return Promise.resolve({ skills: state.skillBindings[key] });
     },
     toggleSkillBinding: function (expertId, skillId, enabled) {
-      if (!state.skillBindings[expertId]) return;
-      state.skillBindings[expertId] = state.skillBindings[expertId].map(function (b) {
-        var id = typeof b === 'string' ? b : b.skillId;
-        if (id !== skillId) return b;
-        if (typeof b === 'string') return { skillId: b, enabled: enabled, params: getDefaultSkillParams(b) };
-        return Object.assign({}, b, { enabled: enabled });
-      });
-      persist();
-      if (!DEV_MOCK && window.SidecarApi && window.SidecarApi.patchExpert) {
-        window.SidecarApi.patchExpert(String(expertId), { skills: this.getSkillIds(expertId) });
-      }
+      return this.toggleSkillEnabled(expertId, skillId, enabled);
     },
     updateSkillParams: function (expertId, skillId, params) {
       if (!state.skillBindings[expertId]) return;
-      state.skillBindings[expertId] = state.skillBindings[expertId].map(function (b) {
-        var id = typeof b === 'string' ? b : b.skillId;
-        if (id !== skillId) return b;
-        if (typeof b === 'string') return { skillId: b, enabled: true, params: params };
+      state.skillBindings[expertId] = this.getSkillBindings(expertId).map(function (b) {
+        if (b.skillId !== skillId) return b;
         return Object.assign({}, b, { params: params });
       });
       persist();
@@ -2899,112 +3369,233 @@
     getToolIds: function (expertId) {
       return normalizeToolIds(state.toolBindings[expertId] || []);
     },
+    /** 兼容旧调用：返回已启用列表；UI 请用 getConfigurableToolsets */
     getToolBindings: function (expertId) {
-      var raw = state.toolBindings[expertId] || [];
-      return raw.map(function (b) {
-        if (typeof b === 'string') {
-          return { toolId: b, enabled: true, status: 'unconfigured', config: getDefaultToolConfig(b) };
-        }
-        return b;
-      });
+      return this.getConfigurableToolsets(expertId).filter(function (t) { return t.enabled; });
     },
     setToolBindings: function (expertId, bindings) {
       var key = String(expertId);
-      state.toolBindings[key] = bindings;
+      // 接受完整行或 id 列表；落盘仅保留 opt-in 已启用 name
+      var enabledIds = [];
+      (bindings || []).forEach(function (b) {
+        if (typeof b === 'string') {
+          if (b.trim()) enabledIds.push(b.trim());
+          return;
+        }
+        if (b && b.enabled === false) return;
+        var tid = bindingToolId(b);
+        if (tid) enabledIds.push(tid);
+      });
+      state.toolBindings[key] = enabledIds;
       persist();
-      var assigned = normalizeToolIds(bindings);
+      bumpCapabilityRev(key);
+      window.dispatchEvent(new CustomEvent('app-store-updated', { detail: { expertId: key } }));
       if (!DEV_MOCK && window.SidecarApi && window.SidecarApi.putExpertTools) {
-        bumpCapabilityRev(key);
-        return sidecarPutTools(key, assigned);
+        return sidecarPutTools(key, enabledIds);
       }
-      return Promise.resolve({ assigned: { toolsets: state.toolBindings[key] } });
+      return Promise.resolve({ assigned: { toolsets: enabledIds }, effective: 'next_session' });
     },
     addToolBinding: function (expertId, toolId) {
-      return this.addToolBindings(expertId, [toolId]);
+      return this.toggleToolEnabled(expertId, toolId, true);
     },
     addToolBindings: function (expertId, toolIds) {
-      var key = String(expertId);
-      if (!state.toolBindings[key]) state.toolBindings[key] = [];
-      var catalog = this.getToolsCatalog(key);
-      var catalogById = {};
-      catalog.forEach(function (t) { catalogById[t.toolset] = t; });
+      var self = this;
+      var chain = Promise.resolve();
       (toolIds || []).forEach(function (toolId) {
-        if (!toolId) return;
-        var tid = String(toolId).trim();
-        if (state.toolBindings[key].some(function (b) { return bindingToolId(b) === tid; })) return;
-        var meta = catalogById[tid] || {};
-        state.toolBindings[key].push({
-          toolId: tid,
-          toolset: tid,
-          label: meta.label || tid,
-          description: meta.description || '',
-          status: meta.configured === false ? 'unconfigured' : 'configured',
-          config: getDefaultToolConfig(tid)
-        });
+        chain = chain.then(function () { return self.toggleToolEnabled(expertId, toolId, true); });
       });
-      persist();
-      var assigned = this.getToolIds(key);
-      if (!DEV_MOCK && window.SidecarApi && window.SidecarApi.putExpertTools) {
-        bumpCapabilityRev(key);
-        return sidecarPutTools(key, assigned);
-      }
-      return Promise.resolve({ assigned: { toolsets: state.toolBindings[key] } });
+      return chain.then(function () {
+        return { assigned: { toolsets: self.getToolIds(expertId) }, effective: 'next_session' };
+      });
     },
     removeToolBinding: function (expertId, toolId) {
+      return this.toggleToolEnabled(expertId, toolId, false);
+    },
+    /** 行内开关：写入 / 移出 platform_toolsets.cli（opt-in） */
+    toggleToolEnabled: function (expertId, toolId, enabled) {
       var key = String(expertId);
-      if (!state.toolBindings[key]) return Promise.resolve(null);
       var target = String(toolId || '').trim();
-      var next = (state.toolBindings[key] || []).filter(function (b) {
-        return bindingToolId(b) !== target;
-      });
-      var assigned = normalizeToolIds(next);
-      if (!DEV_MOCK && window.SidecarApi && window.SidecarApi.putExpertTools) {
-        bumpCapabilityRev(key);
-        return sidecarPutTools(key, assigned);
+      if (!target) return Promise.resolve(null);
+      var current = normalizeToolIds(state.toolBindings[key] || []);
+      var next;
+      if (enabled) {
+        next = current.indexOf(target) >= 0 ? current : current.concat([target]);
+      } else {
+        next = current.filter(function (id) { return id !== target; });
       }
       state.toolBindings[key] = next;
       persist();
-      return Promise.resolve({ assigned: { toolsets: state.toolBindings[key] } });
+      bumpCapabilityRev(key);
+      window.dispatchEvent(new CustomEvent('app-store-updated', { detail: { expertId: key } }));
+      if (!DEV_MOCK && window.SidecarApi && window.SidecarApi.putExpertTools) {
+        return sidecarPutTools(key, next).then(function (data) {
+          return Object.assign({ ok: true, effective: 'next_session' }, data || {});
+        });
+      }
+      return Promise.resolve({ ok: true, effective: 'next_session', assigned: { toolsets: next } });
     },
     toggleToolBinding: function (expertId, toolId, enabled) {
-      if (!state.toolBindings[expertId]) return;
-      state.toolBindings[expertId] = state.toolBindings[expertId].map(function (b) {
-        var id = typeof b === 'string' ? b : b.toolId;
-        if (id !== toolId) return b;
-        if (typeof b === 'string') return { toolId: b, enabled: enabled, status: 'unconfigured', config: getDefaultToolConfig(b) };
-        return Object.assign({}, b, { enabled: enabled });
-      });
-      persist();
-      if (!DEV_MOCK && window.SidecarApi && window.SidecarApi.patchExpert) {
-        window.SidecarApi.patchExpert(String(expertId), { tools: this.getToolIds(expertId) });
-      }
+      return this.toggleToolEnabled(expertId, toolId, enabled);
     },
     updateToolConfig: function (expertId, toolId, config) {
-      if (!state.toolBindings[expertId]) return;
-      state.toolBindings[expertId] = state.toolBindings[expertId].map(function (b) {
-        var id = typeof b === 'string' ? b : b.toolId;
-        if (id !== toolId) return b;
-        var hasConfig = config && Object.keys(config).some(function (k) { return config[k]; });
-        if (typeof b === 'string') return { toolId: b, enabled: true, status: hasConfig ? 'configured' : 'unconfigured', config: config || {} };
-        return Object.assign({}, b, { config: config || {}, status: hasConfig ? 'configured' : 'unconfigured' });
+      var key = String(expertId);
+      var tid = String(toolId || '').trim();
+      if (!tid) return Promise.resolve(null);
+      var cfg = config || {};
+      var hasConfig = Object.keys(cfg).some(function (k) { return !!cfg[k]; });
+      setToolsetConfigOverride(key, tid, {
+        config: cfg,
+        configured: hasConfig
       });
       persist();
+      bumpCapabilityRev(key);
+      window.dispatchEvent(new CustomEvent('app-store-updated', { detail: { expertId: key } }));
       if (!DEV_MOCK && window.SidecarApi && window.SidecarApi.patchExpert) {
-        window.SidecarApi.patchExpert(String(expertId), { tools: this.getToolIds(expertId) });
+        window.SidecarApi.patchExpert(key, { tools: this.getToolIds(key) });
       }
+      return Promise.resolve({ ok: true, effective: 'next_session', configured: hasConfig });
     },
     testToolConnection: function (expertId, toolId) {
-      if (!state.toolBindings[expertId]) return;
-      state.toolBindings[expertId] = state.toolBindings[expertId].map(function (b) {
-        var id = typeof b === 'string' ? b : b.toolId;
-        if (id !== toolId) return b;
-        if (typeof b === 'string') return { toolId: b, enabled: true, status: 'connected', config: getDefaultToolConfig(b) };
-        return Object.assign({}, b, { status: 'connected' });
-      });
+      var key = String(expertId);
+      var tid = String(toolId || '').trim();
+      setToolsetConfigOverride(key, tid, { configured: true, status: 'connected' });
       persist();
-      if (!DEV_MOCK && window.SidecarApi && window.SidecarApi.patchExpert) {
-        window.SidecarApi.patchExpert(String(expertId), { tools: this.getToolIds(expertId) });
+      return Promise.resolve({ ok: true });
+    },
+
+    getMcpServers: function (expertId) {
+      var key = String(expertId);
+      if (!state.mcpServers) state.mcpServers = {};
+      var list = state.mcpServers[key];
+      if (!list) {
+        var td = ((state.expertDetailMeta || {})[key] || {}).toolsDetail || {};
+        list = td.mcpServers || [];
+        if (list.length) setMcpServersInternal(key, list);
       }
+      return (state.mcpServers[key] || []).map(normalizeMcpServer);
+    },
+    getMcpEnabledCount: function (expertId) {
+      return this.getMcpServers(expertId).filter(function (s) { return s.enabled; }).length;
+    },
+    getMcpNeedsAttentionCount: function (expertId) {
+      return this.getMcpServers(expertId).filter(function (s) {
+        return s.enabled && (s.status === 'missing_secret' || s.status === 'connection_failed');
+      }).length;
+    },
+    setMcpServers: function (expertId, list) {
+      setMcpServersInternal(expertId, list);
+      persist();
+      return this.getMcpServers(expertId);
+    },
+    addMcpServer: function (expertId, payload) {
+      var key = String(expertId);
+      var list = this.getMcpServers(key).slice();
+      var name = String((payload && payload.name) || '').trim();
+      if (!name) return Promise.reject(new Error('请填写服务器名称'));
+      if (!/^[a-z0-9][a-z0-9_-]{0,63}$/.test(name)) {
+        return Promise.reject(new Error('名称须匹配 ^[a-z0-9][a-z0-9_-]{0,63}$'));
+      }
+      if (list.some(function (s) { return s.name === name; })) {
+        return Promise.reject(new Error('已存在同名 MCP 服务器'));
+      }
+      var type = (payload.type === 'http') ? 'http' : 'stdio';
+      if (type === 'http' && !(payload.url || '').trim()) {
+        return Promise.reject(new Error('HTTP 类型须填写 URL'));
+      }
+      if (type === 'stdio' && !(payload.command || '').trim()) {
+        return Promise.reject(new Error('stdio 类型须填写 Command'));
+      }
+      var env = {};
+      var missingEnv = [];
+      if (payload.envText) {
+        String(payload.envText).split(/\n+/).forEach(function (line) {
+          var m = line.match(/^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)\s*$/);
+          if (!m) return;
+          env[m[1]] = m[2];
+          if (!m[2]) missingEnv.push(m[1]);
+        });
+      }
+      if (payload.secretKey && !(payload.secretValue || '').trim()) {
+        missingEnv.push(payload.secretKey);
+        env[payload.secretKey] = '';
+      } else if (payload.secretKey && payload.secretValue) {
+        env[payload.secretKey] = payload.secretValue;
+      }
+      list.push(normalizeMcpServer({
+        name: name,
+        type: type,
+        url: payload.url || '',
+        command: payload.command || '',
+        args: payload.args || [],
+        env: env,
+        enabled: payload.enabled !== false,
+        missingEnv: missingEnv,
+        status: missingEnv.length ? 'missing_secret' : 'ok'
+      }));
+      setMcpServersInternal(key, list);
+      persist();
+      return Promise.resolve(this.getMcpServers(key));
+    },
+    updateMcpServer: function (expertId, name, patch) {
+      var key = String(expertId);
+      var list = this.getMcpServers(key).map(function (s) {
+        if (s.name !== name) return s;
+        return normalizeMcpServer(Object.assign({}, s, patch || {}));
+      });
+      setMcpServersInternal(key, list);
+      persist();
+      return Promise.resolve(this.getMcpServers(key));
+    },
+    toggleMcpServerEnabled: function (expertId, name, enabled) {
+      return this.updateMcpServer(expertId, name, { enabled: !!enabled });
+    },
+    fillMcpSecrets: function (expertId, name, secrets) {
+      var key = String(expertId);
+      var list = this.getMcpServers(key).map(function (s) {
+        if (s.name !== name) return s;
+        var env = Object.assign({}, s.env || {});
+        var missingEnv = [];
+        Object.keys(secrets || {}).forEach(function (k) {
+          env[k] = secrets[k];
+        });
+        Object.keys(env).forEach(function (k) {
+          if (env[k] === '' || env[k] == null) missingEnv.push(k);
+        });
+        return normalizeMcpServer(Object.assign({}, s, {
+          env: env,
+          missingEnv: missingEnv,
+          status: missingEnv.length ? 'missing_secret' : 'ok',
+          secretsFilled: !missingEnv.length,
+          errorSummary: missingEnv.length ? s.errorSummary : ''
+        }));
+      });
+      setMcpServersInternal(key, list);
+      persist();
+      return Promise.resolve(this.getMcpServers(key));
+    },
+    retryMcpConnection: function (expertId, name) {
+      var key = String(expertId);
+      var list = this.getMcpServers(key).map(function (s) {
+        if (s.name !== name) return s;
+        if (s.missingEnv && s.missingEnv.length) {
+          return normalizeMcpServer(Object.assign({}, s, { status: 'missing_secret' }));
+        }
+        // Mock：重试后视为连通成功（路径问题样例可手动再改）
+        return normalizeMcpServer(Object.assign({}, s, {
+          status: 'ok',
+          errorSummary: ''
+        }));
+      });
+      setMcpServersInternal(key, list);
+      persist();
+      return Promise.resolve(this.getMcpServers(key));
+    },
+    deleteMcpServer: function (expertId, name) {
+      var key = String(expertId);
+      var list = this.getMcpServers(key).filter(function (s) { return s.name !== name; });
+      setMcpServersInternal(key, list);
+      persist();
+      return Promise.resolve(this.getMcpServers(key));
     },
 
     getMemories: function (expertId) {

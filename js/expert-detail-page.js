@@ -1,5 +1,5 @@
 ﻿/**
- * 专家管理详情页 — 人设 / 工作空间 / 任务 / 记忆 / 技能 / 工具 / IM渠道
+ * 专家管理详情页 — 人设 / 工作空间 / 任务 / 记忆 / 技能 / 工具 / MCP / IM渠道
  */
 (function () {
   var store = window.AppStore;
@@ -14,6 +14,7 @@
       if (activeTab.value === 'overview' || activeTab.value === 'basic') activeTab.value = 'persona';
       if (activeTab.value === 'skills-tools') activeTab.value = 'skills';
       if (activeTab.value === 'messaging') activeTab.value = 'im';
+      if (activeTab.value === 'mcp-servers') activeTab.value = 'mcp';
       if (activeTab.value === 'artifacts' || activeTab.value === 'outputs') {
         activeTab.value = 'workspace';
       } else if (activeTab.value === 'materials') {
@@ -27,6 +28,24 @@
       var memoryInput = Vue.ref('');
       var skillBindings = Vue.ref([]);
       var toolBindings = Vue.ref([]);
+      var mcpServers = Vue.ref([]);
+      var mcpSaving = Vue.ref(false);
+      var mcpFormVisible = Vue.ref(false);
+      var mcpSecretVisible = Vue.ref(false);
+      var mcpSecretTarget = Vue.ref(null);
+      var mcpSecretDraft = Vue.ref({});
+      var mcpForm = Vue.ref({
+        name: '',
+        type: 'stdio',
+        url: '',
+        command: '',
+        argsText: '',
+        envText: '',
+        secretKey: '',
+        secretValue: '',
+        asSecret: false,
+        enabled: true
+      });
       var imChannels = Vue.ref([]);
       var materials = Vue.ref([]);
       var expertArtifacts = Vue.ref([]);
@@ -44,7 +63,6 @@
       var memoryMdContent = Vue.ref('');
       var userMdContent = Vue.ref('');
       var personaOnboardDismissed = Vue.ref(false);
-      var personaApplyImmediate = Vue.ref(false);
       var hubInstallDialogVisible = Vue.ref(false);
       var hubInstallSearch = Vue.ref('');
       var hubInstalling = Vue.ref(false);
@@ -94,12 +112,16 @@
       var personaImportInput = Vue.ref(null);
 
       var detailMeta = Vue.ref({ skillsDetail: [], skillsCatalog: [], toolsDetail: {}, toolsCatalog: [], memoryMeta: {}, gateway: {} });
-      var skillPickerVisible = Vue.ref(false);
-      var skillPickerSearch = Vue.ref('');
-      var skillPickerSelection = Vue.ref([]);
-      var toolPickerVisible = Vue.ref(false);
-      var toolPickerSearch = Vue.ref('');
-      var toolPickerSelection = Vue.ref([]);
+      var skillSearchQuery = Vue.ref('');
+      var skillCategoryFilter = Vue.ref('all');
+      var skillEnabledFilter = Vue.ref('all');
+      var toolSearchQuery = Vue.ref('');
+      var toolEnabledFilter = Vue.ref('all');
+      var toolConfigDrawerVisible = Vue.ref(false);
+      var toolConfigTarget = Vue.ref(null);
+      var toolConfigDraft = Vue.ref({});
+      var toolDetailVisible = Vue.ref(false);
+      var toolDetailTarget = Vue.ref(null);
       var capabilitySaving = Vue.ref(false);
       var capabilitiesLoading = Vue.ref(false);
       var messagingSearchQuery = Vue.ref('');
@@ -155,7 +177,10 @@
       function applyCapabilityState() {
         var eid = String(props.expertId);
         skillBindings.value = store.getSkillBindings(eid).slice();
-        toolBindings.value = store.getToolBindings(eid).slice();
+        toolBindings.value = (store.getConfigurableToolsets
+          ? store.getConfigurableToolsets(eid)
+          : store.getToolBindings(eid)).slice();
+        mcpServers.value = store.getMcpServers(eid).slice();
         detailMeta.value = store.getExpertDetailMeta(eid);
         imGatewayEnabled.value = !!(detailMeta.value.gateway && detailMeta.value.gateway.enabled);
         ensureImChannelSelected();
@@ -181,8 +206,10 @@
           label: c.label || c.name,
           name: c.name || c.label,
           emoji: c.emoji || '',
+          connectionHint: c.connectionHint || '',
           enabled: false,
           configured: false,
+          pendingRestart: false,
           state: 'disabled',
           config: '',
           subscriptions: [],
@@ -201,6 +228,7 @@
           out.emoji = template.emoji || out.emoji || '';
           out.description = template.description || out.description;
           out.docsUrl = template.docsUrl || out.docsUrl;
+          out.connectionHint = template.connectionHint || out.connectionHint || '';
         }
         var templateFields = template && template.credentialFields ? template.credentialFields : null;
         if (templateFields && templateFields.length) {
@@ -310,26 +338,14 @@
       function savePersona() {
         store.savePersona(props.expertId, { soulMd: persona.value.soulMd || '' });
         var count = runningSessionCount.value;
-        var msg;
-        if (personaApplyImmediate.value && count > 0) {
-          msg = '人设已保存并立即生效。已有 ' + count + ' 个运行中会话已刷新缓存。';
-          ElementPlus.ElMessageBox.confirm(
-            '立即生效将刷新当前 ' + count + ' 个运行中会话的 prompt 缓存，可能导致会话中断。确定继续？',
-            '确认立即生效',
-            { confirmButtonText: '确认立即生效', cancelButtonText: '取消', type: 'warning' }
-          ).then(function () {
-            ElementPlus.ElMessage.success(msg);
-          }).catch(function () {
-            ElementPlus.ElMessage.success('人设已保存。修改将在新会话生效。');
-          });
-        } else if (count > 0) {
-          msg = '已保存。该专家当前有 ' + count + ' 个运行中会话，修改将在新会话生效。';
-          ElementPlus.ElMessage.success(msg);
+        // MVP：人设仅下次会话生效，不提供「立即生效」
+        if (count > 0) {
+          ElementPlus.ElMessage.success(
+            '已保存。修改将在新会话生效；该专家当前有 ' + count + ' 个运行中会话，仍使用旧人设。'
+          );
         } else {
-          msg = '已保存。修改将在新会话生效。';
-          ElementPlus.ElMessage.success(msg);
+          ElementPlus.ElMessage.success('已保存。修改将在新会话生效。');
         }
-        personaApplyImmediate.value = false;
       }
 
       function dismissPersonaOnboard() {
@@ -387,12 +403,14 @@
       }
       var hubSkillOptions = Vue.computed(function () {
         var q = hubInstallSearch.value.trim().toLowerCase();
-        var assigned = {};
-        skillBindings.value.forEach(function (s) { assigned[s.skillId] = true; });
+        var installed = {};
+        skillBindings.value.forEach(function (s) { installed[s.skillId] = true; });
         return (window.SKILLS_HUB_CATALOG || []).filter(function (s) {
-          if (assigned[s.id]) return false;
+          if (installed[s.id]) return false;
           if (!q) return true;
-          return (s.name || '').toLowerCase().indexOf(q) >= 0 || (s.description || '').toLowerCase().indexOf(q) >= 0 || (s.category || '').toLowerCase().indexOf(q) >= 0;
+          return (s.name || '').toLowerCase().indexOf(q) >= 0 ||
+            (s.description || '').toLowerCase().indexOf(q) >= 0 ||
+            (s.category || '').toLowerCase().indexOf(q) >= 0;
         });
       });
       function installHubSkill(skill) {
@@ -403,72 +421,224 @@
           if (hubInstallProgress.value >= 100) {
             clearInterval(timer);
             hubInstalling.value = false;
-            var next = skillBindings.value.slice();
-            next.push({ skillId: skill.id, enabled: true, params: {} });
-            store.setSkillBindings(props.expertId, next);
-            skillBindings.value = store.getSkillBindings(props.expertId).slice();
-            hubInstallDialogVisible.value = false;
-            var count = runningSessionCount.value;
-            var msg = count > 0
-              ? '已安装「' + skill.name + '」。该专家当前有 ' + count + ' 个运行中会话，修改将在新会话生效。'
-              : '已安装「' + skill.name + '」。修改将在新会话生效。';
-            ElementPlus.ElMessage.success(msg);
+            store.installHubSkill(props.expertId, skill).then(function () {
+              skillBindings.value = store.getSkillBindings(props.expertId).slice();
+              hubInstallDialogVisible.value = false;
+              var count = runningSessionCount.value;
+              var msg = count > 0
+                ? '已安装「' + (skill.name || skill.id) + '」，默认已启用。该专家当前有 ' + count + ' 个运行中会话，修改将在新会话生效。'
+                : '已安装「' + (skill.name || skill.id) + '」，默认已启用。修改将在新会话生效。';
+              ElementPlus.ElMessage.success(msg);
+            });
           }
         }, 400);
       }
 
-      function removeSkillBindingDynamic(skillId, row) {
-        var name = (row && row.name) || skillId;
-        ElementPlus.ElMessageBox.confirm(
-          '确定解绑技能「' + name + '」？',
-          '解绑技能',
-          { confirmButtonText: '解绑', cancelButtonText: '取消', type: 'warning' }
-        ).then(function () {
-          skillBindings.value = skillBindings.value.filter(function (s) { return s.skillId !== skillId; });
-          store.setSkillBindings(props.expertId, skillBindings.value);
+      function toggleSkillEnabled(row, enabled) {
+        var next = !!enabled;
+        capabilitySaving.value = true;
+        store.toggleSkillEnabled(props.expertId, row.skillId, next).then(function () {
+          skillBindings.value = store.getSkillBindings(props.expertId).slice();
           var count = runningSessionCount.value;
+          var label = next ? '已启用' : '已禁用';
           var msg = count > 0
-            ? '已解绑。该专家当前有 ' + count + ' 个运行中会话，修改将在新会话生效。'
-            : '已解绑。修改将在新会话生效。';
+            ? label + '。该专家当前有 ' + count + ' 个运行中会话，修改将在新会话生效。'
+            : label + '。修改将在新会话生效。';
           ElementPlus.ElMessage.success(msg);
+        }).catch(function (err) {
+          skillBindings.value = store.getSkillBindings(props.expertId).slice();
+          ElementPlus.ElMessage.error((err && err.message) || '启停失败，请重试');
+        }).finally(function () { capabilitySaving.value = false; });
+      }
+
+      function formatSkillLastUsed(iso) {
+        if (!iso) return '—';
+        var t = new Date(iso).getTime();
+        if (isNaN(t)) return '—';
+        var diff = Date.now() - t;
+        if (diff < 60 * 1000) return '刚刚';
+        if (diff < 3600 * 1000) return Math.floor(diff / 60000) + ' 分钟前';
+        if (diff < 24 * 3600 * 1000) return Math.floor(diff / 3600000) + ' 小时前';
+        if (diff < 48 * 3600 * 1000) return '昨天';
+        if (diff < 7 * 24 * 3600 * 1000) return Math.floor(diff / (24 * 3600000)) + ' 天前';
+        return new Date(iso).toLocaleDateString();
+      }
+
+      function skillProvenanceLabel(p) {
+        if (p === 'hub') return 'hub';
+        if (p === 'agent') return 'agent';
+        return 'bundled';
+      }
+
+      function refreshToolsets() {
+        var eid = String(props.expertId);
+        toolBindings.value = (store.getConfigurableToolsets
+          ? store.getConfigurableToolsets(eid)
+          : store.getToolBindings(eid)).slice();
+      }
+
+      function toggleToolEnabled(row, enabled) {
+        var next = !!enabled;
+        var toolId = getToolsetId(row);
+        capabilitySaving.value = true;
+        var op = store.toggleToolEnabled
+          ? store.toggleToolEnabled(props.expertId, toolId, next)
+          : store.toggleToolBinding(props.expertId, toolId, next);
+        Promise.resolve(op).then(function () {
+          refreshToolsets();
+          var count = runningSessionCount.value;
+          var label = next ? '已启用' : '已禁用';
+          var msg = count > 0
+            ? label + '。该专家当前有 ' + count + ' 个运行中会话，修改将在新会话生效。'
+            : label + '。修改将在新会话生效。';
+          ElementPlus.ElMessage.success(msg);
+        }).catch(function (err) {
+          refreshToolsets();
+          ElementPlus.ElMessage.error((err && err.message) || '启停失败，请重试');
+        }).finally(function () { capabilitySaving.value = false; });
+      }
+
+      function mcpEffectToast(actionLabel) {
+        var count = runningSessionCount.value;
+        return count > 0
+          ? actionLabel + '。该专家当前有 ' + count + ' 个运行中会话，修改将在新会话生效。'
+          : actionLabel + '。修改将在新会话生效。';
+      }
+
+      function refreshMcpServers() {
+        mcpServers.value = store.getMcpServers(props.expertId).slice();
+      }
+
+      function resetMcpForm() {
+        mcpForm.value = {
+          name: '',
+          type: 'stdio',
+          url: '',
+          command: '',
+          argsText: '',
+          envText: '',
+          secretKey: '',
+          secretValue: '',
+          asSecret: false,
+          enabled: true
+        };
+      }
+
+      function openMcpForm() {
+        resetMcpForm();
+        mcpFormVisible.value = true;
+      }
+
+      function submitMcpForm() {
+        var f = mcpForm.value;
+        mcpSaving.value = true;
+        store.addMcpServer(props.expertId, {
+          name: (f.name || '').trim(),
+          type: f.type,
+          url: (f.url || '').trim(),
+          command: (f.command || '').trim(),
+          args: (f.argsText || '').trim() ? f.argsText.trim().split(/[\s,]+/) : [],
+          envText: f.envText || '',
+          secretKey: f.asSecret ? (f.secretKey || '').trim() : '',
+          secretValue: f.asSecret ? (f.secretValue || '') : '',
+          enabled: !!f.enabled
+        }).then(function () {
+          refreshMcpServers();
+          mcpFormVisible.value = false;
+          ElementPlus.ElMessage.success(mcpEffectToast('已添加 MCP 服务'));
+        }).catch(function (err) {
+          ElementPlus.ElMessage.error((err && err.message) || '添加失败');
+        }).finally(function () { mcpSaving.value = false; });
+      }
+
+      function toggleMcpEnabled(row) {
+        var next = !row.enabled;
+        store.toggleMcpServerEnabled(props.expertId, row.name, next).then(function () {
+          refreshMcpServers();
+          ElementPlus.ElMessage.success(mcpEffectToast(next ? '已启用' : '已禁用'));
+        });
+      }
+
+      function openMcpSecretForm(row) {
+        mcpSecretTarget.value = row;
+        var draft = {};
+        (row.missingEnv || []).forEach(function (k) { draft[k] = ''; });
+        if (!Object.keys(draft).length) draft.API_KEY = '';
+        mcpSecretDraft.value = draft;
+        mcpSecretVisible.value = true;
+      }
+
+      function submitMcpSecrets() {
+        var target = mcpSecretTarget.value;
+        if (!target) return;
+        var secrets = Object.assign({}, mcpSecretDraft.value);
+        var empty = Object.keys(secrets).filter(function (k) { return !(secrets[k] || '').trim(); });
+        if (empty.length) {
+          ElementPlus.ElMessage.warning('请填写：' + empty.join(', '));
+          return;
+        }
+        mcpSaving.value = true;
+        store.fillMcpSecrets(props.expertId, target.name, secrets).then(function () {
+          refreshMcpServers();
+          mcpSecretVisible.value = false;
+          ElementPlus.ElMessage.success(mcpEffectToast('密钥已保存'));
+        }).finally(function () { mcpSaving.value = false; });
+      }
+
+      function retryMcpConnection(row) {
+        store.retryMcpConnection(props.expertId, row.name).then(function () {
+          refreshMcpServers();
+          ElementPlus.ElMessage.success(mcpEffectToast('已重试连接'));
+        });
+      }
+
+      function deleteMcpServer(row) {
+        ElementPlus.ElMessageBox.confirm(
+          '确定删除 MCP 服务「' + (row.name || row.id) + '」？删除后专家将无法调用该服务暴露的工具。',
+          '删除 MCP',
+          { confirmButtonText: '删除', cancelButtonText: '取消', type: 'warning' }
+        ).then(function () {
+          return store.deleteMcpServer(props.expertId, row.name);
+        }).then(function () {
+          refreshMcpServers();
+          ElementPlus.ElMessage.success(mcpEffectToast('已删除'));
         }).catch(function () {});
       }
 
-      function removeToolBindingDynamic(toolset, row) {
-        var name = (row && row.label) || toolset;
-        ElementPlus.ElMessageBox.confirm(
-          '确定解绑工具「' + name + '」？',
-          '解绑工具',
-          { confirmButtonText: '解绑', cancelButtonText: '取消', type: 'warning' }
-        ).then(function () {
-          toolBindings.value = toolBindings.value.filter(function (t) {
-            return (t.toolset || t.toolId) !== toolset;
-          });
-          store.setToolBindings(props.expertId, toolBindings.value);
-          var count = runningSessionCount.value;
-          var msg = count > 0
-            ? '已解绑。该专家当前有 ' + count + ' 个运行中会话，修改将在新会话生效。'
-            : '已解绑。修改将在新会话生效。';
-          ElementPlus.ElMessage.success(msg);
-        }).catch(function () {});
+      function mcpStatusLabel(row) {
+        if (!row.enabled || row.status === 'disabled') return '已禁用';
+        if (row.status === 'missing_secret') return '未配置密钥';
+        if (row.status === 'connection_failed') return '连接失败';
+        return '正常';
       }
 
-      function unbindMcpServer(server) {
-        ElementPlus.ElMessageBox.confirm(
-          '确定解绑 MCP 服务器「' + (server.name || server.id) + '」？',
-          '解绑 MCP',
-          { confirmButtonText: '解绑', cancelButtonText: '取消', type: 'warning' }
-        ).then(function () {
-          var count = runningSessionCount.value;
-          var msg = count > 0
-            ? '已解绑。该专家当前有 ' + count + ' 个运行中会话，修改将在新会话生效。'
-            : '已解绑。修改将在新会话生效。';
-          ElementPlus.ElMessage.success(msg);
-        }).catch(function () {});
+      function mcpStatusClass(row) {
+        if (!row.enabled || row.status === 'disabled') return 'mcp-status--disabled';
+        if (row.status === 'missing_secret' || row.status === 'connection_failed') return 'mcp-status--error';
+        return 'mcp-status--ok';
       }
+
+      function mcpTypeLabel(row) {
+        return row.type === 'http' ? 'HTTP' : 'stdio';
+      }
+
+      var mcpEnabledCount = Vue.computed(function () {
+        return mcpServers.value.filter(function (s) { return s.enabled; }).length;
+      });
+
+      var mcpNeedsAttentionCount = Vue.computed(function () {
+        return mcpServers.value.filter(function (s) {
+          return s.enabled && (s.status === 'missing_secret' || s.status === 'connection_failed');
+        }).length;
+      });
 
       function saveSkillBindings() { store.setSkillBindings(props.expertId, skillBindings.value); ElementPlus.ElMessage.success('技能已更新'); }
-      function saveToolBindings() { store.setToolBindings(props.expertId, toolBindings.value); ElementPlus.ElMessage.success('工具已更新'); }
+      function saveToolBindings() {
+        store.setToolBindings(props.expertId, toolBindings.value).then(function () {
+          refreshToolsets();
+          ElementPlus.ElMessage.success('工具已更新');
+        });
+      }
       function addMemory() {
         if (!memoryInput.value.trim()) return;
         store.addMemory(props.expertId, memoryInput.value.trim());
@@ -579,7 +749,8 @@
             field.value = v !== undefined && v !== null && v !== '' ? v : (field.default !== undefined ? field.default : '');
           });
         }
-        ch.state = !ch.enabled ? 'disabled' : (ch.configured ? (imGatewayEnabled.value ? 'configured' : 'gateway_stopped') : 'not_configured');
+        if (ch.enabled && ch.configured) ch.pendingRestart = true;
+        ch.state = imConnectionStatus(ch);
       }
 
       function getImPolicyDraftValue(key) {
@@ -1338,12 +1509,19 @@
           return;
         }
         var category = memoryForm.value.category || 'other';
+        var count = runningSessionCount.value;
         if (memoryDialogMode.value === 'edit' && editingMemoryId.value) {
           store.updateMemory(editingMemoryId.value, { content: content, category: category });
-          ElementPlus.ElMessage.success('记忆已更新');
         } else {
           store.addMemory(props.expertId, content, category);
-          ElementPlus.ElMessage.success('记忆已新增');
+        }
+        // P1：记忆手动编辑仅下次会话生效（与人设一致，不提供「立即生效」）
+        if (count > 0) {
+          ElementPlus.ElMessage.success(
+            '已保存。修改将在新会话生效；该专家当前有 ' + count + ' 个运行中会话，仍使用旧记忆。'
+          );
+        } else {
+          ElementPlus.ElMessage.success('已保存。修改将在新会话生效。');
         }
         memoryInput.value = '';
         memoryCategoryInput.value = category;
@@ -1355,6 +1533,14 @@
         if (!editingMemoryId.value) return;
         removeMemory(editingMemoryId.value);
         memoryDialogVisible.value = false;
+        var count = runningSessionCount.value;
+        if (count > 0) {
+          ElementPlus.ElMessage.success(
+            '已保存。修改将在新会话生效；该专家当前有 ' + count + ' 个运行中会话，仍使用旧记忆。'
+          );
+        } else {
+          ElementPlus.ElMessage.success('已保存。修改将在新会话生效。');
+        }
       }
 
       function addMemoryWithCategory() {
@@ -1405,71 +1591,44 @@
         return store.getSkillsCatalog(props.expertId);
       });
 
-      var skillPickerOptions = Vue.computed(function () {
-        var assigned = {};
-        skillBindings.value.forEach(function (b) {
-          var id = b.skillId || b.id || b.canonicalName || b.name;
-          if (id) assigned[id] = true;
+      var installedSkillCount = Vue.computed(function () {
+        return skillBindings.value.length;
+      });
+
+      var enabledSkillCount = Vue.computed(function () {
+        return skillBindings.value.filter(function (s) { return s.enabled !== false; }).length;
+      });
+
+      var skillCategoryOptions = Vue.computed(function () {
+        var set = {};
+        skillBindings.value.forEach(function (s) {
+          var c = (s.category || '').trim();
+          set[c || '__uncategorized'] = c || '未分类';
         });
-        var q = skillPickerSearch.value.trim().toLowerCase();
-        return skillsCatalog.value.filter(function (s) {
-          if (assigned[s.skillId]) return false;
-          if (!q) return true;
-          var name = (s.name || s.skillId || '').toLowerCase();
-          var desc = (s.description || '').toLowerCase();
-          var cat = (s.category || '').toLowerCase();
-          return name.indexOf(q) >= 0 || desc.indexOf(q) >= 0 || cat.indexOf(q) >= 0 || s.skillId.toLowerCase().indexOf(q) >= 0;
+        return Object.keys(set).sort().map(function (k) {
+          return { value: k, label: set[k] };
         });
       });
 
-      function openSkillPicker() {
-        skillPickerSelection.value = [];
-        skillPickerSearch.value = '';
-        skillPickerVisible.value = true;
-      }
-
-      function confirmSkillPicker() {
-        if (!skillPickerSelection.value.length) {
-          ElementPlus.ElMessage.info('请选择至少一项技能');
-          return;
-        }
-        capabilitySaving.value = true;
-        store.addSkillBindings(props.expertId, skillPickerSelection.value.slice()).then(function () {
-          skillBindings.value = store.getSkillBindings(props.expertId);
-          detailMeta.value = store.getExpertDetailMeta(props.expertId);
-          skillPickerVisible.value = false;
-          ElementPlus.ElMessage.success('技能已配给');
-        }).finally(function () { capabilitySaving.value = false; });
-      }
-
-      function isUserCancel(err) {
-        return err === 'cancel' || err === 'close' || (err && err === 'Cancel');
-      }
-
-      function removeSkillBinding(skillId) {
-        ElementPlus.ElMessageBox.confirm(
-          '确定移除此技能的配给？',
-          '移除技能',
-          { type: 'warning', confirmButtonText: '移除', cancelButtonText: '取消' }
-        ).then(function () {
-          capabilitySaving.value = true;
-          loadSeq += 1;
-          return store.removeSkillBinding(props.expertId, skillId);
-        }).then(function (data) {
-          if (data === null && !store.isDevMock()) return;
-          skillBindings.value = store.getSkillBindings(props.expertId);
-          detailMeta.value = store.getExpertDetailMeta(props.expertId);
-          ElementPlus.ElMessage.success('已移除');
-        }).catch(function (err) {
-          if (isUserCancel(err)) return;
-          return store.fetchExpertDetailRemote(props.expertId).then(function () {
-            applyCapabilityState();
-          });
-        }).catch(function (err) {
-          if (isUserCancel(err)) return;
-          ElementPlus.ElMessage.error((err && err.message) || '移除技能失败，请重试');
-        }).finally(function () { capabilitySaving.value = false; });
-      }
+      var filteredSkills = Vue.computed(function () {
+        var q = skillSearchQuery.value.trim().toLowerCase();
+        var cat = skillCategoryFilter.value;
+        var en = skillEnabledFilter.value;
+        return skillBindings.value.filter(function (s) {
+          if (en === 'enabled' && s.enabled === false) return false;
+          if (en === 'disabled' && s.enabled !== false) return false;
+          if (cat && cat !== 'all') {
+            var sc = (s.category || '').trim() || '__uncategorized';
+            if (sc !== cat) return false;
+          }
+          if (!q) return true;
+          var name = (s.name || s.skillId || '').toLowerCase();
+          var desc = (s.description || '').toLowerCase();
+          var category = (s.category || '').toLowerCase();
+          return name.indexOf(q) >= 0 || desc.indexOf(q) >= 0 || category.indexOf(q) >= 0 ||
+            String(s.skillId || '').toLowerCase().indexOf(q) >= 0;
+        });
+      });
 
       function getSkillInfo(skillId) {
         var b = skillBindings.value.find(function (x) { return x.skillId === skillId; });
@@ -1485,126 +1644,151 @@
         return (window.SKILL_PARAM_SCHEMAS || {})[skillId] || [];
       }
 
-      // ---- 工具 Tab 方法 ----
+      // ---- 工具 Tab 方法（全部可配置 + 开关，对齐 platform_toolsets.cli opt-in）----
       var toolsCatalog = Vue.computed(function () {
         var meta = detailMeta.value || {};
         if (meta.toolsCatalog && meta.toolsCatalog.length) return meta.toolsCatalog;
         return store.getToolsCatalog(props.expertId);
       });
 
-      var toolPickerOptions = Vue.computed(function () {
-        var assigned = {};
-        toolBindings.value.forEach(function (b) {
-          var id = b.toolset || b.toolId;
-          assigned[id] = true;
-        });
-        var q = toolPickerSearch.value.trim().toLowerCase();
-        return toolsCatalog.value.filter(function (t) {
-          var id = t.toolset || t.toolId;
-          if (assigned[id]) return false;
+      var enabledToolCount = Vue.computed(function () {
+        return toolBindings.value.filter(function (t) { return t.enabled; }).length;
+      });
+
+      var totalToolCount = Vue.computed(function () {
+        return toolBindings.value.length;
+      });
+
+      var filteredToolsets = Vue.computed(function () {
+        var q = toolSearchQuery.value.trim().toLowerCase();
+        var en = toolEnabledFilter.value;
+        return toolBindings.value.filter(function (t) {
+          if (en === 'enabled' && !t.enabled) return false;
+          if (en === 'disabled' && t.enabled) return false;
           if (!q) return true;
-          var label = (t.label || id || '').toLowerCase();
+          var label = (t.label || '').toLowerCase();
+          var name = (t.name || t.toolset || t.toolId || '').toLowerCase();
           var desc = (t.description || '').toLowerCase();
-          return label.indexOf(q) >= 0 || desc.indexOf(q) >= 0 || id.toLowerCase().indexOf(q) >= 0;
+          return label.indexOf(q) >= 0 || name.indexOf(q) >= 0 || desc.indexOf(q) >= 0;
         });
       });
 
-      function openToolPicker() {
-        toolPickerSelection.value = [];
-        toolPickerSearch.value = '';
-        toolPickerVisible.value = true;
+      function isUserCancel(err) {
+        return err === 'cancel' || err === 'close' || (err && err === 'Cancel');
       }
 
-      function confirmToolPicker() {
-        if (!toolPickerSelection.value.length) {
-          ElementPlus.ElMessage.info('请选择至少一项工具');
-          return;
-        }
-        capabilitySaving.value = true;
-        store.addToolBindings(props.expertId, toolPickerSelection.value.slice()).then(function () {
-          toolBindings.value = store.getToolBindings(props.expertId);
-          detailMeta.value = store.getExpertDetailMeta(props.expertId);
-          toolPickerVisible.value = false;
-          ElementPlus.ElMessage.success('工具已配给');
-        }).finally(function () { capabilitySaving.value = false; });
+      function getToolsetId(b) {
+        return (b && (b.toolset || b.toolId || b.name || b.id)) || '';
       }
 
-      function removeToolBinding(toolId) {
-        ElementPlus.ElMessageBox.confirm(
-          '确定移除此工具配置？',
-          '移除工具',
-          { type: 'warning', confirmButtonText: '移除', cancelButtonText: '取消' }
-        ).then(function () {
-          capabilitySaving.value = true;
-          loadSeq += 1;
-          return store.removeToolBinding(props.expertId, toolId);
-        }).then(function (data) {
-          if (data === null && !store.isDevMock()) return;
-          toolBindings.value = store.getToolBindings(props.expertId);
-          detailMeta.value = store.getExpertDetailMeta(props.expertId);
-          ElementPlus.ElMessage.success('已移除');
-        }).catch(function (err) {
-          if (isUserCancel(err)) return;
-          return store.fetchExpertDetailRemote(props.expertId).then(function () {
-            applyCapabilityState();
-          });
-        }).catch(function (err) {
-          if (isUserCancel(err)) return;
-          ElementPlus.ElMessage.error((err && err.message) || '移除工具失败，请重试');
-        }).finally(function () { capabilitySaving.value = false; });
+      function toolsetPrimaryLabel(row) {
+        return (row && (row.label || row.name || row.toolset || row.toolId)) || '';
+      }
+
+      /** 禁止 label 与 name 同文案重复堆叠 */
+      function toolsetSecondaryId(row) {
+        var label = String((row && row.label) || '').trim();
+        var name = String((row && (row.name || row.toolset || row.toolId)) || '').trim();
+        if (!name) return '';
+        if (label && label.toLowerCase() === name.toLowerCase()) return '';
+        return name;
       }
 
       function getToolInfo(toolId) {
         var binding = toolBindings.value.find(function (b) {
           return getToolsetId(b) === toolId;
         });
-        if (binding && (binding.label || binding.description)) {
+        if (binding) {
           return {
-            name: binding.label || catalog.toolsetLabel(toolId),
-            description: binding.description || ('平台工具 · ' + toolId)
+            name: toolsetPrimaryLabel(binding),
+            description: binding.description || '暂无描述'
           };
         }
-        var cat = toolsCatalog.value.find(function (t) { return (t.toolset || t.toolId) === toolId; });
+        var cat = toolsCatalog.value.find(function (t) { return (t.toolset || t.toolId || t.id) === toolId; });
         if (cat) {
           return {
-            name: cat.label || toolId,
-            description: cat.description || ('平台工具 · ' + toolId)
+            name: cat.label || cat.name || toolId,
+            description: cat.description || '暂无描述'
           };
         }
-        if (!store.isDevMock()) {
-          return { name: catalog.toolsetLabel(toolId), description: '平台工具 · ' + toolId };
-        }
-        return catalog.TOOLS_CATALOG.find(function (t) { return t.id === toolId; }) || { name: toolId, description: '' };
+        return { name: catalog.toolsetLabel ? catalog.toolsetLabel(toolId) : toolId, description: '暂无描述' };
       }
 
       function toolsetLabel(id) {
         return catalog.toolsetLabel ? catalog.toolsetLabel(id) : id;
       }
 
-      function getToolsetId(b) {
-        return b.toolset || b.toolId;
+      function getToolCount(rowOrId) {
+        if (rowOrId && typeof rowOrId === 'object') {
+          if (rowOrId.toolCount != null) return rowOrId.toolCount;
+          if (rowOrId.tools && rowOrId.tools.length) return rowOrId.tools.length;
+          rowOrId = getToolsetId(rowOrId);
+        }
+        var toolId = rowOrId;
+        var cat = toolsCatalog.value.find(function (t) {
+          return (t.toolset || t.toolId || t.id) === toolId;
+        });
+        if (cat && cat.toolCount != null) return cat.toolCount;
+        if (cat && cat.tools) return cat.tools.length;
+        var fromGlobal = (window.TOOLS_CATALOG || []).find(function (t) { return t.id === toolId; });
+        return (fromGlobal && fromGlobal.toolCount != null) ? fromGlobal.toolCount : '—';
       }
 
       function getToolParamSchema(toolId) {
         return (window.TOOL_PARAM_SCHEMAS || {})[toolId] || [];
       }
 
-      function toolStatusLabel(status) {
-        if (status === 'connected') return '已连接';
-        if (status === 'configured') return '已配置';
-        return '未配置';
+      function toolConfigured(row) {
+        return !!(row && row.configured !== false);
       }
 
-      function toolStatusType(status) {
-        if (status === 'connected') return 'success';
-        if (status === 'configured') return 'primary';
-        return 'info';
+      function openToolDetail(row) {
+        toolDetailTarget.value = row;
+        toolDetailVisible.value = true;
       }
 
-      var mcpServers = Vue.computed(function () {
-        var td = detailMeta.value.toolsDetail || {};
-        return td.mcpServers || [];
-      });
+      function openToolConfigDrawer(row) {
+        toolConfigTarget.value = row;
+        var schema = getToolParamSchema(getToolsetId(row));
+        var draft = {};
+        var existing = (row && row.config) || {};
+        schema.forEach(function (f) {
+          draft[f.key] = existing[f.key] != null ? existing[f.key] : (f.default || '');
+        });
+        if (!schema.length) {
+          draft.API_KEY = existing.API_KEY || '';
+        }
+        toolConfigDraft.value = draft;
+        toolConfigDrawerVisible.value = true;
+      }
+
+      function saveToolConfigDrawer() {
+        var row = toolConfigTarget.value;
+        if (!row) return;
+        var toolId = getToolsetId(row);
+        capabilitySaving.value = true;
+        Promise.resolve(store.updateToolConfig(props.expertId, toolId, Object.assign({}, toolConfigDraft.value)))
+          .then(function () {
+            refreshToolsets();
+            toolConfigDrawerVisible.value = false;
+            var count = runningSessionCount.value;
+            ElementPlus.ElMessage.success(count > 0
+              ? '配置已保存。该专家当前有 ' + count + ' 个运行中会话，修改将在新会话生效。'
+              : '配置已保存。修改将在新会话生效。');
+          })
+          .catch(function (err) {
+            ElementPlus.ElMessage.error((err && err.message) || '保存失败，请重试');
+          })
+          .finally(function () { capabilitySaving.value = false; });
+      }
+
+      function toolConfigSchemaFields() {
+        var row = toolConfigTarget.value;
+        if (!row) return [];
+        var schema = getToolParamSchema(getToolsetId(row));
+        if (schema.length) return schema;
+        return [{ key: 'API_KEY', label: 'API Key', password: true }];
+      }
 
       var memoryMeta = Vue.computed(function () {
         return detailMeta.value.memoryMeta || {};
@@ -1627,22 +1811,26 @@
         if (!ch || !ch.enabled) return 'disabled';
         if (!ch.configured) return 'not_configured';
         if (!gatewayRunning.value) return 'gateway_stopped';
-        return 'configured';
+        if (ch.pendingRestart) return 'pending_restart';
+        return 'connected';
       }
 
       function imConnectionLabel(ch) {
         var s = imConnectionStatus(ch);
         if (s === 'disabled') return '已禁用';
-        if (s === 'not_configured') return '未连接';
-        if (s === 'gateway_stopped') return '未连接';
-        if (s === 'configured') return '连接中';
+        if (s === 'not_configured') return '未配置';
+        if (s === 'gateway_stopped') return '网关未运行';
+        if (s === 'pending_restart') return '待重启';
+        if (s === 'connected' || s === 'configured') return '已连接';
+        if (s === 'fatal') return '错误';
         return '—';
       }
 
       function imConnectionDotClass(ch) {
         var s = imConnectionStatus(ch);
         if (s === 'disabled') return 'im-channel-dot--disabled';
-        if (s === 'configured') return 'im-channel-dot--ok';
+        if (s === 'connected' || s === 'configured') return 'im-channel-dot--ok';
+        if (s === 'fatal') return 'im-channel-dot--error';
         return 'im-channel-dot--warn';
       }
 
@@ -1659,8 +1847,8 @@
               })
             });
             imGatewayEnabled.value = true;
-            // 重新计算所有渠道连接状态
             imChannels.value.forEach(function (c) {
+              c.pendingRestart = false;
               c.state = imConnectionStatus(c);
             });
             store.saveImChannels(props.expertId, imChannels.value, { gatewayEnabled: true });
@@ -1679,6 +1867,7 @@
             gateway: Object.assign({}, detailMeta.value.gateway || {}, { running: true })
           });
           imChannels.value.forEach(function (c) {
+            c.pendingRestart = false;
             c.state = imConnectionStatus(c);
           });
           imRestarting.value = false;
@@ -1710,6 +1899,7 @@
 
       function toggleImChannelEnabled(ch) {
         ch.enabled = !ch.enabled;
+        if (ch.enabled && ch.configured) ch.pendingRestart = true;
         ch.state = imConnectionStatus(ch);
       }
 
@@ -1740,8 +1930,10 @@
           persona: '',
           workspace: '',
           tasks: dialogueTasks.value.length > 0 ? ('·' + dialogueTasks.value.length) : '',
-          skills: skillBindings.value.length > 0 ? ('·' + skillBindings.value.length) : '',
-          tools: toolBindings.value.length > 0 ? ('·' + toolBindings.value.length) : '',
+          skills: enabledSkillCount.value > 0 ? ('·' + enabledSkillCount.value) : '',
+          tools: enabledToolCount.value > 0 ? ('·' + enabledToolCount.value) : '',
+          mcp: mcpEnabledCount.value > 0 ? ('·' + mcpEnabledCount.value) : '',
+          mcpAlert: mcpNeedsAttentionCount.value > 0,
           im: (function () {
             var n = imChannels.value.filter(function (c) { return c.enabled && c.configured; }).length;
             return n > 0 ? ('·' + n) : '';
@@ -1828,15 +2020,18 @@
 
       function messagingStateLabel(state) {
         if (state === 'disabled') return '已禁用';
-        if (state === 'not_configured') return '未连接';
-        if (state === 'configured') return '连接中';
-        if (state === 'gateway_stopped') return '未连接（网关未运行）';
+        if (state === 'not_configured') return '未配置';
+        if (state === 'connected' || state === 'configured') return '已连接';
+        if (state === 'pending_restart') return '待重启';
+        if (state === 'gateway_stopped') return '网关未运行';
+        if (state === 'fatal') return '错误';
         return state || '—';
       }
 
       function messagingStateType(state) {
-        if (state === 'configured') return 'success';
-        if (state === 'not_configured' || state === 'gateway_stopped') return 'warning';
+        if (state === 'connected' || state === 'configured') return 'success';
+        if (state === 'not_configured' || state === 'gateway_stopped' || state === 'pending_restart') return 'warning';
+        if (state === 'fatal') return 'danger';
         if (state === 'disabled') return 'info';
         return 'info';
       }
@@ -1844,14 +2039,6 @@
       function personaSectionEmpty(key) {
         if (key === 'soulMd') return !(persona.value.soulMd && String(persona.value.soulMd).trim());
         return !(persona.value.soulMd && String(persona.value.soulMd).trim());
-      }
-
-      function onSkillPickerSelection(rows) {
-        skillPickerSelection.value = (rows || []).map(function (r) { return r.skillId; });
-      }
-
-      function onToolPickerSelection(rows) {
-        toolPickerSelection.value = (rows || []).map(function (r) { return r.toolset; });
       }
 
       // ---- IM 渠道方法 ----
@@ -2031,24 +2218,64 @@
         personaPreviewContent: personaPreviewContent, personaPreviewTabLabel: personaPreviewTabLabel,
         renderMarkdown: renderMarkdown, insertMarkdown: insertMarkdown, insertPersonaMarkdown: insertPersonaMarkdown,
         // 技能 Tab
-        openSkillPicker: openSkillPicker, confirmSkillPicker: confirmSkillPicker,
-        removeSkillBinding: removeSkillBinding,
+        toggleSkillEnabled: toggleSkillEnabled,
+        formatSkillLastUsed: formatSkillLastUsed,
+        skillProvenanceLabel: skillProvenanceLabel,
         getSkillInfo: getSkillInfo, getSkillParamSchema: getSkillParamSchema,
-        skillsCatalog: skillsCatalog, skillPickerOptions: skillPickerOptions,
-        skillPickerVisible: skillPickerVisible, skillPickerSearch: skillPickerSearch, skillPickerSelection: skillPickerSelection,
-        onSkillPickerSelection: onSkillPickerSelection,
+        skillsCatalog: skillsCatalog,
+        filteredSkills: filteredSkills,
+        installedSkillCount: installedSkillCount,
+        enabledSkillCount: enabledSkillCount,
+        skillCategoryOptions: skillCategoryOptions,
+        skillSearchQuery: skillSearchQuery,
+        skillCategoryFilter: skillCategoryFilter,
+        skillEnabledFilter: skillEnabledFilter,
         // 工具 Tab
-        openToolPicker: openToolPicker, confirmToolPicker: confirmToolPicker,
-        removeToolBinding: removeToolBinding,
+        toggleToolEnabled: toggleToolEnabled,
+        refreshToolsets: refreshToolsets,
         getToolInfo: getToolInfo, getToolParamSchema: getToolParamSchema,
-        toolsCatalog: toolsCatalog, toolPickerOptions: toolPickerOptions,
-        toolPickerVisible: toolPickerVisible, toolPickerSearch: toolPickerSearch, toolPickerSelection: toolPickerSelection,
-        onToolPickerSelection: onToolPickerSelection,
+        toolsCatalog: toolsCatalog,
+        filteredToolsets: filteredToolsets,
+        enabledToolCount: enabledToolCount,
+        totalToolCount: totalToolCount,
+        toolSearchQuery: toolSearchQuery,
+        toolEnabledFilter: toolEnabledFilter,
+        toolConfigDrawerVisible: toolConfigDrawerVisible,
+        toolConfigTarget: toolConfigTarget,
+        toolConfigDraft: toolConfigDraft,
+        toolDetailVisible: toolDetailVisible,
+        toolDetailTarget: toolDetailTarget,
+        openToolDetail: openToolDetail,
+        openToolConfigDrawer: openToolConfigDrawer,
+        saveToolConfigDrawer: saveToolConfigDrawer,
+        toolConfigSchemaFields: toolConfigSchemaFields,
+        toolConfigured: toolConfigured,
+        toolsetPrimaryLabel: toolsetPrimaryLabel,
+        toolsetSecondaryId: toolsetSecondaryId,
         toolsetLabel: toolsetLabel, getToolsetId: getToolsetId,
-        toolStatusLabel: toolStatusLabel, toolStatusType: toolStatusType,
+        getToolCount: getToolCount,
         capabilitySaving: capabilitySaving,
         capabilitiesLoading: capabilitiesLoading,
+        // MCP Tab
         mcpServers: mcpServers,
+        mcpSaving: mcpSaving,
+        mcpFormVisible: mcpFormVisible,
+        mcpSecretVisible: mcpSecretVisible,
+        mcpSecretTarget: mcpSecretTarget,
+        mcpSecretDraft: mcpSecretDraft,
+        mcpForm: mcpForm,
+        mcpEnabledCount: mcpEnabledCount,
+        mcpNeedsAttentionCount: mcpNeedsAttentionCount,
+        openMcpForm: openMcpForm,
+        submitMcpForm: submitMcpForm,
+        toggleMcpEnabled: toggleMcpEnabled,
+        openMcpSecretForm: openMcpSecretForm,
+        submitMcpSecrets: submitMcpSecrets,
+        retryMcpConnection: retryMcpConnection,
+        deleteMcpServer: deleteMcpServer,
+        mcpStatusLabel: mcpStatusLabel,
+        mcpStatusClass: mcpStatusClass,
+        mcpTypeLabel: mcpTypeLabel,
         // IM 渠道
         IM_SUBSCRIPTION_OPTIONS: IM_SUBSCRIPTION_OPTIONS,
         toggleImSubscription: toggleImSubscription, testImConnection: testImConnection,
@@ -2089,7 +2316,6 @@
         userMdContent: userMdContent,
         memorySubTab: memorySubTab,
         personaOnboardDismissed: personaOnboardDismissed,
-        personaApplyImmediate: personaApplyImmediate,
         dismissPersonaOnboard: dismissPersonaOnboard,
         fillPersonaFromTemplate: fillPersonaFromTemplate,
         importPersonaSoulMd: importPersonaSoulMd,
@@ -2102,9 +2328,6 @@
         hubSkillOptions: hubSkillOptions,
         openHubInstallDialog: openHubInstallDialog,
         installHubSkill: installHubSkill,
-        removeSkillBindingDynamic: removeSkillBindingDynamic,
-        removeToolBindingDynamic: removeToolBindingDynamic,
-        unbindMcpServer: unbindMcpServer,
         defaultModelLabel: defaultModelLabel,
         defaultModelTooltip: defaultModelTooltip
       };
@@ -2154,7 +2377,7 @@
                 <div class="detail-tab-pane">\
                   <div class="detail-section-head">\
                     <h3 class="detail-section-title">人设</h3>\
-                    <p class="detail-section-desc">定义专家的核心职责、工作流程与行为准则</p>\
+                    <p class="detail-section-desc">定义专家的核心职责、工作流程与行为准则。保存后默认在新会话生效，不影响已打开的对话。</p>\
                   </div>\
                   <div v-if="!personaOnboardDismissed && !persona.soulMd" class="persona-onboard-banner">\
                     <div class="persona-onboard-title">首次使用：为专家编写 SOUL.md</div>\
@@ -2178,7 +2401,6 @@
                       </el-button>\
                     </div>\
                     <div class="detail-action-right">\
-                      <el-checkbox v-if="runningSessionCount > 0" v-model="personaApplyImmediate" size="small" style="margin-right:12px">立即生效</el-checkbox>\
                       <el-button type="primary" size="small" @click="savePersona">保存</el-button>\
                     </div>\
                   </div>\
@@ -2401,47 +2623,75 @@
                 <div class="detail-tab-pane">\
                   <div class="detail-section-head">\
                     <h3 class="detail-section-title">技能</h3>\
-                    <p class="detail-section-desc">为专家配置可调用的业务技能，可从已安装技能池中添加</p>\
+                    <p class="detail-section-desc">管理本专家已安装的技能（启停 / 用量 / Hub 安装）<span v-if="runningSessionCount > 0">。当前有 {{ runningSessionCount }} 个运行中会话，启停将在新会话生效</span></p>\
                   </div>\
-                  <div class="detail-action-bar detail-action-bar--split">\
+                  <div class="detail-action-bar detail-action-bar--split skill-action-bar">\
                     <div class="detail-action-left">\
-                      <span class="detail-action-bar-label">已配给 {{ skillBindings.length }} 项技能</span>\
+                      <span class="detail-action-bar-label">已安装 {{ installedSkillCount }} 项 · 已启用 {{ enabledSkillCount }} 项</span>\
                     </div>\
-                    <div class="detail-action-right">\
-                      <el-button size="small" @click="openHubInstallDialog">从 Hub 安装</el-button>\
-                      <el-button type="primary" size="small" :loading="capabilitySaving" @click="openSkillPicker">+ 添加技能</el-button>\
+                    <div class="detail-action-right skill-toolbar">\
+                      <el-input v-model="skillSearchQuery" placeholder="搜索技能" size="small" clearable class="skill-toolbar-search" />\
+                      <el-select v-model="skillCategoryFilter" size="small" class="skill-toolbar-select" placeholder="分类">\
+                        <el-option label="全部分类" value="all" />\
+                        <el-option v-for="opt in skillCategoryOptions" :key="opt.value" :label="opt.label" :value="opt.value" />\
+                      </el-select>\
+                      <el-select v-model="skillEnabledFilter" size="small" class="skill-toolbar-select skill-toolbar-select--narrow" placeholder="状态">\
+                        <el-option label="全部" value="all" />\
+                        <el-option label="仅已启用" value="enabled" />\
+                        <el-option label="仅已禁用" value="disabled" />\
+                      </el-select>\
+                      <el-button type="primary" size="small" @click="openHubInstallDialog">从 Hub 安装</el-button>\
                     </div>\
                   </div>\
-                  <div v-if="runningSessionCount > 0" class="capability-notice">该专家当前有 {{ runningSessionCount }} 个运行中会话，技能变更将在新会话生效。</div>\
                   <div v-loading="capabilitiesLoading || capabilitySaving">\
                     <div v-if="skillBindings.length === 0 && !capabilitiesLoading" class="profile-empty-state">\
-                    <p class="profile-empty-title">尚未配给任何技能</p>\
-                    <p class="profile-empty-desc">点击「添加技能」从已安装技能池中选择。</p>\
-                  </div>\
-                  <div v-else class="detail-table-wrap">\
-                    <el-table :data="skillBindings" stripe class="toolset-table">\
-                      <el-table-column label="技能" min-width="140">\
-                        <template #default="{ row }">\
-                          <div class="toolset-name-cell">{{ getSkillInfo(row.skillId).name }}</div>\
-                          <div class="toolset-id-cell">{{ row.skillId }}</div>\
-                        </template>\
-                      </el-table-column>\
-                      <el-table-column label="分类" width="120" show-overflow-tooltip>\
-                        <template #default="{ row }">{{ row.category || \'—\' }}</template>\
-                      </el-table-column>\
-                      <el-table-column label="说明" min-width="200" show-overflow-tooltip>\
-                        <template #default="{ row }">{{ getSkillInfo(row.skillId).description || \'—\' }}</template>\
-                      </el-table-column>\
-                      <el-table-column label="使用次数" width="90" align="center">\
-                        <template #default="{ row }">{{ row.useCount || 0 }}</template>\
-                      </el-table-column>\
-                      <el-table-column label="操作" width="80" align="center">\
-                        <template #default="{ row }">\
-                          <el-button link type="danger" size="small" @click="removeSkillBindingDynamic(row.skillId, getSkillInfo(row.skillId))">移除</el-button>\
-                        </template>\
-                      </el-table-column>\
-                    </el-table>\
-                  </div>\
+                      <p class="profile-empty-title">暂无已安装技能</p>\
+                      <p class="profile-empty-desc">创建专家时会自动 seed 内置技能；也可从 Hub 安装。</p>\
+                    </div>\
+                    <div v-else-if="filteredSkills.length === 0" class="profile-empty-state">\
+                      <p class="profile-empty-title">无匹配技能</p>\
+                      <p class="profile-empty-desc">试试调整搜索或筛选条件。</p>\
+                    </div>\
+                    <div v-else class="detail-table-wrap">\
+                      <el-table :data="filteredSkills" stripe class="toolset-table skill-optout-table">\
+                        <el-table-column label="启用" width="72" align="center">\
+                          <template #default="{ row }">\
+                            <el-switch\
+                              :model-value="row.enabled !== false"\
+                              :disabled="capabilitySaving"\
+                              size="small"\
+                              @change="(v) => toggleSkillEnabled(row, v)"\
+                            />\
+                          </template>\
+                        </el-table-column>\
+                        <el-table-column label="技能名" min-width="140">\
+                          <template #default="{ row }">\
+                            <div class="toolset-name-cell">{{ row.name || row.skillId }}</div>\
+                            <div class="toolset-id-cell">{{ row.skillId }}</div>\
+                          </template>\
+                        </el-table-column>\
+                        <el-table-column label="描述" min-width="200" show-overflow-tooltip>\
+                          <template #default="{ row }">{{ row.description || \'暂无描述\' }}</template>\
+                        </el-table-column>\
+                        <el-table-column label="分类" width="130" show-overflow-tooltip>\
+                          <template #default="{ row }">{{ row.category || \'未分类\' }}</template>\
+                        </el-table-column>\
+                        <el-table-column label="使用" width="72" align="center">\
+                          <template #default="{ row }">{{ row.useCount || 0 }}</template>\
+                        </el-table-column>\
+                        <el-table-column label="补丁" width="72" align="center">\
+                          <template #default="{ row }">{{ row.patchCount || 0 }}</template>\
+                        </el-table-column>\
+                        <el-table-column label="最近使用" width="100" align="center">\
+                          <template #default="{ row }">{{ formatSkillLastUsed(row.lastUsedAt) }}</template>\
+                        </el-table-column>\
+                        <el-table-column label="来源" width="88" align="center">\
+                          <template #default="{ row }">\
+                            <el-tag size="small" :type="row.provenance === \'hub\' ? \'success\' : \'info\'" effect="plain">{{ skillProvenanceLabel(row.provenance) }}</el-tag>\
+                          </template>\
+                        </el-table-column>\
+                      </el-table>\
+                    </div>\
                   </div>\
                 </div>\
               </el-tab-pane>\
@@ -2450,63 +2700,120 @@
                 <div class="detail-tab-pane">\
                   <div class="detail-section-head">\
                     <h3 class="detail-section-title">工具</h3>\
-                    <p class="detail-section-desc">为专家配置可调用工具，并查看已接入的外部服务</p>\
+                    <p class="detail-section-desc">管理本专家可调用的 Hermes 内置工具集<span v-if="runningSessionCount > 0">。当前有 {{ runningSessionCount }} 个运行中会话，变更将在新会话生效</span></p>\
+                  </div>\
+                  <div class="tool-core-baseline">\
+                    未额外开启可选工具集时，专家仍可使用默认核心工具（<code>_HERMES_CORE_TOOLS</code>：文件、终端、搜索等）。本列表用于开启 browser、vision、web 等可选能力。\
+                  </div>\
+                  <div class="detail-action-bar detail-action-bar--split skill-action-bar">\
+                    <div class="detail-action-left">\
+                      <span class="detail-action-bar-label">已启用 {{ enabledToolCount }} / 共 {{ totalToolCount }} 个</span>\
+                    </div>\
+                    <div class="detail-action-right skill-toolbar">\
+                      <el-input v-model="toolSearchQuery" placeholder="搜索工具集" size="small" clearable class="skill-toolbar-search" />\
+                      <el-select v-model="toolEnabledFilter" size="small" class="skill-toolbar-select skill-toolbar-select--narrow" placeholder="状态">\
+                        <el-option label="全部" value="all" />\
+                        <el-option label="仅已启用" value="enabled" />\
+                        <el-option label="仅已禁用" value="disabled" />\
+                      </el-select>\
+                    </div>\
+                  </div>\
+                  <div v-loading="capabilitiesLoading || capabilitySaving">\
+                    <div v-if="filteredToolsets.length === 0" class="profile-empty-state">\
+                      <p class="profile-empty-title">无匹配工具集</p>\
+                      <p class="profile-empty-desc">试试调整搜索或筛选条件。</p>\
+                    </div>\
+                    <div v-else class="detail-table-wrap">\
+                      <el-table :data="filteredToolsets" stripe class="toolset-table skill-optout-table">\
+                        <el-table-column label="启用" width="72" align="center">\
+                          <template #default="{ row }">\
+                            <el-switch\
+                              :model-value="!!row.enabled"\
+                              :disabled="capabilitySaving"\
+                              size="small"\
+                              @change="(v) => toggleToolEnabled(row, v)"\
+                            />\
+                          </template>\
+                        </el-table-column>\
+                        <el-table-column label="工具集" min-width="150">\
+                          <template #default="{ row }">\
+                            <div class="toolset-name-cell">{{ toolsetPrimaryLabel(row) }}</div>\
+                            <div v-if="toolsetSecondaryId(row)" class="toolset-id-cell">{{ toolsetSecondaryId(row) }}</div>\
+                          </template>\
+                        </el-table-column>\
+                        <el-table-column label="描述" min-width="200" show-overflow-tooltip>\
+                          <template #default="{ row }">{{ row.description || \'暂无描述\' }}</template>\
+                        </el-table-column>\
+                        <el-table-column label="工具数" width="90" align="center">\
+                          <template #default="{ row }">{{ getToolCount(row) }}</template>\
+                        </el-table-column>\
+                        <el-table-column label="就绪" width="110" align="center">\
+                          <template #default="{ row }">\
+                            <span class="mcp-status" :class="toolConfigured(row) ? \'mcp-status--ok\' : \'mcp-status--error\'">\
+                              <span class="mcp-status-dot"></span>{{ toolConfigured(row) ? \'就绪\' : \'缺密钥\' }}\
+                            </span>\
+                          </template>\
+                        </el-table-column>\
+                        <el-table-column label="操作" width="120" align="right">\
+                          <template #default="{ row }">\
+                            <el-button link size="small" @click="openToolDetail(row)">详情</el-button>\
+                            <el-button v-if="!toolConfigured(row)" link type="primary" size="small" @click="openToolConfigDrawer(row)">配置</el-button>\
+                          </template>\
+                        </el-table-column>\
+                      </el-table>\
+                    </div>\
+                  </div>\
+                </div>\
+              </el-tab-pane>\
+              <el-tab-pane name="mcp">\
+                <template #label>\
+                  <span class="tab-label-with-dot">\
+                    MCP <span v-if="tabBadges.mcp" class="tab-count-badge">{{ tabBadges.mcp }}</span>\
+                    <span v-if="tabBadges.mcpAlert" class="tab-alert-dot" title="存在缺密钥或连通失败项"></span>\
+                  </span>\
+                </template>\
+                <div class="detail-tab-pane">\
+                  <div class="detail-section-head">\
+                    <h3 class="detail-section-title">MCP</h3>\
+                    <p class="detail-section-desc">接入外部 MCP 服务，扩展专家可调用的外部工具。配置写入本专家 config.yaml，凭据进 .env<span v-if="runningSessionCount > 0">。当前有 {{ runningSessionCount }} 个运行中会话，MCP 变更将在新会话生效</span></p>\
                   </div>\
                   <div class="detail-action-bar detail-action-bar--split">\
                     <div class="detail-action-left">\
-                      <span class="detail-action-bar-label">已配置 {{ toolBindings.length }} 个工具</span>\
+                      <span class="detail-action-bar-label">已启用 {{ mcpEnabledCount }} 台<span v-if="mcpNeedsAttentionCount"> · 其中 {{ mcpNeedsAttentionCount }} 台需处理</span></span>\
                     </div>\
                     <div class="detail-action-right">\
-                      <el-button type="primary" size="small" :loading="capabilitySaving" @click="openToolPicker">+ 添加工具</el-button>\
+                      <el-button type="primary" size="small" :loading="mcpSaving" @click="openMcpForm">+ 添加</el-button>\
                     </div>\
                   </div>\
-                  <div v-if="runningSessionCount > 0" class="capability-notice">该专家当前有 {{ runningSessionCount }} 个运行中会话，工具变更将在新会话生效。</div>\
-                  <div v-if="toolBindings.length === 0" class="profile-empty-state">\
-                    <p class="profile-empty-title">尚未配给任何工具</p>\
-                    <p class="profile-empty-desc">点击「添加工具」从可选工具列表中挑选。</p>\
+                  <div v-if="mcpServers.length === 0" class="profile-empty-state">\
+                    <p class="profile-empty-title">尚未接入外部 MCP 服务</p>\
+                    <p class="profile-empty-desc">MCP 用于连接 GitHub、数据库、文件系统等外部工具。点击「添加」配置一台服务。</p>\
                   </div>\
                   <div v-else class="detail-table-wrap">\
-                    <el-table :data="toolBindings" stripe class="toolset-table">\
-                      <el-table-column label="工具" min-width="160">\
+                    <el-table :data="mcpServers" stripe class="toolset-table">\
+                      <el-table-column label="服务器名" min-width="140">\
                         <template #default="{ row }">\
-                          <div class="toolset-name-cell">{{ getToolInfo(getToolsetId(row)).name }}</div>\
-                          <div class="toolset-id-cell">{{ getToolsetId(row) }}</div>\
+                          <div class="toolset-name-cell">{{ row.name }}</div>\
                         </template>\
                       </el-table-column>\
-                      <el-table-column label="说明" min-width="200" show-overflow-tooltip>\
-                        <template #default="{ row }">{{ getToolInfo(getToolsetId(row)).description || \'—\' }}</template>\
+                      <el-table-column label="类型" width="90" align="center">\
+                        <template #default="{ row }">{{ mcpTypeLabel(row) }}</template>\
                       </el-table-column>\
-                      <el-table-column label="配置" width="90" align="center">\
+                      <el-table-column label="状态" min-width="160">\
                         <template #default="{ row }">\
-                          <el-tag :type="toolStatusType(row.status)" size="small" effect="plain">{{ toolStatusLabel(row.status) }}</el-tag>\
+                          <span class="mcp-status" :class="mcpStatusClass(row)">\
+                            <span class="mcp-status-dot"></span>{{ mcpStatusLabel(row) }}\
+                          </span>\
+                          <div v-if="row.status === \'connection_failed\' && row.errorSummary" class="toolset-id-cell">{{ row.errorSummary }}</div>\
+                          <div v-else-if="row.status === \'missing_secret\'" class="toolset-id-cell">缺：{{ (row.missingEnv || []).join(\', \') || \'密钥\' }}</div>\
                         </template>\
                       </el-table-column>\
-                      <el-table-column label="操作" width="80" align="center">\
+                      <el-table-column label="操作" width="220" align="right">\
                         <template #default="{ row }">\
-                          <el-button link type="danger" size="small" @click="removeToolBindingDynamic(getToolsetId(row), getToolInfo(getToolsetId(row)))">移除</el-button>\
-                        </template>\
-                      </el-table-column>\
-                    </el-table>\
-                  </div>\
-                  <div v-if="mcpServers.length" class="mcp-servers-section">\
-                    <h4 class="mcp-servers-title">MCP 服务</h4>\
-                    <el-table :data="mcpServers" stripe size="small" class="toolset-table">\
-                      <el-table-column prop="name" label="名称" min-width="120" />\
-                      <el-table-column label="配置" width="100">\
-                        <template #default="{ row }">\
-                          <el-tag :type="row.configured ? \'success\' : \'warning\'" size="small">{{ row.configured ? \'已配置\' : \'未配置\' }}</el-tag>\
-                        </template>\
-                      </el-table-column>\
-                      <el-table-column label="缺失环境变量" min-width="180">\
-                        <template #default="{ row }">\
-                          <span v-if="row.configured">—</span>\
-                          <span v-else class="toolset-id-cell">需补充配置：{{ (row.missingEnv || []).join(\', \') || \'相关 KEY\' }}</span>\
-                        </template>\
-                      </el-table-column>\
-                      <el-table-column label="操作" width="140" align="center">\
-                        <template #default="{ row }">\
-                          <el-button link type="primary" size="small" @click="$emit(\'nav\', \'/experts/\' + expert.id + \'?tab=tools\')">管理</el-button>\
-                          <el-button link type="danger" size="small" @click="unbindMcpServer(row)">解绑</el-button>\
+                          <el-button v-if="row.status === \'missing_secret\'" link type="primary" size="small" @click="openMcpSecretForm(row)">填写密钥</el-button>\
+                          <el-button v-if="row.status === \'connection_failed\'" link type="primary" size="small" @click="retryMcpConnection(row)">重试</el-button>\
+                          <el-button link size="small" @click="toggleMcpEnabled(row)">{{ row.enabled ? \'禁用\' : \'启用\' }}</el-button>\
+                          <el-button link type="danger" size="small" @click="deleteMcpServer(row)">删除</el-button>\
                         </template>\
                       </el-table-column>\
                     </el-table>\
@@ -2518,7 +2825,7 @@
                 <div class="detail-tab-pane im-channel-tab">\
                   <div class="detail-section-head">\
                     <h3 class="detail-section-title">IM渠道</h3>\
-                    <p class="detail-section-desc">配置专家可被触达的 IM 渠道（企业微信 / 钉钉 / 飞书）。启用后用户在 IM 端 @机器人或私聊即可与该专家对话。</p>\
+                    <p class="detail-section-desc">配置专家可被触达的 IM 渠道（企业微信 AI Bot / 企业微信自建应用 / 钉钉 / 飞书）。两项企业微信分开展示，对应不同凭据与连接模型。启用后用户在 IM 端 @机器人或私聊即可与该专家对话。</p>\
                   </div>\
                   <div class="im-channel-layout">\
                     <div class="im-channel-sidebar">\
@@ -2526,8 +2833,14 @@
                       <div class="im-channel-list">\
                         <button v-for="ch in filteredImSidebarChannels" :key="ch.id || ch.type" type="button" class="im-channel-list-item" :class="{ active: String(selectedImChannelId) === String(ch.id || ch.type) }" @click="selectImChannel(ch)">\
                           <span class="im-channel-list-icon">{{ ch.emoji || imPlatformIcon(ch) }}</span>\
-                          <span class="im-channel-list-name">{{ ch.name || ch.label }}</span>\
-                          <span class="im-channel-dot" :class="imChannelDotClass(ch)"></span>\
+                          <span class="im-channel-list-meta">\
+                            <span class="im-channel-list-name">{{ ch.name || ch.label }}</span>\
+                            <span v-if="ch.connectionHint" class="im-channel-list-hint">{{ ch.connectionHint }}</span>\
+                          </span>\
+                          <span class="im-channel-list-right">\
+                            <span class="im-channel-list-switch">{{ ch.enabled ? \'开\' : \'关\' }}</span>\
+                            <span class="im-channel-dot" :class="imChannelDotClass(ch)"></span>\
+                          </span>\
                         </button>\
                         <div v-if="!filteredImSidebarChannels.length" class="im-channel-list-empty">未找到匹配渠道</div>\
                       </div>\
@@ -2543,6 +2856,7 @@
                               <span class="im-channel-panel-icon">{{ selectedImChannel.emoji || imPlatformIcon(selectedImChannel) }}</span>\
                               <div>\
                                 <h3 class="im-channel-panel-name">{{ selectedImChannel.name || selectedImChannel.label }}</h3>\
+                                <p v-if="selectedImChannel.connectionHint" class="im-channel-panel-hint">{{ selectedImChannel.connectionHint }} · {{ imConnectionLabel(selectedImChannel) }}</p>\
                                 <p class="im-channel-panel-desc">{{ selectedImChannel.description || \'\' }}</p>\
                               </div>\
                             </div>\
@@ -2566,6 +2880,7 @@
                           <div class="im-channel-toolbar-left">\
                             <el-button link type="primary" @click="openImSetupGuide(selectedImChannel)">设置指南 ↗</el-button>\
                             <span v-if="!selectedImChannel.enabled" class="im-channel-inline-hint">渠道已禁用，开启右上角开关并填写凭据后保存生效</span>\
+                            <span v-else-if="imConnectionStatus(selectedImChannel) === \'pending_restart\'" class="im-channel-inline-hint">配置已变更，需重启 Gateway 生效</span>\
                           </div>\
                           <div class="im-channel-toolbar-right">\
                             <el-button type="primary" :loading="imSaving" @click="saveSelectedImChannel">保存</el-button>\
@@ -2583,10 +2898,13 @@
                                 <div class="im-credential-label">{{ field.label }}<span v-if="field.required" class="im-cred-required">*</span></div>\
                                 <div class="im-credential-desc">{{ field.description || \'\' }}</div>\
                               </div>\
-                              <el-input v-model="imSecretDraft[field.key]" :type="field.password ? \'password\' : \'text\'" :placeholder="credentialPlaceholder(field)" show-password :class="\'im-credential-input\'" />\
+                              <el-select v-if="field.type === \'select\'" :model-value="imSecretDraft[field.key] || field.default || \'\'" @change="imSecretDraft[field.key] = $event" placeholder="请选择" class="im-credential-input" style="width:100%">\
+                                <el-option v-for="opt in field.options" :key="opt.value" :label="opt.label" :value="opt.value" />\
+                              </el-select>\
+                              <el-input v-else v-model="imSecretDraft[field.key]" :type="field.password ? \'password\' : \'text\'" :placeholder="credentialPlaceholder(field)" :show-password="!!field.password" class="im-credential-input" />\
                             </div>\
                           </div>\
-                          <div class="im-channel-section-foot">凭据写入 <code>.env</code>，保存时校验唯一性（bot_id / client_id / app_id 不可跨专家复用）</div>\
+                          <div class="im-channel-section-foot">凭据写入 <code>.env</code>（<code>WECOM_*</code> / <code>WECOM_CALLBACK_*</code> / <code>DINGTALK_*</code> / <code>FEISHU_*</code>），保存时校验唯一性（bot_id / corp_id / client_id / app_id 不可跨专家复用；两种企微命名空间互不冲突）</div>\
                         </div>\
                         \
                         <div v-if="selectedImChannel.policyFields && selectedImChannel.policyFields.length" class="im-channel-section im-channel-policy-section">\
@@ -2625,170 +2943,410 @@
         </div>\
         </div>\
         <expert-edit-page-dialog :edit="expertEdit" header-title="编辑基本信息" :tag-colors="tagColors" />\
-        <!-- 新建任务对话框 -->\
-        <el-dialog v-model="newTaskDialogVisible" title="新建任务" width="420px" :close-on-click-modal="false" append-to-body>\
-          <el-form label-position="top">\
-            <el-form-item label="任务标题" required>\
-              <el-input v-model="newTaskTitle" placeholder="输入任务标题..." @keyup.enter="submitNewTask" />\
-            </el-form-item>\
-          </el-form>\
-          <template #footer>\
-            <el-button @click="newTaskDialogVisible = false">取消</el-button>\
-            <el-button type="primary" @click="submitNewTask">创建</el-button>\
-          </template>\
-        </el-dialog>\
-        <el-dialog v-model="workspaceFolderDialogVisible" :title="workspaceFolderDialogMode === \'rename\' ? \'重命名\' : \'新建文件夹\'" width="420px" :close-on-click-modal="false" append-to-body>\
-          <el-form label-position="top">\
-            <el-form-item :label="workspaceFolderDialogMode === \'rename\' ? \'名称\' : \'文件夹名称\'" required>\
-              <el-input v-model="workspaceFolderName" placeholder="请输入名称" maxlength="60" show-word-limit @keyup.enter="submitWorkspaceFolderDialog" />\
-            </el-form-item>\
-          </el-form>\
-          <template #footer>\
-            <el-button @click="workspaceFolderDialogVisible = false">取消</el-button>\
-            <el-button type="primary" @click="submitWorkspaceFolderDialog">保存</el-button>\
-          </template>\
-        </el-dialog>\
-        <!-- 文件预览对话框 -->\
-        <el-dialog v-model="artifactPreviewVisible" title="文件预览" width="560px" append-to-body @closed="artifactPreviewItem = null">\
-          <div v-if="artifactPreviewItem" style="max-height:400px;overflow:auto">\
-            <div style="margin-bottom:12px">\
-              <el-tag size="small" type="info">{{ artifactTypeLabel[artifactPreviewItem.type] || artifactPreviewItem.type }}</el-tag>\
-              <span style="margin-left:8px;color:#909399;font-size:12px">{{ artifactPreviewItem.createdAt }}</span>\
+        <!-- 新建任务 -->\
+        <el-dialog v-model="newTaskDialogVisible" width="440px" class="form-dialog form-dialog-sm ed-dialog ed-dialog-task" :close-on-click-modal="false" append-to-body>\
+          <template #header>\
+            <div class="dialog-header-custom dialog-header-expert-wizard">\
+              <div class="dialog-header-icon dialog-header-icon-task">\
+                <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>\
+              </div>\
+              <div class="dialog-header-text">\
+                <div class="dialog-header-title">新建任务</div>\
+                <div class="dialog-header-sub">创建后进入对话，开始与专家协作</div>\
+              </div>\
             </div>\
-            <h3 style="margin:0 0 12px 0;font-size:16px">{{ artifactPreviewItem.title }}</h3>\
-            <div style="white-space:pre-wrap;font-size:13px;line-height:1.7;color:#303133;background:#f5f7fa;padding:16px;border-radius:6px">{{ artifactPreviewItem.content || \'暂无内容\' }}</div>\
+          </template>\
+          <div class="form-dialog-body ed-dialog-body">\
+            <el-form label-position="top" class="form-dialog-form" @submit.prevent="submitNewTask">\
+              <el-form-item label="任务标题" required>\
+                <el-input v-model="newTaskTitle" placeholder="例如：分析本月良率波动原因" maxlength="80" show-word-limit clearable @keyup.enter="submitNewTask" />\
+              </el-form-item>\
+            </el-form>\
           </div>\
           <template #footer>\
-            <el-button @click="artifactPreviewVisible = false">关闭</el-button>\
-            <el-button type="primary" @click="downloadArtifact(artifactPreviewItem); artifactPreviewVisible = false">下载</el-button>\
-          </template>\
-        </el-dialog>\
-        <!-- 文件预览对话框 -->\
-        <el-dialog v-model="materialPreviewVisible" title="文件预览" width="560px" append-to-body @closed="materialPreviewItem = null">\
-          <div v-if="materialPreviewItem" style="max-height:400px;overflow:auto">\
-            <div style="margin-bottom:12px;display:flex;align-items:center;gap:8px">\
-              <span style="font-size:20px">{{ fileTypeIcon(materialPreviewItem.type) }}</span>\
-              <span style="font-weight:600">{{ materialPreviewItem.name }}</span>\
-              <span style="color:#909399;font-size:12px">{{ formatFileSize(materialPreviewItem.size) }}</span>\
+            <div class="dialog-footer-custom dialog-footer-wizard">\
+              <div class="dialog-footer-actions">\
+                <el-button class="wizard-btn wizard-btn-cancel" @click="newTaskDialogVisible = false">取消</el-button>\
+                <el-button type="primary" class="wizard-btn wizard-btn-submit wizard-btn-submit-expert" :disabled="!(newTaskTitle && newTaskTitle.trim())" @click="submitNewTask">创建</el-button>\
+              </div>\
             </div>\
-            <div style="white-space:pre-wrap;font-size:13px;line-height:1.7;color:#303133;background:#f5f7fa;padding:16px;border-radius:6px">{{ materialPreviewItem.content || \'（该文件类型暂不支持预览，可下载后查看）\' }}</div>\
-          </div>\
-          <template #footer>\
-            <el-button @click="materialPreviewVisible = false">关闭</el-button>\
-            <el-button type="primary" @click="downloadMaterial(materialPreviewItem); materialPreviewVisible = false">下载</el-button>\
           </template>\
         </el-dialog>\
-        <el-dialog v-model="memoryDialogVisible" :title="memoryDialogMode === \'edit\' ? \'编辑记忆\' : \'新增记忆\'" width="520px" append-to-body class="form-dialog memory-dialog">\
-          <el-form label-position="top">\
-            <el-form-item label="分类">\
-              <el-select v-model="memoryForm.category" style="width:100%">\
-                <el-option label="用户偏好" value="user_preference" />\
-                <el-option label="项目背景" value="project_context" />\
-                <el-option label="领域知识" value="domain_knowledge" />\
-                <el-option label="其他" value="other" />\
-              </el-select>\
-            </el-form-item>\
-            <el-form-item label="内容">\
-              <el-input v-model="memoryForm.content" type="textarea" :rows="6" placeholder="请输入记忆内容" />\
-            </el-form-item>\
-          </el-form>\
+        <!-- 工作空间文件夹 -->\
+        <el-dialog v-model="workspaceFolderDialogVisible" width="420px" class="form-dialog form-dialog-sm ws-folder-dialog ed-dialog" :close-on-click-modal="false" append-to-body>\
+          <template #header>\
+            <div class="dialog-header-custom dialog-header-workspace">\
+              <div class="dialog-header-icon dialog-header-icon-workspace">\
+                <svg v-if="workspaceFolderDialogMode === \'rename\'" viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>\
+                <svg v-else viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/><line x1="12" y1="11" x2="12" y2="17"/><line x1="9" y1="14" x2="15" y2="14"/></svg>\
+              </div>\
+              <div class="dialog-header-text">\
+                <div class="dialog-header-title">{{ workspaceFolderDialogMode === \'rename\' ? \'重命名文件夹\' : \'新建文件夹\' }}</div>\
+                <div class="dialog-header-sub">{{ workspaceFolderDialogMode === \'rename\' ? \'修改文件夹显示名称\' : \'整理工作空间中的文件与任务产物\' }}</div>\
+              </div>\
+            </div>\
+          </template>\
+          <div class="form-dialog-body ws-folder-dialog-body">\
+            <el-form label-position="top" class="form-dialog-form ws-folder-form" @submit.prevent="submitWorkspaceFolderDialog">\
+              <el-form-item :label="workspaceFolderDialogMode === \'rename\' ? \'名称\' : \'文件夹名称\'" required>\
+                <el-input v-model="workspaceFolderName" placeholder="例如：分析报告、原始数据" maxlength="60" show-word-limit clearable @keyup.enter="submitWorkspaceFolderDialog" />\
+              </el-form-item>\
+            </el-form>\
+          </div>\
           <template #footer>\
-            <el-button v-if="memoryDialogMode === \'edit\'" type="danger" plain @click="deleteMemoryFromDialog">删除</el-button>\
-            <el-button @click="memoryDialogVisible = false">取消</el-button>\
-            <el-button type="primary" @click="saveMemoryDialog">保存</el-button>\
+            <div class="dialog-footer-custom dialog-footer-wizard">\
+              <div class="dialog-footer-actions">\
+                <el-button class="wizard-btn wizard-btn-cancel" @click="workspaceFolderDialogVisible = false">取消</el-button>\
+                <el-button type="primary" class="wizard-btn wizard-btn-submit" :disabled="!(workspaceFolderName && workspaceFolderName.trim())" @click="submitWorkspaceFolderDialog">保存</el-button>\
+              </div>\
+            </div>\
           </template>\
         </el-dialog>\
-        <el-dialog v-model="skillPickerVisible" title="添加技能" width="640px" append-to-body class="form-dialog capability-picker-dialog">\
-          <div class="capability-picker-head">\
-            <el-input v-model="skillPickerSearch" placeholder="搜索技能名称、分类..." size="small" clearable class="member-picker-search" />\
-            <span class="member-picker-count">可选 {{ skillPickerOptions.length }} 项</span>\
+        <!-- 任务产物预览 -->\
+        <el-dialog v-model="artifactPreviewVisible" width="580px" class="form-dialog ws-preview-dialog ed-dialog ed-preview-dialog" append-to-body @closed="artifactPreviewItem = null">\
+          <template #header>\
+            <div class="dialog-header-custom dialog-header-workspace">\
+              <div class="dialog-header-icon dialog-header-icon-workspace">\
+                <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>\
+              </div>\
+              <div class="dialog-header-text">\
+                <div class="dialog-header-title">{{ artifactPreviewItem ? artifactPreviewItem.title : \'文件预览\' }}</div>\
+                <div class="dialog-header-sub" v-if="artifactPreviewItem">{{ artifactTypeLabel[artifactPreviewItem.type] || artifactPreviewItem.type }} · {{ artifactPreviewItem.createdAt }} · 只读预览</div>\
+              </div>\
+            </div>\
+          </template>\
+          <div v-if="artifactPreviewItem" class="ws-preview-body ed-preview-body">\
+            <pre class="ws-preview-text">{{ artifactPreviewItem.content || \'暂无内容\' }}</pre>\
           </div>\
-          <el-table\
-            :data="skillPickerOptions"\
-            stripe\
-            max-height="360"\
-            class="toolset-table capability-picker-table"\
-            empty-text="暂无可添加技能（均已配给或未安装）"\
-            @selection-change="onSkillPickerSelection"\
-          >\
-            <el-table-column type="selection" width="48" />\
-            <el-table-column label="技能" min-width="140">\
-              <template #default="{ row }">\
-                <div class="toolset-name-cell">{{ row.name || row.skillId }}</div>\
-                <div class="toolset-id-cell">{{ row.skillId }}</div>\
+          <template #footer>\
+            <div class="dialog-footer-custom dialog-footer-wizard">\
+              <div class="dialog-footer-actions">\
+                <el-button class="wizard-btn wizard-btn-cancel" @click="artifactPreviewVisible = false">关闭</el-button>\
+                <el-button type="primary" class="wizard-btn wizard-btn-submit" @click="downloadArtifact(artifactPreviewItem); artifactPreviewVisible = false">\
+                  <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right:4px;vertical-align:-2px"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>下载\
+                </el-button>\
+              </div>\
+            </div>\
+          </template>\
+        </el-dialog>\
+        <!-- 资料文件预览 -->\
+        <el-dialog v-model="materialPreviewVisible" width="580px" class="form-dialog ws-preview-dialog ed-dialog ed-preview-dialog" append-to-body @closed="materialPreviewItem = null">\
+          <template #header>\
+            <div class="dialog-header-custom dialog-header-workspace">\
+              <div class="dialog-header-icon dialog-header-icon-workspace">\
+                <span class="ed-preview-file-emoji">{{ materialPreviewItem ? fileTypeIcon(materialPreviewItem.type) : \'📄\' }}</span>\
+              </div>\
+              <div class="dialog-header-text">\
+                <div class="dialog-header-title">{{ materialPreviewItem ? materialPreviewItem.name : \'文件预览\' }}</div>\
+                <div class="dialog-header-sub" v-if="materialPreviewItem">{{ formatFileSize(materialPreviewItem.size) }} · 只读预览</div>\
+              </div>\
+            </div>\
+          </template>\
+          <div v-if="materialPreviewItem" class="ws-preview-body ed-preview-body">\
+            <pre v-if="materialPreviewItem.content" class="ws-preview-text">{{ materialPreviewItem.content }}</pre>\
+            <div v-else class="ws-preview-binary">\
+              <span class="ws-preview-binary-icon">{{ fileTypeIcon(materialPreviewItem.type) }}</span>\
+              <span class="ws-preview-binary-name">{{ materialPreviewItem.name }}</span>\
+              <span class="ws-preview-binary-info">该文件类型暂不支持预览，可下载后查看</span>\
+            </div>\
+          </div>\
+          <template #footer>\
+            <div class="dialog-footer-custom dialog-footer-wizard">\
+              <div class="dialog-footer-actions">\
+                <el-button class="wizard-btn wizard-btn-cancel" @click="materialPreviewVisible = false">关闭</el-button>\
+                <el-button type="primary" class="wizard-btn wizard-btn-submit" @click="downloadMaterial(materialPreviewItem); materialPreviewVisible = false">\
+                  <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right:4px;vertical-align:-2px"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>下载\
+                </el-button>\
+              </div>\
+            </div>\
+          </template>\
+        </el-dialog>\
+        <!-- 记忆 -->\
+        <el-dialog v-model="memoryDialogVisible" width="520px" append-to-body class="form-dialog memory-dialog ed-dialog ed-dialog-memory" :close-on-click-modal="false">\
+          <template #header>\
+            <div class="dialog-header-custom dialog-header-memory">\
+              <div class="dialog-header-icon dialog-header-icon-memory">\
+                <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a7 7 0 0 0-4 12.7V18a2 2 0 0 0 2 2h4a2 2 0 0 0 2-2v-3.3A7 7 0 0 0 12 2z"/><line x1="10" y1="22" x2="14" y2="22"/></svg>\
+              </div>\
+              <div class="dialog-header-text">\
+                <div class="dialog-header-title">{{ memoryDialogMode === \'edit\' ? \'编辑记忆\' : \'新增记忆\' }}</div>\
+                <div class="dialog-header-sub">{{ memoryDialogMode === \'edit\' ? \'更新后将在后续对话中优先引用\' : \'写入专家长期记忆，跨任务持续生效\' }}</div>\
+              </div>\
+            </div>\
+          </template>\
+          <div class="form-dialog-body ed-dialog-body">\
+            <el-form label-position="top" class="form-dialog-form">\
+              <el-form-item label="分类">\
+                <el-select v-model="memoryForm.category" style="width:100%" placeholder="选择分类">\
+                  <el-option label="用户偏好" value="user_preference" />\
+                  <el-option label="项目背景" value="project_context" />\
+                  <el-option label="领域知识" value="domain_knowledge" />\
+                  <el-option label="其他" value="other" />\
+                </el-select>\
+              </el-form-item>\
+              <el-form-item label="内容" required>\
+                <el-input v-model="memoryForm.content" type="textarea" :rows="6" placeholder="请输入记忆内容，尽量具体、可复用" maxlength="2000" show-word-limit />\
+              </el-form-item>\
+            </el-form>\
+          </div>\
+          <template #footer>\
+            <div class="dialog-footer-custom dialog-footer-wizard memory-dialog-footer">\
+              <el-button v-if="memoryDialogMode === \'edit\'" type="danger" plain class="wizard-btn wizard-btn-danger" @click="deleteMemoryFromDialog">删除</el-button>\
+              <div class="dialog-footer-actions">\
+                <el-button class="wizard-btn wizard-btn-cancel" @click="memoryDialogVisible = false">取消</el-button>\
+                <el-button type="primary" class="wizard-btn wizard-btn-submit wizard-btn-submit-expert" :disabled="!(memoryForm.content && memoryForm.content.trim())" @click="saveMemoryDialog">保存</el-button>\
+              </div>\
+            </div>\
+          </template>\
+        </el-dialog>\
+        <!-- 工具集详情 -->\
+        <el-dialog v-model="toolDetailVisible" width="520px" append-to-body class="form-dialog ed-dialog ed-dialog-tool">\
+          <template #header>\
+            <div class="dialog-header-custom dialog-header-tool">\
+              <div class="dialog-header-icon dialog-header-icon-tool">\
+                <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>\
+              </div>\
+              <div class="dialog-header-text">\
+                <div class="dialog-header-title">工具集详情</div>\
+                <div class="dialog-header-sub">查看工具集说明与包含的工具名单</div>\
+              </div>\
+            </div>\
+          </template>\
+          <div class="form-dialog-body ed-dialog-body" v-if="toolDetailTarget">\
+            <div class="ed-tool-detail-card">\
+              <p class="tool-detail-title">{{ toolsetPrimaryLabel(toolDetailTarget) }}</p>\
+              <p v-if="toolsetSecondaryId(toolDetailTarget)" class="tool-detail-id">{{ toolsetSecondaryId(toolDetailTarget) }}</p>\
+              <p class="tool-detail-desc">{{ toolDetailTarget.description || \'暂无描述\' }}</p>\
+              <div class="tool-detail-tools">\
+                <div class="tool-detail-tools-label">包含工具（{{ getToolCount(toolDetailTarget) }}）</div>\
+                <div v-if="!(toolDetailTarget.tools && toolDetailTarget.tools.length)" class="tool-detail-empty">暂无工具名单</div>\
+                <ul v-else class="tool-detail-list">\
+                  <li v-for="t in toolDetailTarget.tools" :key="t">{{ t }}</li>\
+                </ul>\
+              </div>\
+            </div>\
+          </div>\
+          <template #footer>\
+            <div class="dialog-footer-custom dialog-footer-wizard">\
+              <div class="dialog-footer-actions">\
+                <el-button type="primary" class="wizard-btn wizard-btn-submit wizard-btn-submit-expert" @click="toolDetailVisible = false">关闭</el-button>\
+              </div>\
+            </div>\
+          </template>\
+        </el-dialog>\
+        <!-- 配置工具集 -->\
+        <el-drawer v-model="toolConfigDrawerVisible" size="420px" append-to-body class="toolset-config-drawer ed-drawer">\
+          <template #header>\
+            <div class="ed-drawer-header">\
+              <div class="dialog-header-icon dialog-header-icon-tool">\
+                <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>\
+              </div>\
+              <div class="dialog-header-text">\
+                <div class="dialog-header-title">配置工具集</div>\
+                <div class="dialog-header-sub">补全密钥后方可正常调用</div>\
+              </div>\
+            </div>\
+          </template>\
+          <template v-if="toolConfigTarget">\
+            <div class="ed-drawer-body">\
+              <div class="ed-tool-detail-card">\
+                <p class="tool-detail-title">{{ toolsetPrimaryLabel(toolConfigTarget) }}</p>\
+                <p class="tool-detail-desc">配置写入本专家环境，变更将在新会话生效。</p>\
+              </div>\
+              <el-form label-position="top" class="mcp-form form-dialog-form">\
+                <el-form-item v-for="field in toolConfigSchemaFields()" :key="field.key" :label="field.label || field.key">\
+                  <el-input\
+                    v-model="toolConfigDraft[field.key]"\
+                    :type="field.password ? \'password\' : \'text\'"\
+                    :show-password="!!field.password"\
+                    :placeholder="\'请输入 \' + (field.label || field.key)"\
+                  />\
+                </el-form-item>\
+              </el-form>\
+            </div>\
+            <div class="toolset-config-actions">\
+              <el-button class="wizard-btn wizard-btn-cancel" @click="toolConfigDrawerVisible = false">取消</el-button>\
+              <el-button type="primary" class="wizard-btn wizard-btn-submit wizard-btn-submit-expert" :loading="capabilitySaving" @click="saveToolConfigDrawer">保存</el-button>\
+            </div>\
+          </template>\
+        </el-drawer>\
+        <!-- Hub 安装技能 -->\
+        <el-dialog v-model="hubInstallDialogVisible" width="640px" append-to-body class="form-dialog capability-picker-dialog ed-dialog ed-dialog-hub">\
+          <template #header>\
+            <div class="dialog-header-custom dialog-header-hub">\
+              <div class="dialog-header-icon dialog-header-icon-hub">\
+                <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>\
+              </div>\
+              <div class="dialog-header-text">\
+                <div class="dialog-header-title">从 Hub 安装技能</div>\
+                <div class="dialog-header-sub">搜索并安装官方 / 社区技能到当前专家</div>\
+              </div>\
+            </div>\
+          </template>\
+          <div class="form-dialog-body ed-dialog-body">\
+            <div v-if="hubInstalling" class="hub-install-progress">\
+              <div class="hub-install-progress-text">正在安装技能… {{ hubInstallProgress }}%</div>\
+              <el-progress :percentage="hubInstallProgress" :stroke-width="10" />\
+            </div>\
+            <template v-else>\
+              <div class="capability-picker-head">\
+                <el-input v-model="hubInstallSearch" placeholder="搜索 Hub 技能..." clearable class="member-picker-search">\
+                  <template #prefix>\
+                    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>\
+                  </template>\
+                </el-input>\
+                <span class="member-picker-count">可选 {{ hubSkillOptions.length }} 项</span>\
+              </div>\
+              <el-table :data="hubSkillOptions" stripe max-height="360" class="toolset-table capability-picker-table" empty-text="暂无可安装的 Hub 技能">\
+                <el-table-column label="技能" min-width="160">\
+                  <template #default="{ row }">\
+                    <div class="toolset-name-cell">{{ row.name }}</div>\
+                    <div class="toolset-id-cell">{{ row.id }}</div>\
+                  </template>\
+                </el-table-column>\
+                <el-table-column prop="category" label="分类" width="120" show-overflow-tooltip />\
+                <el-table-column prop="description" label="说明" min-width="200" show-overflow-tooltip />\
+                <el-table-column label="操作" width="90" align="center">\
+                  <template #default="{ row }">\
+                    <el-button link type="primary" size="small" @click="installHubSkill(row)">安装</el-button>\
+                  </template>\
+                </el-table-column>\
+              </el-table>\
+            </template>\
+          </div>\
+          <template #footer>\
+            <div class="dialog-footer-custom dialog-footer-wizard">\
+              <div class="dialog-footer-actions">\
+                <el-button class="wizard-btn wizard-btn-cancel" @click="hubInstallDialogVisible = false">关闭</el-button>\
+              </div>\
+            </div>\
+          </template>\
+        </el-dialog>\
+        <!-- 添加 MCP -->\
+        <el-dialog v-model="mcpFormVisible" width="560px" append-to-body class="form-dialog ed-dialog ed-dialog-mcp" :close-on-click-modal="false">\
+          <template #header>\
+            <div class="dialog-header-custom dialog-header-mcp">\
+              <div class="dialog-header-icon dialog-header-icon-mcp">\
+                <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/><path d="M7 8h2M11 8h6M7 12h10"/></svg>\
+              </div>\
+              <div class="dialog-header-text">\
+                <div class="dialog-header-title">添加 MCP 服务</div>\
+                <div class="dialog-header-sub">配置 stdio 或 HTTP 服务，扩展专家能力</div>\
+              </div>\
+            </div>\
+          </template>\
+          <div class="form-dialog-body ed-dialog-body">\
+            <el-form label-position="top" class="mcp-form form-dialog-form">\
+              <el-form-item label="名称" required>\
+                <el-input v-model="mcpForm.name" placeholder="如 filesystem、github-api（小写字母/数字/_/-）" />\
+              </el-form-item>\
+              <el-form-item label="类型" required>\
+                <el-radio-group v-model="mcpForm.type" class="ed-mcp-type-group">\
+                  <el-radio-button label="stdio">本地命令（stdio）</el-radio-button>\
+                  <el-radio-button label="http">HTTP</el-radio-button>\
+                </el-radio-group>\
+              </el-form-item>\
+              <el-form-item v-if="mcpForm.type === \'http\'" label="URL" required>\
+                <el-input v-model="mcpForm.url" placeholder="https://..." />\
+              </el-form-item>\
+              <template v-else>\
+                <el-form-item label="Command" required>\
+                  <el-input v-model="mcpForm.command" placeholder="如 npx" />\
+                </el-form-item>\
+                <el-form-item label="Args">\
+                  <el-input v-model="mcpForm.argsText" placeholder="空格或逗号分隔，如 -y @modelcontextprotocol/server-filesystem /path" />\
+                </el-form-item>\
               </template>\
-            </el-table-column>\
-            <el-table-column prop="category" label="分类" width="110" show-overflow-tooltip />\
-            <el-table-column prop="description" label="说明" min-width="200" show-overflow-tooltip />\
-          </el-table>\
-          <template #footer>\
-            <el-button @click="skillPickerVisible = false">取消</el-button>\
-            <el-button type="primary" :loading="capabilitySaving" @click="confirmSkillPicker">添加所选</el-button>\
-          </template>\
-        </el-dialog>\
-        <el-dialog v-model="toolPickerVisible" title="添加工具" width="640px" append-to-body class="form-dialog capability-picker-dialog">\
-          <div class="capability-picker-head">\
-            <el-input v-model="toolPickerSearch" placeholder="搜索工具..." size="small" clearable class="member-picker-search" />\
-            <span class="member-picker-count">可选 {{ toolPickerOptions.length }} 项</span>\
-          </div>\
-          <el-table\
-            :data="toolPickerOptions"\
-            stripe\
-            max-height="360"\
-            class="toolset-table capability-picker-table"\
-            empty-text="暂无可添加工具（均已配置）"\
-            @selection-change="onToolPickerSelection"\
-          >\
-            <el-table-column type="selection" width="48" />\
-            <el-table-column label="Toolset" min-width="140">\
-              <template #default="{ row }">\
-                <div class="toolset-name-cell">{{ row.label || row.toolset }}</div>\
-                <div class="toolset-id-cell">{{ row.toolset }}</div>\
+              <el-form-item label="Env">\
+                <el-input v-model="mcpForm.envText" type="textarea" :rows="3" placeholder="多行 KEY=VALUE；密钥建议勾选下方「作为密钥」" />\
+              </el-form-item>\
+              <el-form-item>\
+                <el-checkbox v-model="mcpForm.asSecret">作为密钥写入 .env</el-checkbox>\
+              </el-form-item>\
+              <template v-if="mcpForm.asSecret">\
+                <div class="ed-mcp-secret-panel">\
+                  <el-form-item label="密钥名">\
+                    <el-input v-model="mcpForm.secretKey" placeholder="如 GITHUB_TOKEN" />\
+                  </el-form-item>\
+                  <el-form-item label="密钥值">\
+                    <el-input v-model="mcpForm.secretValue" type="password" show-password placeholder="留空则保存后显示「未配置密钥」" />\
+                  </el-form-item>\
+                </div>\
               </template>\
-            </el-table-column>\
-            <el-table-column prop="description" label="说明" min-width="220" show-overflow-tooltip />\
-          </el-table>\
-          <template #footer>\
-            <el-button @click="toolPickerVisible = false">取消</el-button>\
-            <el-button type="primary" :loading="capabilitySaving" @click="confirmToolPicker">添加所选</el-button>\
-          </template>\
-        </el-dialog>\
-        <el-dialog v-model="hubInstallDialogVisible" title="从 Hub 安装技能" width="600px" append-to-body class="form-dialog capability-picker-dialog">\
-          <div v-if="hubInstalling" class="hub-install-progress">\
-            <div class="hub-install-progress-text">正在安装技能… {{ hubInstallProgress }}%</div>\
-            <el-progress :percentage="hubInstallProgress" :stroke-width="8" />\
+              <el-form-item label="启用">\
+                <el-switch v-model="mcpForm.enabled" />\
+              </el-form-item>\
+            </el-form>\
           </div>\
-          <template v-else>\
-            <div class="capability-picker-head">\
-              <el-input v-model="hubInstallSearch" placeholder="搜索 Hub 技能..." size="small" clearable class="member-picker-search" />\
-              <span class="member-picker-count">可选 {{ hubSkillOptions.length }} 项</span>\
-            </div>\
-            <el-table :data="hubSkillOptions" stripe max-height="360" class="toolset-table capability-picker-table" empty-text="暂无可安装的 Hub 技能">\
-              <el-table-column label="技能" min-width="160">\
-                <template #default="{ row }">\
-                  <div class="toolset-name-cell">{{ row.name }}</div>\
-                  <div class="toolset-id-cell">{{ row.id }}</div>\
-                </template>\
-              </el-table-column>\
-              <el-table-column prop="category" label="分类" width="120" show-overflow-tooltip />\
-              <el-table-column prop="description" label="说明" min-width="200" show-overflow-tooltip />\
-              <el-table-column label="操作" width="90" align="center">\
-                <template #default="{ row }">\
-                  <el-button link type="primary" size="small" @click="installHubSkill(row)">安装</el-button>\
-                </template>\
-              </el-table-column>\
-            </el-table>\
-          </template>\
           <template #footer>\
-            <el-button @click="hubInstallDialogVisible = false">关闭</el-button>\
+            <div class="dialog-footer-custom dialog-footer-wizard">\
+              <div class="dialog-footer-actions">\
+                <el-button class="wizard-btn wizard-btn-cancel" @click="mcpFormVisible = false">取消</el-button>\
+                <el-button type="primary" class="wizard-btn wizard-btn-submit wizard-btn-submit-expert" :loading="mcpSaving" @click="submitMcpForm">添加</el-button>\
+              </div>\
+            </div>\
           </template>\
         </el-dialog>\
-        <el-dialog v-model="workspaceRootDialogVisible" title="更改工作空间根路径" width="480px" append-to-body class="form-dialog">\
-          <p style="margin-bottom:12px;color:var(--text-secondary,#606266);font-size:13px">更改工作空间根路径可能导致已有文件引用失效，请谨慎操作。</p>\
-          <el-input v-model="workspaceRootInput" placeholder="如：~/.hermes/profiles/expert/workspace" />\
+        <!-- MCP 密钥 -->\
+        <el-dialog v-model="mcpSecretVisible" width="480px" append-to-body class="form-dialog ed-dialog ed-dialog-secret" :close-on-click-modal="false">\
+          <template #header>\
+            <div class="dialog-header-custom dialog-header-secret">\
+              <div class="dialog-header-icon dialog-header-icon-secret">\
+                <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>\
+              </div>\
+              <div class="dialog-header-text">\
+                <div class="dialog-header-title">填写密钥</div>\
+                <div class="dialog-header-sub">{{ (mcpSecretTarget && mcpSecretTarget.name) || \'MCP 服务\' }} · 密钥仅写入本专家环境</div>\
+              </div>\
+            </div>\
+          </template>\
+          <div class="form-dialog-body ed-dialog-body">\
+            <el-form label-position="top" class="form-dialog-form">\
+              <el-form-item v-for="(val, key) in mcpSecretDraft" :key="key" :label="key" required>\
+                <el-input v-model="mcpSecretDraft[key]" type="password" show-password :placeholder="\'填写 \' + key" />\
+              </el-form-item>\
+            </el-form>\
+          </div>\
           <template #footer>\
-            <el-button @click="workspaceRootDialogVisible = false">取消</el-button>\
-            <el-button type="primary" @click="submitWorkspaceRootChange">确认更改</el-button>\
+            <div class="dialog-footer-custom dialog-footer-wizard">\
+              <div class="dialog-footer-actions">\
+                <el-button class="wizard-btn wizard-btn-cancel" @click="mcpSecretVisible = false">取消</el-button>\
+                <el-button type="primary" class="wizard-btn wizard-btn-submit wizard-btn-submit-expert" :loading="mcpSaving" @click="submitMcpSecrets">保存</el-button>\
+              </div>\
+            </div>\
+          </template>\
+        </el-dialog>\
+        <!-- 工作空间根路径 -->\
+        <el-dialog v-model="workspaceRootDialogVisible" width="500px" append-to-body class="form-dialog ed-dialog ed-dialog-wsroot" :close-on-click-modal="false">\
+          <template #header>\
+            <div class="dialog-header-custom dialog-header-workspace">\
+              <div class="dialog-header-icon dialog-header-icon-workspace">\
+                <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7v10a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-6l-2-2H5a2 2 0 0 0-2 2z"/></svg>\
+              </div>\
+              <div class="dialog-header-text">\
+                <div class="dialog-header-title">更改工作空间根路径</div>\
+                <div class="dialog-header-sub">修改专家文件读写的根目录</div>\
+              </div>\
+            </div>\
+          </template>\
+          <div class="form-dialog-body ed-dialog-body">\
+            <div class="ed-wsroot-warn">\
+              <span class="ed-wsroot-warn-icon">⚠</span>\
+              <span>更改根路径可能导致已有文件引用失效，请谨慎操作。</span>\
+            </div>\
+            <el-form label-position="top" class="form-dialog-form">\
+              <el-form-item label="新路径" required>\
+                <el-input v-model="workspaceRootInput" placeholder="如：~/.hermes/profiles/expert/workspace" clearable />\
+              </el-form-item>\
+            </el-form>\
+          </div>\
+          <template #footer>\
+            <div class="dialog-footer-custom dialog-footer-wizard">\
+              <div class="dialog-footer-actions">\
+                <el-button class="wizard-btn wizard-btn-cancel" @click="workspaceRootDialogVisible = false">取消</el-button>\
+                <el-button type="primary" class="wizard-btn wizard-btn-submit" :disabled="!(workspaceRootInput && workspaceRootInput.trim())" @click="submitWorkspaceRootChange">确认更改</el-button>\
+              </div>\
+            </div>\
           </template>\
         </el-dialog>\
       </div>\

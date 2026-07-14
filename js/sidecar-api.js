@@ -216,6 +216,13 @@
         return es;
       });
     },
+    toggleExpertSkill: function (profile, name, enabled) {
+      return request("/experts/" + encodeURIComponent(profile) + "/skills/toggle", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: name, enabled: !!enabled })
+      });
+    },
     getExpertSkills: function (profile) {
       return request("/experts/" + encodeURIComponent(profile) + "/skills");
     },

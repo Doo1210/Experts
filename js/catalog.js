@@ -1,23 +1,356 @@
-/** 平台技能与工具目录（Mock） */
+/** 平台已安装技能目录（Mock）— 对齐 Hermes：磁盘 skills/<category>/<name>，描述来自 frontmatter */
 window.SKILLS_CATALOG = [
-  { id: 'skill-yield', name: '良率分析', category: '工艺制造', description: '产线良率统计、缺陷 pareto 与根因推断' },
-  { id: 'skill-spc', name: 'SPC 统计', category: '质量管理', description: '控制图绘制、过程能力 Cpk 评估' },
-  { id: 'skill-pm', name: '预测性维护', category: '设备运维', description: '设备振动/温度趋势分析与维护建议' },
-  { id: 'skill-vision', name: '工业视觉', category: '智能算法', description: '质检图像识别与缺陷分类' },
-  { id: 'skill-supply', name: '供应链规划', category: '供应链', description: '需求预测、安全库存与物料计划' },
-  { id: 'skill-ehs', name: 'EHS 合规', category: '安全合规', description: '风险辨识、应急预案与合规检查' },
-  { id: 'skill-integration', name: '系统集成', category: '数字化', description: 'MES/WMS/QMS 对接与数据治理' },
-  { id: 'skill-energy', name: '能源审计', category: '能源环保', description: '能耗基线、节能改造方案' }
+  { id: 'plan', name: 'plan', category: 'software-development', description: 'Create structured implementation plans before coding', provenance: 'bundled' },
+  { id: 'github-code-review', name: 'github-code-review', category: 'github', description: 'Review PRs with checklist and risk notes', provenance: 'bundled' },
+  { id: 'apple-notes', name: 'apple-notes', category: 'apple', description: 'Manage Notes.app entries via automation', provenance: 'bundled' },
+  { id: 'skill-yield', name: 'yield-analysis', category: 'manufacturing', description: '产线良率统计、缺陷 pareto 与根因推断', provenance: 'bundled' },
+  { id: 'skill-spc', name: 'spc-stats', category: 'quality', description: '控制图绘制、过程能力 Cpk 评估', provenance: 'bundled' },
+  { id: 'skill-pm', name: 'predictive-maintenance', category: 'equipment', description: '设备振动/温度趋势分析与维护建议', provenance: 'bundled' },
+  { id: 'skill-vision', name: 'industrial-vision', category: 'ml', description: '质检图像识别与缺陷分类', provenance: 'bundled' },
+  { id: 'skill-supply', name: 'supply-planning', category: 'supply-chain', description: '需求预测、安全库存与物料计划', provenance: 'bundled' },
+  { id: 'skill-ehs', name: 'ehs-compliance', category: 'compliance', description: '风险辨识、应急预案与合规检查', provenance: 'bundled' },
+  { id: 'skill-integration', name: 'system-integration', category: 'digital', description: 'MES/WMS/QMS 对接与数据治理', provenance: 'bundled' },
+  { id: 'skill-energy', name: 'energy-audit', category: 'energy', description: '能耗基线、节能改造方案', provenance: 'bundled' }
 ];
 
+/**
+ * Hermes 可配置 toolset（工具 Tab，对齐 CONFIGURABLE_TOOLSETS）
+ * - label：主标题；id/name：次要 ID（UI 禁止与 label 同文案重复堆叠）
+ * - configured：缺密钥时为 false（MVP 红点）；核心基线 _HERMES_CORE_TOOLS 不在此列表二次暴露
+ * 外部 MCP 服务见 MCP Tab，不在此目录
+ */
 window.TOOLS_CATALOG = [
-  { id: 'tool-mes', name: 'MES 数据查询', type: 'api', description: '读取产线实时产量与工单状态' },
-  { id: 'tool-spc-api', name: 'SPC 计算服务', type: 'api', description: '上传测量数据返回控制图结果' },
-  { id: 'tool-file', name: '文件读写', type: 'mcp', description: '专家资料与产物文件 CRUD' },
-  { id: 'tool-web', name: '网页检索', type: 'mcp', description: '检索行业标准与公开技术文档' },
-  { id: 'tool-db', name: '工业数据库', type: 'mcp', description: '只读访问工厂数据仓库' },
-  { id: 'tool-notify', name: '消息通知', type: 'api', description: '向 IM 渠道推送任务进展' }
+  {
+    id: 'terminal', label: 'Terminal', name: 'terminal', type: 'toolset',
+    description: 'Terminal/command execution and process management',
+    toolCount: 5, configured: true,
+    tools: ['terminal', 'process', 'write_file', 'read_file', 'search_files']
+  },
+  {
+    id: 'file', label: 'File', name: 'file', type: 'toolset',
+    description: 'Read and write files in the workspace',
+    toolCount: 4, configured: true,
+    tools: ['read_file', 'write_file', 'edit_file', 'list_dir']
+  },
+  {
+    id: 'browser', label: 'Browser', name: 'browser', type: 'toolset',
+    description: 'Browser automation for interactive web tasks',
+    toolCount: 12, configured: true,
+    tools: ['browser_navigate', 'browser_click', 'browser_type', 'browser_screenshot']
+  },
+  {
+    id: 'web', label: 'Web', name: 'web', type: 'toolset',
+    description: 'Web research and public document retrieval',
+    toolCount: 2, configured: false,
+    tools: ['web_search', 'web_extract']
+  },
+  {
+    id: 'vision', label: 'Vision', name: 'vision', type: 'toolset',
+    description: 'Image understanding and visual analysis',
+    toolCount: 2, configured: false,
+    tools: ['vision_analyze', 'vision_describe']
+  },
+  {
+    id: 'code_execution', label: 'Code Execution', name: 'code_execution', type: 'toolset',
+    description: 'Execute code in a sandbox',
+    toolCount: 2, configured: true,
+    tools: ['execute_code', 'execute_repl']
+  }
 ];
+
+/** 复制 default 时随 --clone 保留的示例 MCP（产品层不 strip） */
+window.DEFAULT_MCP_SERVERS = [
+  {
+    name: 'filesystem',
+    type: 'stdio',
+    command: 'npx',
+    args: ['-y', '@modelcontextprotocol/server-filesystem', '/data/workspace'],
+    env: {},
+    enabled: true,
+    status: 'ok',
+    missingEnv: []
+  },
+  {
+    name: 'github-api',
+    type: 'http',
+    url: 'https://api.githubcopilot.com/mcp/',
+    command: '',
+    args: [],
+    env: { GITHUB_TOKEN: '' },
+    enabled: true,
+    status: 'missing_secret',
+    missingEnv: ['GITHUB_TOKEN']
+  }
+];
+
+/**
+ * DEV_MOCK 专家详情「MCP」Tab 演示数据（按专家在 EXPERTS_DATA 中的下标）。
+ * 覆盖 PRD 四种状态：正常 / 未配置密钥 / 连接失败 / 已禁用。
+ */
+window.DEMO_MCP_SERVERS_BY_INDEX = {
+  0: [
+    {
+      name: 'filesystem',
+      type: 'stdio',
+      command: 'npx',
+      args: ['-y', '@modelcontextprotocol/server-filesystem', '/data/fab-a/process'],
+      enabled: true,
+      status: 'ok'
+    },
+    {
+      name: 'github-api',
+      type: 'http',
+      url: 'https://api.githubcopilot.com/mcp/',
+      env: { GITHUB_TOKEN: '' },
+      enabled: true,
+      status: 'missing_secret',
+      missingEnv: ['GITHUB_TOKEN']
+    },
+    {
+      name: 'mes-query',
+      type: 'http',
+      url: 'https://mes.fab-a.internal/mcp',
+      env: { MES_API_KEY: '' },
+      enabled: true,
+      status: 'missing_secret',
+      missingEnv: ['MES_API_KEY']
+    },
+    {
+      name: 'legacy-fs',
+      type: 'stdio',
+      command: 'npx',
+      args: ['-y', '@modelcontextprotocol/server-filesystem', '/Users/old/profile/workspace'],
+      enabled: true,
+      status: 'connection_failed',
+      errorSummary: '路径无效或服务不可达（clone 后绝对路径失效）'
+    },
+    {
+      name: 'old-svc',
+      type: 'http',
+      url: 'https://mcp.example.com/v1',
+      enabled: false,
+      status: 'disabled'
+    }
+  ],
+  1: [
+    {
+      name: 'filesystem',
+      type: 'stdio',
+      command: 'npx',
+      args: ['-y', '@modelcontextprotocol/server-filesystem', '/data/ai-lab'],
+      enabled: true,
+      status: 'ok'
+    },
+    {
+      name: 'postgres',
+      type: 'stdio',
+      command: 'npx',
+      args: ['-y', '@modelcontextprotocol/server-postgres', 'postgresql://localhost/vision_metrics'],
+      env: { POSTGRES_PASSWORD: '' },
+      enabled: true,
+      status: 'missing_secret',
+      missingEnv: ['POSTGRES_PASSWORD']
+    },
+    {
+      name: 'mlflow',
+      type: 'http',
+      url: 'https://mlflow.ai-lab.internal/mcp',
+      enabled: true,
+      status: 'ok'
+    }
+  ],
+  2: [
+    {
+      name: 'cmms-api',
+      type: 'http',
+      url: 'https://cmms.fab-a.internal/mcp',
+      env: { CMMS_TOKEN: '' },
+      enabled: true,
+      status: 'missing_secret',
+      missingEnv: ['CMMS_TOKEN']
+    },
+    {
+      name: 'scada-bridge',
+      type: 'stdio',
+      command: 'node',
+      args: ['/opt/mcp/scada-bridge/index.js'],
+      enabled: true,
+      status: 'connection_failed',
+      errorSummary: '命令退出码 1：无法连接 OPC UA 端点'
+    }
+  ],
+  3: [
+    {
+      name: 'filesystem',
+      type: 'stdio',
+      command: 'npx',
+      args: ['-y', '@modelcontextprotocol/server-filesystem', '/data/supply-chain'],
+      enabled: true,
+      status: 'ok'
+    },
+    {
+      name: 'erp-api',
+      type: 'http',
+      url: 'https://erp.corp.internal/mcp',
+      env: { ERP_CLIENT_ID: 'supply-planner', ERP_CLIENT_SECRET: '' },
+      enabled: true,
+      status: 'missing_secret',
+      missingEnv: ['ERP_CLIENT_SECRET']
+    }
+  ],
+  4: [
+    {
+      name: 'qms-docs',
+      type: 'stdio',
+      command: 'npx',
+      args: ['-y', '@modelcontextprotocol/server-filesystem', '/data/qms/docs'],
+      enabled: true,
+      status: 'ok'
+    },
+    {
+      name: 'spc-service',
+      type: 'http',
+      url: 'https://spc.qms.internal/mcp',
+      enabled: false,
+      status: 'disabled'
+    }
+  ],
+  // 数字化转型顾问
+  5: [
+    {
+      name: 'filesystem',
+      type: 'stdio',
+      command: 'npx',
+      args: ['-y', '@modelcontextprotocol/server-filesystem', '/data/digital-blueprint'],
+      enabled: true,
+      status: 'ok'
+    },
+    {
+      name: 'mes-integration',
+      type: 'http',
+      url: 'https://mes.integration.internal/mcp',
+      env: { MES_CLIENT_SECRET: '' },
+      enabled: true,
+      status: 'missing_secret',
+      missingEnv: ['MES_CLIENT_SECRET']
+    },
+    {
+      name: 'mdm-gateway',
+      type: 'http',
+      url: 'https://mdm.corp.internal/mcp',
+      enabled: true,
+      status: 'ok'
+    },
+    {
+      name: 'legacy-esb',
+      type: 'stdio',
+      command: 'node',
+      args: ['/opt/mcp/esb-bridge/index.js'],
+      enabled: true,
+      status: 'connection_failed',
+      errorSummary: 'ESB 端点超时（10.0.12.8:8080）'
+    }
+  ],
+  // 能源管理专家
+  6: [
+    {
+      name: 'ems-telemetry',
+      type: 'http',
+      url: 'https://ems.fab-a.internal/mcp',
+      env: { EMS_API_KEY: '' },
+      enabled: true,
+      status: 'missing_secret',
+      missingEnv: ['EMS_API_KEY']
+    },
+    {
+      name: 'carbon-ledger',
+      type: 'stdio',
+      command: 'npx',
+      args: ['-y', '@modelcontextprotocol/server-filesystem', '/data/carbon/ledger'],
+      enabled: true,
+      status: 'ok'
+    },
+    {
+      name: 'peak-valley-opt',
+      type: 'http',
+      url: 'https://energy-opt.corp.internal/mcp',
+      enabled: false,
+      status: 'disabled'
+    }
+  ],
+  // 安全合规专家
+  7: [
+    {
+      name: 'ehs-docs',
+      type: 'stdio',
+      command: 'npx',
+      args: ['-y', '@modelcontextprotocol/server-filesystem', '/data/ehs/policies'],
+      enabled: true,
+      status: 'ok'
+    },
+    {
+      name: 'hazard-tracker',
+      type: 'http',
+      url: 'https://ehs.fab-a.internal/mcp',
+      env: { EHS_TOKEN: '' },
+      enabled: true,
+      status: 'missing_secret',
+      missingEnv: ['EHS_TOKEN']
+    },
+    {
+      name: 'chem-inventory',
+      type: 'stdio',
+      command: 'node',
+      args: ['/opt/mcp/chem-inventory/index.js', '--db', '/data/ehs/chem.db'],
+      enabled: true,
+      status: 'connection_failed',
+      errorSummary: '危化品库文件不存在或权限不足'
+    },
+    {
+      name: 'training-lms',
+      type: 'http',
+      url: 'https://lms.corp.internal/mcp',
+      enabled: false,
+      status: 'disabled'
+    }
+  ],
+  // 人机协作专家（EXPERTS_DATA index 8）
+  8: [
+    {
+      name: 'filesystem',
+      type: 'stdio',
+      command: 'npx',
+      args: ['-y', '@modelcontextprotocol/server-filesystem', '/data/cobot-cell'],
+      enabled: true,
+      status: 'ok'
+    },
+    {
+      name: 'agv-fleet',
+      type: 'http',
+      url: 'https://agv.fab-a.internal/mcp',
+      env: { AGV_API_TOKEN: '' },
+      enabled: true,
+      status: 'missing_secret',
+      missingEnv: ['AGV_API_TOKEN']
+    },
+    {
+      name: 'ur-polyscope',
+      type: 'stdio',
+      command: 'node',
+      args: ['/opt/mcp/ur-polyscope/index.js', '--host', '192.168.10.42'],
+      enabled: true,
+      status: 'connection_failed',
+      errorSummary: '无法连接 UR 控制器（192.168.10.42:30004）'
+    },
+    {
+      name: 'layout-cad',
+      type: 'http',
+      url: 'https://cad.plant.internal/mcp',
+      enabled: false,
+      status: 'disabled'
+    }
+  ]
+};
 
 /** Profile toolset 中文标签（只读 UI，非 Mock 绑定源） */
 window.HERMES_TOOLSET_LABELS = {
@@ -60,14 +393,15 @@ window.toolsetLabel = function (id) {
 window.IM_CHANNEL_TYPES = [
   {
     id: 'wecom',
-    label: '企业微信 (WeCom)',
-    name: '企业微信',
+    label: '企业微信 · AI Bot',
+    name: '企业微信 · AI Bot',
     emoji: '💼',
-    description: '企业微信 AI Bot，走 WebSocket 长连接，无需公网回调端点，适合内网/本地部署。',
+    description: '智能机器人 / AI Bot，走 WebSocket 长连接，无需公网回调端点，适合内网/本地部署。与「自建应用」为不同 platform，可单独启用。',
     docsUrl: 'https://developer.work.weixin.qq.com/document/path/99510',
+    connectionHint: 'WebSocket · 无需公网回调',
     credentialFields: [
-      { key: 'WECOM_BOT_ID', label: 'Bot ID', description: '企业微信 AI Bot 的 bot_id（管理后台 → 智能机器人 → API 模式获取）。', required: true },
-      { key: 'WECOM_SECRET', label: 'Secret', description: '企业微信 AI Bot 对应 secret。', password: true, required: true }
+      { key: 'WECOM_BOT_ID', label: 'Bot ID', description: '智能机器人 bot_id（管理后台 → 应用工作台 → 智能机器人 → API 模式获取）。', required: true },
+      { key: 'WECOM_SECRET', label: 'Secret', description: '对应 secret。', password: true, required: true }
     ],
     policyFields: [
       {
@@ -85,12 +419,38 @@ window.IM_CHANNEL_TYPES = [
     ]
   },
   {
+    id: 'wecom_callback',
+    label: '企业微信 · 自建应用',
+    name: '企业微信 · 自建应用',
+    emoji: '💼',
+    description: '自建应用走 HTTP 回调（WecomCallbackAdapter），gateway 监听回调端口，须保证企业微信服务器能访问到该回调地址（公网或内网穿透）。凭据命名空间为 WECOM_CALLBACK_*，与 AI Bot 互不冲突。',
+    docsUrl: 'https://developer.work.weixin.qq.com/document/path/90238',
+    connectionHint: 'HTTP 回调 · 需回调 URL 可达',
+    credentialFields: [
+      { key: 'WECOM_CALLBACK_CORP_ID', label: 'Corp ID', description: '企业 ID（管理后台 → 应用管理 → 自建应用）。', required: true },
+      { key: 'WECOM_CALLBACK_CORP_SECRET', label: 'Corp Secret', description: '应用 Secret。', password: true, required: true },
+      { key: 'WECOM_CALLBACK_AGENT_ID', label: 'Agent ID', description: '应用 AgentId。', required: true },
+      { key: 'WECOM_CALLBACK_TOKEN', label: 'Token', description: '回调 URL 校验 Token（与企微后台「接收消息」一致）。', password: true },
+      { key: 'WECOM_CALLBACK_ENCODING_AES_KEY', label: 'EncodingAESKey', description: '回调加解密密钥。', password: true },
+      { key: 'WECOM_CALLBACK_HOST', label: '监听 Host', description: '回调服务绑定地址；须保证企业微信能访问到该回调地址。' },
+      { key: 'WECOM_CALLBACK_PORT', label: '监听 Port', description: '回调监听端口（如 8645）；须与企微后台回调 URL 一致，端口占用会导致启动失败。' }
+    ],
+    policyFields: [
+      { key: 'WECOM_CALLBACK_ALLOWED_USERS', label: '允许用户', type: 'text', default: '', description: '逗号分隔 user_id；填 * 表示任意用户。' },
+      {
+        key: 'WECOM_CALLBACK_ALLOW_ALL_USERS', label: '开放访问', type: 'switch', default: false,
+        description: '设为 true 时开放任意用户访问。'
+      }
+    ]
+  },
+  {
     id: 'dingtalk',
-    label: '钉钉 (DingTalk)',
+    label: '钉钉',
     name: '钉钉',
     emoji: '🐳',
     description: '钉钉企业内部应用，走 Stream Mode（WebSocket 长连接），无需公网回调端点。',
     docsUrl: 'https://open.dingtalk.com/document/orgapp/the-robot-development-process',
+    connectionHint: 'WebSocket · 无需公网回调',
     credentialFields: [
       { key: 'DINGTALK_CLIENT_ID', label: 'Client ID', description: '钉钉应用 App Key（开发者后台 → 应用基础信息）。', required: true },
       { key: 'DINGTALK_CLIENT_SECRET', label: 'Client Secret', description: '钉钉应用 App Secret。', password: true, required: true }
@@ -106,11 +466,12 @@ window.IM_CHANNEL_TYPES = [
   },
   {
     id: 'feishu',
-    label: '飞书 (Feishu/Lark)',
+    label: '飞书',
     name: '飞书',
     emoji: '🪽',
     description: '飞书 / Lark 企业自建应用，默认 WebSocket 长连接（推荐），可选 Webhook 模式。',
     docsUrl: 'https://open.feishu.cn/document/uAjLw4CM/ukTMukTMukTM/reference/im-v1/intro',
+    connectionHint: 'WebSocket（推荐）或 Webhook',
     credentialFields: [
       { key: 'FEISHU_APP_ID', label: 'App ID', description: '飞书应用 App ID（开放平台 → 凭证与基础信息）。', required: true },
       { key: 'FEISHU_APP_SECRET', label: 'App Secret', description: '飞书应用 App Secret。', password: true, required: true },
@@ -152,9 +513,10 @@ window.IM_CHANNEL_TYPES = [
   }
 ];
 
-/** 用于凭据互斥校验的锁标识字段（对应 PRD §8.11.6 acquire_scoped_lock）。 */
+/** 用于凭据互斥校验的锁标识字段（对应 PRD §8.12.6 acquire_scoped_lock）。 */
 window.IM_CHANNEL_LOCK_FIELDS = {
   wecom: 'WECOM_BOT_ID',
+  wecom_callback: 'WECOM_CALLBACK_CORP_ID',
   dingtalk: 'DINGTALK_CLIENT_ID',
   feishu: 'FEISHU_APP_ID'
 };
@@ -288,36 +650,14 @@ window.SKILL_PARAM_SCHEMAS = {
   ]
 };
 
-/** 工具参数预设 */
+/** 内置 toolset 一般无需额外参数；保留空表兼容旧绑定 */
+/** 需密钥的 toolset 配置字段（原型抽屉；对齐 Dashboard ToolsetConfigDrawer） */
 window.TOOL_PARAM_SCHEMAS = {
-  'tool-mes': [
-    { key: 'endpoint', label: 'API Endpoint', type: 'text', required: true, placeholder: 'https://mes.example.com/api' },
-    { key: 'apiKey', label: 'API Key', type: 'password', required: true },
-    { key: 'timeout', label: '超时时间(秒)', type: 'number', default: 30, min: 5, max: 120 },
-    { key: 'retries', label: '重试次数', type: 'number', default: 3, min: 0, max: 10 }
+  web: [
+    { key: 'WEB_SEARCH_API_KEY', label: 'Web Search API Key', password: true, default: '', required: true }
   ],
-  'tool-spc-api': [
-    { key: 'endpoint', label: 'API Endpoint', type: 'text', required: true, placeholder: 'https://spc.example.com/api' },
-    { key: 'apiKey', label: 'API Key', type: 'password', required: true },
-    { key: 'timeout', label: '超时时间(秒)', type: 'number', default: 60, min: 10, max: 300 }
-  ],
-  'tool-file': [
-    { key: 'serverUrl', label: 'MCP Server 地址', type: 'text', required: true, placeholder: 'http://localhost:8080/mcp' },
-    { key: 'authType', label: '认证方式', type: 'select', options: ['无认证', 'Bearer Token', 'API Key'], default: '无认证' },
-    { key: 'authToken', label: '认证凭证', type: 'password' }
-  ],
-  'tool-web': [
-    { key: 'serverUrl', label: 'MCP Server 地址', type: 'text', required: true, placeholder: 'http://localhost:8081/mcp' },
-    { key: 'maxResults', label: '最大结果数', type: 'number', default: 10, min: 1, max: 50 }
-  ],
-  'tool-db': [
-    { key: 'connectionString', label: '连接字符串', type: 'text', required: true, placeholder: 'postgresql://user:pass@host:5432/db' },
-    { key: 'readOnly', label: '只读模式', type: 'select', options: ['是', '否'], default: '是' },
-    { key: 'maxRows', label: '最大返回行数', type: 'number', default: 1000, min: 100, max: 10000 }
-  ],
-  'tool-notify': [
-    { key: 'webhookUrl', label: 'Webhook URL', type: 'text', required: true, placeholder: 'https://hooks.example.com/notify' },
-    { key: 'channel', label: '推送渠道', type: 'select', options: ['企业微信', '钉钉', '飞书', '邮件'], default: '企业微信' }
+  vision: [
+    { key: 'VISION_API_KEY', label: 'Vision API Key', password: true, default: '', required: true }
   ]
 };
 
@@ -374,16 +714,16 @@ window.PROVIDER_DEFAULTS_DETAIL = {
   qwen: { name: '通义千问', baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1' }
 };
 
-/** Hub 技能目录（Mock） */
+/** Hub 技能目录（Mock）— 安装后默认启用，用量从 0 起算 */
 window.SKILLS_HUB_CATALOG = [
-  { id: 'hub-lean-manufacturing', name: '精益生产分析', category: '工艺制造', description: '价值流图分析、七大浪费识别与改善方案' },
-  { id: 'hub-six-sigma', name: '六西格玛工具箱', category: '质量管理', description: 'DMAIC 流程、假设检验与过程能力分析' },
-  { id: 'hub-digital-twin', name: '数字孪生仿真', category: '数字化', description: '产线仿真建模与节拍优化' },
-  { id: 'hub-predictive-quality', name: '质量预测模型', category: '智能算法', description: '基于工艺参数的良率预测与异常预警' },
-  { id: 'hub-lean-logistics', name: '精益物流规划', category: '供应链', description: '厂内物流路径优化与线边库存设计' },
-  { id: 'hub-energy-optimization', name: '能效优化引擎', category: '能源环保', description: '能耗基线建模与节能策略推荐' },
-  { id: 'hub-safety-risk', name: '安全风险图谱', category: '安全合规', description: 'JHA 分析与 LEC 风险评估' },
-  { id: 'hub-mes-connector', name: 'MES 数据连接器', category: '数字化', description: '对接主流 MES 系统拉取工单与报工数据' }
+  { id: 'hub-lean-manufacturing', name: 'lean-manufacturing', category: 'manufacturing', description: '价值流图分析、七大浪费识别与改善方案', provenance: 'hub' },
+  { id: 'hub-six-sigma', name: 'six-sigma', category: 'quality', description: 'DMAIC 流程、假设检验与过程能力分析', provenance: 'hub' },
+  { id: 'hub-digital-twin', name: 'digital-twin', category: 'digital', description: '产线仿真建模与节拍优化', provenance: 'hub' },
+  { id: 'hub-predictive-quality', name: 'predictive-quality', category: 'ml', description: '基于工艺参数的良率预测与异常预警', provenance: 'hub' },
+  { id: 'hub-lean-logistics', name: 'lean-logistics', category: 'supply-chain', description: '厂内物流路径优化与线边库存设计', provenance: 'hub' },
+  { id: 'hub-energy-optimization', name: 'energy-optimization', category: 'energy', description: '能耗基线建模与节能策略推荐', provenance: 'hub' },
+  { id: 'hub-safety-risk', name: 'safety-risk', category: 'compliance', description: 'JHA 分析与 LEC 风险评估', provenance: 'hub' },
+  { id: 'hub-mes-connector', name: 'mes-connector', category: 'digital', description: '对接主流 MES 系统拉取工单与报工数据', provenance: 'hub' }
 ];
 
 /** Mock 运行中会话数：基于 expertId 稳定哈希返回 0-3 */
