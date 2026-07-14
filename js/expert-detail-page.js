@@ -163,6 +163,7 @@
         personaOnboardDismissed.value = !!(p && p.onboarded);
         tasks.value = store.getTasksByExpert(eid);
         memories.value = store.getMemories(eid);
+        if (store.ensureDemoWorkspace) store.ensureDemoWorkspace(eid);
         materials.value = store.getWorkspaceFiles(eid);
         expertArtifacts.value = store.getExpertArtifacts(eid);
         runningSessionCount.value = store.getRunningSessionCount(eid);
@@ -389,11 +390,101 @@
       }
 
       function getTaskCwdLabel(task) {
-        if (!task.cwd) return '.';
-        return task.cwd;
+        var cwd = task && task.cwd != null ? String(task.cwd).trim() : '';
+        if (!cwd || cwd === '.' || cwd === './' || cwd === '/' || cwd === '-' || cwd === '\\') {
+          return '工作空间';
+        }
+        var root = String(workspaceRootPath.value || '').replace(/\\/g, '/').replace(/\/+$/, '');
+        var normalized = cwd.replace(/\\/g, '/').replace(/\/+$/, '');
+        if (root && normalized === root) return '工作空间';
+        return cwd;
       }
+
+      /** 将 cwd 规范为相对工作空间根的路径段；根目录返回空数组 */
+      function normalizeCwdParts(cwd) {
+        var raw = String(cwd || '').trim();
+        if (!raw || raw === '.' || raw === './') return [];
+        var normalized = raw.replace(/\\/g, '/').replace(/\/+$/, '');
+        var root = String(workspaceRootPath.value || '').replace(/\\/g, '/').replace(/\/+$/, '');
+        if (root) {
+          if (normalized === root) return [];
+          if (normalized.indexOf(root + '/') === 0) {
+            normalized = normalized.slice(root.length + 1);
+          }
+        }
+        if (!normalized || normalized === '.' || normalized === '/') return [];
+        return normalized.split('/').filter(function (p) { return p && p !== '.'; });
+      }
+
+      /** 按路径段解析文件夹；未找到返回 null */
+      function resolveWorkspaceFolderByParts(parts) {
+        if (!parts || !parts.length) return null;
+        var parentId = null;
+        var found = null;
+        var folders = materials.value.filter(function (f) { return f.kind === 'folder'; });
+        for (var i = 0; i < parts.length; i++) {
+          var segment = parts[i];
+          found = folders.find(function (f) {
+            var pid = f.parentId != null && f.parentId !== '' ? String(f.parentId) : null;
+            return pid === parentId && f.name === segment;
+          }) || null;
+          if (!found) return null;
+          parentId = String(found.id);
+        }
+        return found;
+      }
+
+      /** 按名称在整棵树中查找文件夹（兼容 cwd 只存目录名） */
+      function findWorkspaceFolderByName(name) {
+        if (!name) return null;
+        return materials.value.find(function (f) {
+          return f.kind === 'folder' && f.name === name;
+        }) || null;
+      }
+
+      /** 确保路径上的文件夹存在，返回最深一层 */
+      function ensureWorkspaceFolderPath(parts) {
+        if (!parts || !parts.length) return null;
+        var parentId = null;
+        var folder = null;
+        for (var i = 0; i < parts.length; i++) {
+          var segment = parts[i];
+          folder = materials.value.find(function (f) {
+            var pid = f.parentId != null && f.parentId !== '' ? String(f.parentId) : null;
+            return f.kind === 'folder' && pid === parentId && f.name === segment;
+          }) || null;
+          if (!folder) {
+            folder = store.addWorkspaceFolder(props.expertId, { name: segment, parentId: parentId });
+            materials.value = store.getWorkspaceFiles(props.expertId);
+          }
+          parentId = String(folder.id);
+        }
+        return folder;
+      }
+
       function goToWorkspaceFromTask(task) {
-        if (task.cwd) highlightSessionId.value = task.cwd;
+        // 工作空间 demo / 本地目录可能尚未加载
+        if (store.ensureDemoWorkspace) store.ensureDemoWorkspace(props.expertId);
+        materials.value = store.getWorkspaceFiles(props.expertId);
+
+        var cwd = task && task.cwd != null ? String(task.cwd).trim() : '';
+        var parts = normalizeCwdParts(cwd);
+        var folder = resolveWorkspaceFolderByParts(parts);
+        if (!folder && parts.length === 1) {
+          folder = findWorkspaceFolderByName(parts[0]);
+        }
+        // 目录尚不存在时按路径创建，保证能定位进去
+        if (!folder && parts.length) {
+          folder = ensureWorkspaceFolderPath(parts);
+        }
+
+        if (folder) {
+          workspaceCurrentFolderId.value = folder.id;
+          highlightSessionId.value = folder.name;
+        } else {
+          workspaceCurrentFolderId.value = null;
+          highlightSessionId.value = '';
+        }
         activeTab.value = 'workspace';
       }
 
@@ -1249,8 +1340,24 @@
       }
 
       function deleteWorkspaceFile(file) {
-        if (!file || file.source !== 'upload') return;
-        deleteMaterial(file.raw);
+        if (!file || file.kind === 'folder') return;
+        if (file.source === 'generated') {
+          deleteArtifact(file.raw);
+          return;
+        }
+        if (file.source === 'upload') deleteMaterial(file.raw);
+      }
+
+      function deleteArtifact(item) {
+        if (!item) return;
+        ElementPlus.ElMessageBox.confirm(
+          '确定删除任务产物「' + (item.title || '未命名文件') + '」？', '删除文件',
+          { confirmButtonText: '删除', cancelButtonText: '取消', type: 'warning' }
+        ).then(function () {
+          store.deleteTaskArtifact(item.id);
+          expertArtifacts.value = store.getExpertArtifacts(props.expertId);
+          ElementPlus.ElMessage.success('文件已删除');
+        }).catch(function () {});
       }
 
       function openCreateWorkspaceFolderDialog() {
@@ -1261,25 +1368,57 @@
       }
 
       function openRenameWorkspaceItem(file) {
-        if (!file || file.source !== 'upload') return;
+        if (!file) return;
+        if (file.source !== 'upload' && file.source !== 'generated') return;
+        if (file.kind === 'folder' && file.source !== 'upload') return;
         workspaceFolderDialogMode.value = 'rename';
         workspaceEditingItem.value = file;
         workspaceFolderName.value = file.name || '';
         workspaceFolderDialogVisible.value = true;
       }
 
+      var workspaceRenameDialogTitle = Vue.computed(function () {
+        if (workspaceFolderDialogMode.value !== 'rename') return '新建文件夹';
+        var item = workspaceEditingItem.value;
+        if (item && item.kind === 'folder') return '重命名文件夹';
+        return '重命名文件';
+      });
+
+      var workspaceRenameDialogSub = Vue.computed(function () {
+        if (workspaceFolderDialogMode.value !== 'rename') return '整理工作空间中的文件与任务产物';
+        var item = workspaceEditingItem.value;
+        if (item && item.source === 'generated') return '修改任务产物显示名称';
+        if (item && item.kind === 'folder') return '修改文件夹显示名称';
+        return '修改文件显示名称';
+      });
+
       function submitWorkspaceFolderDialog() {
         var name = workspaceFolderName.value.trim();
         if (!name) { ElementPlus.ElMessage.warning('请输入名称'); return; }
         if (/[\\/:*?"<>|]/.test(name)) { ElementPlus.ElMessage.warning('名称不能包含特殊字符'); return; }
-        var parentId = workspaceFolderDialogMode.value === 'rename' && workspaceEditingItem.value ? workspaceEditingItem.value.parentId : (workspaceCurrentFolderId.value || null);
+        var editing = workspaceEditingItem.value;
+
+        if (workspaceFolderDialogMode.value === 'rename' && editing && editing.source === 'generated') {
+          var artDup = expertArtifacts.value.some(function (a) {
+            if (String(a.id) === String(editing.raw.id)) return false;
+            return String(a.taskId) === String(editing.taskId) && (a.title || '').trim() === name;
+          });
+          if (artDup) { ElementPlus.ElMessage.warning('同任务下已存在同名产物'); return; }
+          store.renameTaskArtifact(editing.raw.id, name);
+          expertArtifacts.value = store.getExpertArtifacts(props.expertId);
+          workspaceFolderDialogVisible.value = false;
+          ElementPlus.ElMessage.success('已重命名');
+          return;
+        }
+
+        var parentId = workspaceFolderDialogMode.value === 'rename' && editing ? editing.parentId : (workspaceCurrentFolderId.value || null);
         var duplicate = materials.value.some(function (f) {
-          if (workspaceFolderDialogMode.value === 'rename' && workspaceEditingItem.value && String(f.id) === String(workspaceEditingItem.value.raw.id)) return false;
+          if (workspaceFolderDialogMode.value === 'rename' && editing && String(f.id) === String(editing.raw.id)) return false;
           return String(f.parentId || '') === String(parentId || '') && (f.name || '').trim() === name;
         });
         if (duplicate) { ElementPlus.ElMessage.warning('当前目录下已存在同名项目'); return; }
-        if (workspaceFolderDialogMode.value === 'rename' && workspaceEditingItem.value) {
-          store.renameWorkspaceItem(props.expertId, workspaceEditingItem.value.raw.id, name);
+        if (workspaceFolderDialogMode.value === 'rename' && editing) {
+          store.renameWorkspaceItem(props.expertId, editing.raw.id, name);
           ElementPlus.ElMessage.success('已重命名');
         } else {
           store.addWorkspaceFolder(props.expertId, { name: name, parentId: workspaceCurrentFolderId.value || null });
@@ -1308,8 +1447,10 @@
         if (command === 'preview') openWorkspaceFilePreview(file);
         if (command === 'download') downloadWorkspaceFile(file);
         if (command === 'task') goToArtifactTask(file.taskId);
-        if (command === 'rename' && file.source === 'upload') openRenameWorkspaceItem(file);
-        if (command === 'delete' && file.source === 'upload') {
+        if (command === 'rename' && (file.source === 'upload' || file.source === 'generated')) {
+          openRenameWorkspaceItem(file);
+        }
+        if (command === 'delete' && (file.source === 'upload' || file.source === 'generated')) {
           if (file.kind === 'folder') deleteWorkspaceFolder(file);
           else deleteWorkspaceFile(file);
         }
@@ -2190,6 +2331,7 @@
         materialPreviewVisible: materialPreviewVisible, materialPreviewItem: materialPreviewItem,
         workspaceCurrentFolderId: workspaceCurrentFolderId, workspaceFolderDialogVisible: workspaceFolderDialogVisible,
         workspaceFolderDialogMode: workspaceFolderDialogMode, workspaceFolderName: workspaceFolderName,
+        workspaceRenameDialogTitle: workspaceRenameDialogTitle, workspaceRenameDialogSub: workspaceRenameDialogSub,
         workspaceDragItem: workspaceDragItem, workspaceRootDragOver: workspaceRootDragOver,
         filteredMaterials: filteredMaterials, workspaceFiles: workspaceFiles, workspaceStats: workspaceStats, workspaceBreadcrumbs: workspaceBreadcrumbs, workspacePathLabel: workspacePathLabel,
         openMaterialUpload: openMaterialUpload, handleMaterialFileSelect: handleMaterialFileSelect,
@@ -2533,8 +2675,8 @@
                             <button type="button" class="workspace-more-btn workspace-more-btn-vertical" aria-label="更多操作">⋮</button>\
                             <template #dropdown>\
                               <el-dropdown-menu>\
-                                <el-dropdown-item command="rename" :disabled="file.source !== \'upload\'">重命名</el-dropdown-item>\
-                                <el-dropdown-item command="delete" :disabled="file.source !== \'upload\'" class="workspace-danger-dropdown-item">删除</el-dropdown-item>\
+                                <el-dropdown-item command="rename">重命名</el-dropdown-item>\
+                                <el-dropdown-item command="delete" class="workspace-danger-dropdown-item">删除</el-dropdown-item>\
                               </el-dropdown-menu>\
                             </template>\
                           </el-dropdown>\
@@ -2981,8 +3123,8 @@
                 <svg v-else viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/><line x1="12" y1="11" x2="12" y2="17"/><line x1="9" y1="14" x2="15" y2="14"/></svg>\
               </div>\
               <div class="dialog-header-text">\
-                <div class="dialog-header-title">{{ workspaceFolderDialogMode === \'rename\' ? \'重命名文件夹\' : \'新建文件夹\' }}</div>\
-                <div class="dialog-header-sub">{{ workspaceFolderDialogMode === \'rename\' ? \'修改文件夹显示名称\' : \'整理工作空间中的文件与任务产物\' }}</div>\
+                <div class="dialog-header-title">{{ workspaceRenameDialogTitle }}</div>\
+                <div class="dialog-header-sub">{{ workspaceRenameDialogSub }}</div>\
               </div>\
             </div>\
           </template>\

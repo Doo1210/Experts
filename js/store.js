@@ -4728,6 +4728,20 @@
         .filter(function (a) { return a.taskId === taskId; })
         .sort(function (a, b) { return (b.createdAt || '').localeCompare(a.createdAt || ''); });
     },
+    renameTaskArtifact: function (artifactId, title) {
+      if (!state.taskArtifacts || !Array.isArray(state.taskArtifacts)) return null;
+      var item = state.taskArtifacts.find(function (a) { return String(a.id) === String(artifactId); });
+      if (!item) return null;
+      item.title = String(title || '').trim();
+      item.updatedAt = nowIso();
+      persist();
+      return item;
+    },
+    deleteTaskArtifact: function (artifactId) {
+      if (!state.taskArtifacts || !Array.isArray(state.taskArtifacts)) return;
+      state.taskArtifacts = state.taskArtifacts.filter(function (a) { return String(a.id) !== String(artifactId); });
+      persist();
+    },
     fetchTaskArtifactsRemote: async function (expertId, taskId) {
       if (DEV_MOCK || !window.SidecarApi || !window.SidecarApi.listArtifacts) return null;
       var remote = await window.SidecarApi.listArtifacts(String(expertId), String(taskId));
@@ -4933,66 +4947,142 @@
     }
   };
 
-  // 阶段3：工作空间 demo 数据
+  // 阶段3：工作空间 demo 数据（幂等；material 文件来源展示为「用户」）
   function ensureDemoWorkspace(expertId) {
     state.workspaceFiles[expertId] = state.workspaceFiles[expertId] || [];
     var list = state.workspaceFiles[expertId];
-    // 已有 demo 数据则跳过
-    var hasDemo = list.some(function (x) { return String(x.id || '').indexOf('ws-' + expertId + '-') === 0; });
-    if (hasDemo) return;
+    var changed = false;
+    var prefix = 'ws-' + expertId + '-';
 
-    function addFolder(name, parentId) {
-      var f = {
-        id: 'ws-' + expertId + '-f-' + list.length,
-        name: name, type: 'folder', kind: 'folder',
-        parentId: parentId || null,
-        createdAt: '2026-06-01T09:00:00+08:00', updatedAt: '2026-06-01T09:00:00+08:00'
-      };
-      list.push(f);
-      return f.id;
-    }
-    function addFile(name, parentId, payload) {
-      var f = Object.assign({
-        id: 'ws-' + expertId + '-d-' + list.length,
-        name: name, type: 'document', kind: 'material',
-        size: 0, content: '', mime: '', previewUrl: '',
-        parentId: parentId || null,
-        createdAt: '2026-06-15T10:30:00+08:00', updatedAt: '2026-06-15T10:30:00+08:00'
-      }, payload || {});
-      list.push(f);
+    function findById(id) {
+      return list.find(function (x) { return String(x.id) === String(id); }) || null;
     }
 
-    var rootReports = addFolder('工位8', null);
-    var fReports = addFolder('报告', rootReports);
-    var fData = addFolder('数据', rootReports);
-    var fSrc = addFolder('参考资料', rootReports);
+    function ensureFolder(idSuffix, name, parentId) {
+      var id = prefix + idSuffix;
+      var existing = findById(id);
+      if (existing) return existing.id;
+      list.push({
+        id: id,
+        name: name,
+        type: 'folder',
+        kind: 'folder',
+        parentId: parentId || null,
+        createdAt: '2026-06-01T09:00:00+08:00',
+        updatedAt: '2026-06-01T09:00:00+08:00'
+      });
+      changed = true;
+      return id;
+    }
 
-    addFile('Q2-运营分析报告.md', fReports, {
+    function ensureFile(idSuffix, name, parentId, payload) {
+      var id = prefix + idSuffix;
+      if (findById(id)) return id;
+      list.push(Object.assign({
+        id: id,
+        name: name,
+        type: 'document',
+        kind: 'material',
+        size: 0,
+        content: '',
+        mime: '',
+        previewUrl: '',
+        parentId: parentId || null,
+        createdAt: '2026-06-15T10:30:00+08:00',
+        updatedAt: '2026-06-15T10:30:00+08:00',
+        updatedBy: '我'
+      }, payload || {}));
+      changed = true;
+      return id;
+    }
+
+    var fStation8 = ensureFolder('folder-station8', '工位8', null);
+    var fStation3 = ensureFolder('folder-station3', '工位3', null);
+    var fStation12 = ensureFolder('folder-station12', '工位12', null);
+    var fDeviceA = ensureFolder('folder-device-a', '设备区A', null);
+    var fWarehouse = ensureFolder('folder-warehouse', '原料仓', null);
+    var fShared = ensureFolder('folder-shared', '共享资料', null);
+
+    var fReports = ensureFolder('folder-s8-reports', '报告', fStation8);
+    var fData = ensureFolder('folder-s8-data', '数据', fStation8);
+    var fSrc = ensureFolder('folder-s8-refs', '参考资料', fStation8);
+
+    // —— 根目录：用户上传文件（工作空间 Tab 根列表可见，来源=用户）——
+    ensureFile('file-root-sop', '产线SOP-总览.md', null, {
+      type: 'document', size: 6280, mime: 'text/markdown',
+      content: '# 产线 SOP 总览\n\n## 适用范围\n工位 3 / 8 / 12 及设备区 A。\n\n## 开工检查\n1. 安全护栏完好\n2. 气路压力 0.5–0.7 MPa\n3. 视觉相机标定有效期未过\n\n## 异常处理\n- 节拍超差 >10%：呼叫线长\n- 设备报警：按《设备急停处置》执行'
+    });
+    ensureFile('file-root-layout', '车间布局图说明.md', null, {
+      type: 'document', size: 4120, mime: 'text/markdown',
+      content: '# 车间布局图说明\n\n- A 区：原料仓 → 上料缓冲\n- B 区：工位 3 / 7 协作机器人\n- C 区：工位 8 视觉检测\n- D 区：包装与出货\n\n坐标原点：西北角立柱，单位 mm。'
+    });
+    ensureFile('file-root-checklist', '班前检查表.xlsx', null, {
+      type: 'spreadsheet', size: 18432, mime: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    });
+    ensureFile('file-root-contacts', '产线联系人.xlsx', null, {
+      type: 'spreadsheet', size: 9216, mime: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    });
+    ensureFile('file-root-photo', '现场照片-工位8.jpg', null, {
+      type: 'document', size: 245760, mime: 'image/jpeg'
+    });
+
+    // —— 共享资料 ——
+    ensureFile('file-shared-glossary', '术语表.md', fShared, {
+      type: 'document', size: 3560, mime: 'text/markdown',
+      content: '# 术语表\n\n| 术语 | 含义 |\n|------|------|\n| OEE | 设备综合效率 |\n| FPY | 一次通过率 |\n| CT | 节拍时间 |\n| MTTR | 平均修复时间 |'
+    });
+    ensureFile('file-shared-template', '任务交接模板.md', fShared, {
+      type: 'document', size: 2180, mime: 'text/markdown',
+      content: '# 任务交接模板\n\n- 任务名称：\n- 当前进度：\n- 风险点：\n- 待办：\n- 交接人 / 接收人：'
+    });
+
+    // —— 工位8 子目录（原有 demo 内容，改为稳定 ID）——
+    ensureFile('file-s8-q2', 'Q2-运营分析报告.md', fReports, {
       type: 'document', size: 8420, mime: 'text/markdown',
       content: '# Q2 运营分析报告\n\n## 概要\n- 总访问量 12.4万（环比 +18%）\n- 转化率 3.2%（环比 +0.4pt）\n- 重点品类增长稳定\n\n## 关键发现\n1. 华东区域贡献最大增量\n2. 移动端占比首超 70%\n3. 复购用户ARPU提升 12%\n\n## 建议\n- 加大华东物流投入\n- 优化移动端首屏加载\n- 启动会员复购激励计划'
     });
-    addFile('竞品对比.xlsx', fReports, { type: 'data', size: 24576, mime: 'application/vnd.ms-excel' });
-    addFile('周会纪要-0701.md', fReports, {
+    ensureFile('file-s8-compete', '竞品对比.xlsx', fReports, {
+      type: 'data', size: 24576, mime: 'application/vnd.ms-excel'
+    });
+    ensureFile('file-s8-meeting', '周会纪要-0701.md', fReports, {
       type: 'document', size: 3120, mime: 'text/markdown',
       content: '# 周会纪要 2026-07-01\n\n## 参会\n- 产品、运营、数据\n\n## 议题\n1. Q2 复盘\n2. Q3 OKR 对齐\n3. 资源调配\n\n## 决议\n- 7月底前完成移动端首屏优化\n- 数据看板新增复购维度'
     });
-
-    addFile('订单明细.csv', fData, {
+    ensureFile('file-s8-orders', '订单明细.csv', fData, {
       type: 'data', size: 154320, mime: 'text/csv',
       content: 'order_id,user_id,amount,region,channel,created_at\n1001,u_001,128.50,华东,mobile,2026-06-01 09:12\n1002,u_002,89.00,华南,pc,2026-06-01 10:05\n1003,u_003,256.80,华东,mobile,2026-06-01 11:48\n1004,u_004,42.10,华北,mobile,2026-06-02 08:30\n1005,u_005,310.00,华东,pc,2026-06-02 14:22'
     });
-    addFile('用户画像.json', fData, {
+    ensureFile('file-s8-persona', '用户画像.json', fData, {
       type: 'data', size: 5210, mime: 'application/json',
       content: '{\n  "total": 12453,\n  "segments": [\n    { "name": "高价值用户", "count": 823, "ratio": 0.066 },\n    { "name": "潜力用户", "count": 2156, "ratio": 0.173 },\n    { "name": "新用户", "count": 4210, "ratio": 0.338 },\n    { "name": "沉睡用户", "count": 5264, "ratio": 0.423 }\n  ]\n}'
     });
-
-    addFile('行业白皮书.pdf', fSrc, { type: 'document', size: 1024576, mime: 'application/pdf' });
-    addFile('产品手册.md', fSrc, {
+    ensureFile('file-s8-whitepaper', '行业白皮书.pdf', fSrc, {
+      type: 'document', size: 1024576, mime: 'application/pdf'
+    });
+    ensureFile('file-s8-manual', '产品手册.md', fSrc, {
       type: 'document', size: 15820, mime: 'text/markdown',
       content: '# 产品使用手册 v3.2\n\n## 1. 快速开始\n注册账号 → 创建工作空间 → 邀请成员\n\n## 2. 核心功能\n- 任务编排\n- 工具调用\n- 数据接入\n\n## 3. 进阶用法\n- 子智能体委派\n- 多轮澄清\n- 审批流转'
     });
 
-    persist();
+    // —— 其他工位 / 区域用户资料 ——
+    ensureFile('file-s3-layout', '工位3空间测量记录.md', fStation3, {
+      type: 'document', size: 2680, mime: 'text/markdown',
+      content: '# 工位3空间测量\n\n- 宽度：1800 mm\n- 进深：2200 mm\n- 可拆除料架后净宽：约 +600 mm\n- 结论：可部署 UR5e'
+    });
+    ensureFile('file-s12-agv', 'AGV路径草图说明.md', fStation12, {
+      type: 'document', size: 2940, mime: 'text/markdown',
+      content: '# AGV 路径草图\n\n起点：原料仓出库口\n途经：缓冲站 B2 → 工位 12\n终点：线边仓\n\n备注：转弯半径 ≥ 0.8 m，避免与人行通道交叉。'
+    });
+    ensureFile('file-device-a-list', '设备台账-A区.csv', fDeviceA, {
+      type: 'data', size: 8192, mime: 'text/csv',
+      content: 'asset_id,name,status,last_pm\nEQ-A01,拧紧枪#1,运行,2026-05-20\nEQ-A02,拧紧枪#2,待机,2026-05-20\nEQ-A03,视觉光源控制器,运行,2026-06-01'
+    });
+    ensureFile('file-wh-stock', '原料库存快照.json', fWarehouse, {
+      type: 'data', size: 2460, mime: 'application/json',
+      content: '{\n  "asOf": "2026-07-14",\n  "items": [\n    { "sku": "SCR-M4", "qty": 12000, "unit": "pcs" },\n    { "sku": "PCB-A12", "qty": 860, "unit": "pcs" },\n    { "sku": "CASE-BK", "qty": 420, "unit": "pcs" }\n  ]\n}'
+    });
+
+    if (changed) persist();
   }
   window.AppStore.ensureDemoWorkspace = ensureDemoWorkspace;
 
