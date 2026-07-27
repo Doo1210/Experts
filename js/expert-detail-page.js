@@ -488,7 +488,7 @@
         activeTab.value = 'workspace';
       }
 
-      function openHubInstallDialog() {
+      function openPlatformImportDialog() {
         hubInstallSearch.value = '';
         hubInstallDialogVisible.value = true;
       }
@@ -517,12 +517,63 @@
               hubInstallDialogVisible.value = false;
               var count = runningSessionCount.value;
               var msg = count > 0
-                ? '已安装「' + (skill.name || skill.id) + '」，默认已启用。该专家当前有 ' + count + ' 个运行中会话，修改将在新会话生效。'
-                : '已安装「' + (skill.name || skill.id) + '」，默认已启用。修改将在新会话生效。';
+                ? '已从平台导入「' + (skill.name || skill.id) + '」，默认已启用。该专家当前有 ' + count + ' 个运行中会话，修改将在新会话生效。'
+                : '已从平台导入「' + (skill.name || skill.id) + '」，默认已启用。修改将在新会话生效。';
               ElementPlus.ElMessage.success(msg);
             });
           }
         }, 400);
+      }
+
+      var skillLocalImportInput = Vue.ref(null);
+      var localSkillUploading = Vue.ref(false);
+
+      function triggerLocalSkillUpload() {
+        if (skillLocalImportInput.value) skillLocalImportInput.value.click();
+      }
+
+      function parseLocalSkillFile(file) {
+        var rawName = (file && file.name) || 'local-skill';
+        var base = rawName.replace(/\.(zip|md|json|skill)$/i, '').replace(/[^a-zA-Z0-9_\-\u4e00-\u9fa5]+/g, '-');
+        if (!base) base = 'local-skill';
+        var id = 'local-' + base.toLowerCase().replace(/\s+/g, '-');
+        return {
+          id: id,
+          name: base,
+          description: '从本地文件「' + rawName + '」导入',
+          category: 'local',
+          provenance: 'local'
+        };
+      }
+
+      function handleLocalSkillUpload(e) {
+        var file = e.target.files && e.target.files[0];
+        e.target.value = '';
+        if (!file) return;
+        var okExt = /\.(zip|md|json|skill)$/i.test(file.name || '');
+        if (!okExt) {
+          ElementPlus.ElMessage.warning('请上传 .zip / .md / .json 技能包');
+          return;
+        }
+        var skill = parseLocalSkillFile(file);
+        var installed = skillBindings.value.some(function (s) { return s.skillId === skill.id; });
+        if (installed) {
+          ElementPlus.ElMessage.warning('技能「' + skill.name + '」已存在');
+          return;
+        }
+        localSkillUploading.value = true;
+        store.installLocalSkill(props.expertId, skill).then(function () {
+          skillBindings.value = store.getSkillBindings(props.expertId).slice();
+          localSkillUploading.value = false;
+          var count = runningSessionCount.value;
+          var msg = count > 0
+            ? '已本地上传「' + skill.name + '」，默认已启用。该专家当前有 ' + count + ' 个运行中会话，修改将在新会话生效。'
+            : '已本地上传「' + skill.name + '」，默认已启用。修改将在新会话生效。';
+          ElementPlus.ElMessage.success(msg);
+        }).catch(function (err) {
+          localSkillUploading.value = false;
+          ElementPlus.ElMessage.error((err && err.message) || '本地上传失败');
+        });
       }
 
       function toggleSkillEnabled(row, enabled) {
@@ -556,9 +607,17 @@
       }
 
       function skillProvenanceLabel(p) {
-        if (p === 'hub') return 'hub';
+        if (p === 'hub') return '平台';
+        if (p === 'local') return '本地';
         if (p === 'agent') return 'agent';
         return 'bundled';
+      }
+
+      function skillProvenanceTagType(p) {
+        if (p === 'hub') return 'success';
+        if (p === 'local') return 'warning';
+        if (p === 'agent') return '';
+        return 'info';
       }
 
       function refreshToolsets() {
@@ -2363,6 +2422,7 @@
         toggleSkillEnabled: toggleSkillEnabled,
         formatSkillLastUsed: formatSkillLastUsed,
         skillProvenanceLabel: skillProvenanceLabel,
+        skillProvenanceTagType: skillProvenanceTagType,
         getSkillInfo: getSkillInfo, getSkillParamSchema: getSkillParamSchema,
         skillsCatalog: skillsCatalog,
         filteredSkills: filteredSkills,
@@ -2468,8 +2528,12 @@
         hubInstalling: hubInstalling,
         hubInstallProgress: hubInstallProgress,
         hubSkillOptions: hubSkillOptions,
-        openHubInstallDialog: openHubInstallDialog,
+        openPlatformImportDialog: openPlatformImportDialog,
         installHubSkill: installHubSkill,
+        skillLocalImportInput: skillLocalImportInput,
+        localSkillUploading: localSkillUploading,
+        triggerLocalSkillUpload: triggerLocalSkillUpload,
+        handleLocalSkillUpload: handleLocalSkillUpload,
         defaultModelLabel: defaultModelLabel,
         defaultModelTooltip: defaultModelTooltip
       };
@@ -2765,7 +2829,7 @@
                 <div class="detail-tab-pane">\
                   <div class="detail-section-head">\
                     <h3 class="detail-section-title">技能</h3>\
-                    <p class="detail-section-desc">管理本专家已安装的技能（启停 / 用量 / Hub 安装）<span v-if="runningSessionCount > 0">。当前有 {{ runningSessionCount }} 个运行中会话，启停将在新会话生效</span></p>\
+                    <p class="detail-section-desc">管理本专家已安装的技能（启停 / 用量 / 平台导入 / 本地上传）<span v-if="runningSessionCount > 0">。当前有 {{ runningSessionCount }} 个运行中会话，启停将在新会话生效</span></p>\
                   </div>\
                   <div class="detail-action-bar detail-action-bar--split skill-action-bar">\
                     <div class="detail-action-left">\
@@ -2782,13 +2846,15 @@
                         <el-option label="仅已启用" value="enabled" />\
                         <el-option label="仅已禁用" value="disabled" />\
                       </el-select>\
-                      <el-button type="primary" size="small" @click="openHubInstallDialog">从 Hub 安装</el-button>\
+                      <el-button type="primary" size="small" @click="openPlatformImportDialog">从平台导入</el-button>\
+                      <el-button size="small" :loading="localSkillUploading" @click="triggerLocalSkillUpload">本地上传</el-button>\
+                      <input ref="skillLocalImportInput" type="file" accept=".zip,.md,.json,.skill" style="display:none" @change="handleLocalSkillUpload" />\
                     </div>\
                   </div>\
-                  <div v-loading="capabilitiesLoading || capabilitySaving">\
+                  <div v-loading="capabilitiesLoading || capabilitySaving || localSkillUploading">\
                     <div v-if="skillBindings.length === 0 && !capabilitiesLoading" class="profile-empty-state">\
                       <p class="profile-empty-title">暂无已安装技能</p>\
-                      <p class="profile-empty-desc">创建专家时会自动 seed 内置技能；也可从 Hub 安装。</p>\
+                      <p class="profile-empty-desc">创建专家时会自动 seed 内置技能；也可从平台导入或本地上传。</p>\
                     </div>\
                     <div v-else-if="filteredSkills.length === 0" class="profile-empty-state">\
                       <p class="profile-empty-title">无匹配技能</p>\
@@ -2829,7 +2895,7 @@
                         </el-table-column>\
                         <el-table-column label="来源" width="88" align="center">\
                           <template #default="{ row }">\
-                            <el-tag size="small" :type="row.provenance === \'hub\' ? \'success\' : \'info\'" effect="plain">{{ skillProvenanceLabel(row.provenance) }}</el-tag>\
+                            <el-tag size="small" :type="skillProvenanceTagType(row.provenance)" effect="plain">{{ skillProvenanceLabel(row.provenance) }}</el-tag>\
                           </template>\
                         </el-table-column>\
                       </el-table>\
@@ -2842,10 +2908,7 @@
                 <div class="detail-tab-pane">\
                   <div class="detail-section-head">\
                     <h3 class="detail-section-title">工具</h3>\
-                    <p class="detail-section-desc">管理本专家可调用的 Hermes 内置工具集<span v-if="runningSessionCount > 0">。当前有 {{ runningSessionCount }} 个运行中会话，变更将在新会话生效</span></p>\
-                  </div>\
-                  <div class="tool-core-baseline">\
-                    未额外开启可选工具集时，专家仍可使用默认核心工具（<code>_HERMES_CORE_TOOLS</code>：文件、终端、搜索等）。本列表用于开启 browser、vision、web 等可选能力。\
+                    <p class="detail-section-desc">管理本专家可调用的内置工具集<span v-if="runningSessionCount > 0">。当前有 {{ runningSessionCount }} 个运行中会话，变更将在新会话生效</span></p>\
                   </div>\
                   <div class="detail-action-bar detail-action-bar--split skill-action-bar">\
                     <div class="detail-action-left">\
@@ -3312,7 +3375,7 @@
             </div>\
           </template>\
         </el-drawer>\
-        <!-- Hub 安装技能 -->\
+        <!-- 从平台导入技能 -->\
         <el-dialog v-model="hubInstallDialogVisible" width="640px" append-to-body class="form-dialog capability-picker-dialog ed-dialog ed-dialog-hub">\
           <template #header>\
             <div class="dialog-header-custom dialog-header-hub">\
@@ -3320,37 +3383,36 @@
                 <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>\
               </div>\
               <div class="dialog-header-text">\
-                <div class="dialog-header-title">从 Hub 安装技能</div>\
-                <div class="dialog-header-sub">搜索并安装官方 / 社区技能到当前专家</div>\
+                <div class="dialog-header-title">从平台导入技能</div>\
+                <div class="dialog-header-sub">搜索并导入平台资源库中的技能到当前专家</div>\
               </div>\
             </div>\
           </template>\
           <div class="form-dialog-body ed-dialog-body">\
             <div v-if="hubInstalling" class="hub-install-progress">\
-              <div class="hub-install-progress-text">正在安装技能… {{ hubInstallProgress }}%</div>\
+              <div class="hub-install-progress-text">正在导入技能… {{ hubInstallProgress }}%</div>\
               <el-progress :percentage="hubInstallProgress" :stroke-width="10" />\
             </div>\
             <template v-else>\
               <div class="capability-picker-head">\
-                <el-input v-model="hubInstallSearch" placeholder="搜索 Hub 技能..." clearable class="member-picker-search">\
+                <el-input v-model="hubInstallSearch" placeholder="搜索平台技能..." clearable class="member-picker-search">\
                   <template #prefix>\
                     <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>\
                   </template>\
                 </el-input>\
                 <span class="member-picker-count">可选 {{ hubSkillOptions.length }} 项</span>\
               </div>\
-              <el-table :data="hubSkillOptions" stripe max-height="360" class="toolset-table capability-picker-table" empty-text="暂无可安装的 Hub 技能">\
+              <el-table :data="hubSkillOptions" stripe max-height="360" class="toolset-table capability-picker-table" empty-text="暂无可导入的平台技能">\
                 <el-table-column label="技能" min-width="160">\
                   <template #default="{ row }">\
                     <div class="toolset-name-cell">{{ row.name }}</div>\
                     <div class="toolset-id-cell">{{ row.id }}</div>\
                   </template>\
                 </el-table-column>\
-                <el-table-column prop="category" label="分类" width="120" show-overflow-tooltip />\
                 <el-table-column prop="description" label="说明" min-width="200" show-overflow-tooltip />\
                 <el-table-column label="操作" width="90" align="center">\
                   <template #default="{ row }">\
-                    <el-button link type="primary" size="small" @click="installHubSkill(row)">安装</el-button>\
+                    <el-button link type="primary" size="small" @click="installHubSkill(row)">导入</el-button>\
                   </template>\
                 </el-table-column>\
               </el-table>\

@@ -3327,10 +3327,17 @@
       return Promise.resolve({ ok: true, effective: 'next_session', skills: state.skillBindings[key] });
     },
     installHubSkill: function (expertId, skill) {
+      return this.installSkill(expertId, skill, 'hub');
+    },
+    installLocalSkill: function (expertId, skill) {
+      return this.installSkill(expertId, skill, 'local');
+    },
+    installSkill: function (expertId, skill, provenance) {
       var key = String(expertId);
       var list = this.getSkillBindings(key);
       var sid = String((skill && (skill.id || skill.skillId)) || '').trim();
-      if (!sid) return Promise.reject(new Error('无效的 Hub 技能'));
+      var source = provenance || (skill && skill.provenance) || 'hub';
+      if (!sid) return Promise.reject(new Error('无效的技能'));
       if (list.some(function (s) { return s.skillId === sid; })) {
         return this.toggleSkillEnabled(key, sid, true);
       }
@@ -3339,7 +3346,7 @@
         name: (skill && skill.name) || sid,
         description: (skill && skill.description) || '',
         category: (skill && skill.category) || '',
-        provenance: 'hub'
+        provenance: source
       }, { clearUsage: true, enabled: true });
       list.push(entry);
       state.skillBindings[key] = list;
