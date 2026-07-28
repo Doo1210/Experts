@@ -1262,9 +1262,25 @@ body {
   transition: background 0.15s, color 0.15s;
   user-select: none;
 }
-.chat-config-trigger:hover {
+.chat-config-trigger:hover,
+.chat-config-trigger.is-open {
   background: #f0f2f5;
   color: #606266;
+}
+.chat-config-model {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 280px;
+}
+.chat-config-model-icon {
+  display: inline-flex;
+  color: #409eff;
+  flex: 0 0 auto;
+}
+.chat-config-caret {
+  color: #c0c4cc;
+  font-size: 10px;
 }
 .chat-config-tag {
   margin-left: 6px;
@@ -1277,6 +1293,58 @@ body {
 .el-dropdown-menu__item.is-active {
   color: #4080ff;
   font-weight: 600;
+}
+
+/* 对话输入区 · 模型选择浮窗 */
+.chat-model-picker-popper.el-popover,
+.chat-model-picker-popper {
+  padding: 12px !important;
+  border-radius: 10px !important;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.12) !important;
+}
+.chat-model-picker-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+.chat-model-picker-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #303133;
+}
+.chat-model-picker-search {
+  margin-bottom: 8px;
+}
+.chat-model-picker-list {
+  max-height: 280px;
+  overflow-y: auto;
+  margin: 0 -4px;
+  padding: 0 4px;
+}
+.chat-model-option {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  border-radius: 6px;
+  font: inherit;
+  color: inherit;
+}
+.chat-model-option:hover,
+.chat-model-option.is-active {
+  background: #ecf5ff;
+}
+.chat-model-option.is-active .model-option-name {
+  color: #409eff;
+  font-weight: 600;
+}
+.chat-model-picker-empty {
+  padding: 20px 12px;
+  text-align: center;
+  font-size: 12px;
+  color: #909399;
 }
 .task-remote-error {
   margin: 0 12px 10px;
@@ -8545,11 +8613,140 @@ body {
   pointer-events: none;
 }
 
+/* === 模型选择下拉 === */
+.model-select-wrap {
+  width: 100%;
+}
+.model-select-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.model-select-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: #303133;
+}
+.model-select-gear {
+  display: inline-flex;
+  align-items: center;
+  color: #409eff;
+  opacity: 0.85;
+}
+.model-select-picker {
+  width: 100%;
+}
+.model-select-picker .el-select__wrapper,
+.model-select-picker .el-input__wrapper {
+  min-height: 44px;
+  padding-left: 12px;
+}
+.model-select-picker .el-input .el-input__inner {
+  height: 42px;
+  line-height: 42px;
+}
+.model-select-prefix {
+  display: inline-flex;
+  align-items: center;
+  color: #409eff;
+  margin-right: 2px;
+}
+.model-select-icon-svg {
+  display: block;
+  color: inherit;
+}
+.model-select-dropdown.el-select__popper,
+.model-select-dropdown {
+  min-width: 560px !important;
+}
+.model-select-dropdown .el-select-dropdown__item {
+  height: auto;
+  padding: 0;
+  line-height: normal;
+}
+.model-select-dropdown .el-select-dropdown__item.is-selected,
+.model-select-dropdown .el-select-dropdown__item.is-hovering {
+  background: transparent;
+}
+.model-option-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  min-height: 40px;
+  box-sizing: border-box;
+}
+.model-option-row.is-active,
+.el-select-dropdown__item.is-selected .model-option-row,
+.el-select-dropdown__item.is-hovering .model-option-row {
+  background: #ecf5ff;
+}
+.model-option-row.is-active .model-option-name,
+.el-select-dropdown__item.is-selected .model-option-name {
+  color: #409eff;
+  font-weight: 600;
+}
+.model-option-icon {
+  flex: 0 0 auto;
+  display: inline-flex;
+  color: #409eff;
+}
+.model-option-name {
+  flex: 0 1 auto;
+  max-width: 42%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  color: #303133;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+.model-option-tags {
+  display: flex;
+  align-items: center;
+  flex-wrap: nowrap;
+  gap: 6px;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+}
+.model-option-tag {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  height: 22px;
+  padding: 0 8px;
+  border-radius: 4px;
+  font-size: 12px;
+  line-height: 22px;
+  color: #409eff;
+  background: #ecf5ff;
+  border: 1px solid #d9ecff;
+  white-space: nowrap;
+}
+.model-option-tag--visibility {
+  background: #f0f7ff;
+}
+.model-option-ctx {
+  flex: 0 0 auto;
+  margin-left: auto;
+  min-width: 36px;
+  text-align: right;
+  font-size: 12px;
+  font-weight: 600;
+  color: #409eff;
+  font-variant-numeric: tabular-nums;
+}
+
 /* === 编辑弹窗模型配置区 === */
 .edit-model-section {
   margin-top: 20px;
   padding-top: 20px;
   border-top: 1px solid #ebeef5;
+}
+.edit-model-section .form-dialog-hint {
+  margin-top: 10px;
 }
 .edit-model-current {
   display: flex;
