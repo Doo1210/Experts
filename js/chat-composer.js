@@ -29,8 +29,7 @@
         pathQuery: '',
         pathSelectedIndex: 0,
         pathAnchorPos: -1,
-        modelPickerVisible: false,
-        modelSearchQuery: ''
+        modelPickerVisible: false
       };
     },
     computed: {
@@ -65,15 +64,6 @@
             contextLabel: m.contextLabel || '—',
             reasoning: !!m.reasoning
           };
-        });
-      },
-      filteredModelList: function () {
-        var q = String(this.modelSearchQuery || '').trim().toLowerCase();
-        var list = this.resolvedModelList;
-        if (!q) return list;
-        return list.filter(function (m) {
-          return String(m.name || '').toLowerCase().indexOf(q) >= 0
-            || String(m.id || '').toLowerCase().indexOf(q) >= 0;
         });
       },
       displayModel: function () {
@@ -134,12 +124,10 @@
       },
       onSelectModel: function (id) {
         this.modelPickerVisible = false;
-        this.modelSearchQuery = '';
         this.$emit('selectModel', id);
       },
       onModelPickerVisible: function (visible) {
         this.modelPickerVisible = visible;
-        if (!visible) this.modelSearchQuery = '';
       },
       onSelectCwd: function (cwd) {
         if (cwd === '__workspace__') {
@@ -342,15 +330,9 @@
                     </svg>\
                   </span>\
                 </div>\
-                <el-input\
-                  v-model="modelSearchQuery"\
-                  size="small"\
-                  clearable\
-                  placeholder="搜索模型"\
-                  class="chat-model-picker-search" />\
                 <div class="chat-model-picker-list">\
                   <button\
-                    v-for="m in filteredModelList"\
+                    v-for="m in resolvedModelList"\
                     :key="m.id"\
                     type="button"\
                     class="model-option-row chat-model-option"\
@@ -363,7 +345,7 @@
                     </span>\
                     <span class="model-option-ctx">{{ m.contextLabel }}</span>\
                   </button>\
-                  <div v-if="filteredModelList.length === 0" class="chat-model-picker-empty">无匹配模型</div>\
+                  <div v-if="resolvedModelList.length === 0" class="chat-model-picker-empty">无匹配模型</div>\
                 </div>\
               </div>\
             </el-popover>\
