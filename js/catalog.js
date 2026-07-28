@@ -739,6 +739,161 @@ window.getRunningSessionCount = function (expertId) {
 /** Mock MEMORY.md 文本 */
 window.MOCK_MEMORY_MD = '# 专家长期记忆\n\n## 用户偏好\n- 偏好用数据驱动方式做决策，汇报时需附带量化结论\n- 习惯用中文输出，技术术语可保留英文\n\n## 项目背景\n- 当前产线为 12 寸晶圆厂，月产能 5 万片\n- 重点攻关工序：光刻对准精度与刻蚀均匀性\n\n## 领域知识\n- SPC 控制限按 ±3σ 设定，Cpk 目标 ≥ 1.33\n- 异常处理流程：发现 -> 隔离 -> 根因分析 -> 纠正措施 -> 验证关闭';
 
+/**
+ * 平台可用模型目录（Mock）— 新建/编辑专家「默认模型」下拉
+ * visibility: personal | public
+ * capabilities: 能力标签
+ * contextLabel: 上下文/用量展示
+ */
+window.MODELS_CATALOG = [
+  {
+    id: 'qwen3.5-122b-a10b-mass',
+    name: 'qwen3.5-122b-a10b-mass',
+    visibility: 'personal',
+    capabilities: ['文本生成', '图文问答', '工具调用'],
+    contextLabel: '7K',
+    providerName: '通义千问',
+    providerSlug: 'qwen',
+    baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1'
+  },
+  {
+    id: 'qwen3-235b-a22b-2507',
+    name: 'qwen3-235b-a22b-2507',
+    visibility: 'personal',
+    capabilities: ['文本生成'],
+    contextLabel: '5K',
+    providerName: '通义千问',
+    providerSlug: 'qwen',
+    baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1'
+  },
+  {
+    id: 'minimax-m2.5',
+    name: 'minimax-m2.5',
+    visibility: 'public',
+    capabilities: ['文本生成'],
+    contextLabel: '7K',
+    providerName: 'MiniMax',
+    providerSlug: 'minimax',
+    baseUrl: 'https://api.minimax.chat/v1'
+  },
+  {
+    id: 'glm-5.1',
+    name: 'glm-5.1',
+    visibility: 'public',
+    capabilities: ['文本生成'],
+    contextLabel: '193K',
+    providerName: '智谱',
+    providerSlug: 'zhipu',
+    baseUrl: 'https://open.bigmodel.cn/api/paas/v4'
+  },
+  {
+    id: 'qwen3-235b-a22b',
+    name: 'qwen3-235b-a22b',
+    visibility: 'public',
+    capabilities: ['文本生成', '工具调用'],
+    contextLabel: '78K',
+    providerName: '通义千问',
+    providerSlug: 'qwen',
+    baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1'
+  },
+  {
+    id: 'qwen2.5-72b-instruct',
+    name: 'qwen2.5-72b-instruct',
+    visibility: 'public',
+    capabilities: ['文本生成'],
+    contextLabel: '7K',
+    providerName: '通义千问',
+    providerSlug: 'qwen',
+    baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1'
+  },
+  {
+    id: 'qwen2.5-32b-instruct',
+    name: 'qwen2.5-32b-instruct',
+    visibility: 'public',
+    capabilities: ['文本生成'],
+    contextLabel: '7K',
+    providerName: '通义千问',
+    providerSlug: 'qwen',
+    baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1'
+  },
+  {
+    id: 'Qwen-235B-A22B-cucloud',
+    name: 'Qwen-235B-A22B-cucloud',
+    visibility: 'public',
+    capabilities: ['文本生成'],
+    contextLabel: '78K',
+    providerName: '通义千问',
+    providerSlug: 'qwen',
+    baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1'
+  },
+  {
+    id: 'gpt-4o',
+    name: 'gpt-4o',
+    visibility: 'public',
+    capabilities: ['文本生成', '图文问答', '工具调用'],
+    contextLabel: '128K',
+    providerName: 'OpenAI',
+    providerSlug: 'openai',
+    baseUrl: 'https://api.openai.com/v1'
+  },
+  {
+    id: 'claude-sonnet-4',
+    name: 'claude-sonnet-4',
+    visibility: 'public',
+    capabilities: ['文本生成', '工具调用'],
+    contextLabel: '200K',
+    providerName: 'Anthropic',
+    providerSlug: 'anthropic',
+    baseUrl: 'https://api.anthropic.com/v1'
+  },
+  {
+    id: 'deepseek-chat',
+    name: 'deepseek-chat',
+    visibility: 'public',
+    capabilities: ['文本生成', '工具调用'],
+    contextLabel: '64K',
+    providerName: 'DeepSeek',
+    providerSlug: 'deepseek',
+    baseUrl: 'https://api.deepseek.com/v1'
+  },
+  {
+    id: 'qwen-max',
+    name: 'qwen-max',
+    visibility: 'public',
+    capabilities: ['文本生成', '工具调用'],
+    contextLabel: '32K',
+    providerName: '通义千问',
+    providerSlug: 'qwen',
+    baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1'
+  }
+];
+
+window.findModelInCatalog = function (modelIdOrName) {
+  var key = String(modelIdOrName || '').trim();
+  if (!key) return null;
+  var list = window.MODELS_CATALOG || [];
+  for (var i = 0; i < list.length; i++) {
+    if (list[i].id === key || list[i].name === key) return list[i];
+  }
+  return null;
+};
+
+window.modelCatalogToConfig = function (model) {
+  if (!model) return null;
+  return {
+    providerSlug: model.providerSlug || 'custom',
+    providerName: model.providerName || '',
+    baseUrl: model.baseUrl || '',
+    apiKey: '',
+    model: model.name || model.id || ''
+  };
+};
+
+window.modelVisibilityLabel = function (visibility) {
+  if (visibility === 'personal') return '个人';
+  return '全局公开';
+};
+
 /** Mock USER.md 文本 */
 window.MOCK_USER_MD = '# 用户画像\n\n## 角色\n- 制造工艺工程师，负责良率提升与工艺优化\n\n## 沟通风格\n- 直接、简洁，偏好结论先行\n- 喜欢用表格和图表对比方案\n\n## 常用工具\n- MES 报表系统、JMP 统计分析、Minitab';
 

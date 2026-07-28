@@ -9,16 +9,16 @@
     var editAvatarInput = Vue.ref(null);
     var editExpertiseTagInput = Vue.ref('');
     var editingExpert = Vue.ref(null);
-    var editModelMode = Vue.ref('keep');
-    var editModelConfig = Vue.ref({ baseUrl: '', apiKey: '', model: '', providerName: '' });
+    var editSelectedModelId = Vue.ref('');
+    var editOriginalModelId = Vue.ref('');
     var editModelCurrent = Vue.ref(null);
 
     function resetEditForm() {
       editForm.value = { name: '', description: '', avatar: '', expertise: [] };
       editExpertiseTagInput.value = '';
       editingExpert.value = null;
-      editModelMode.value = 'keep';
-      editModelConfig.value = { baseUrl: '', apiKey: '', model: '', providerName: '' };
+      editSelectedModelId.value = '';
+      editOriginalModelId.value = '';
       editModelCurrent.value = null;
     }
 
@@ -33,13 +33,16 @@
       };
       editExpertiseTagInput.value = '';
       var mc = expert.modelConfig || null;
+      var currentModel = (mc && mc.model) || expert.model || '';
       editModelCurrent.value = mc ? {
-        model: mc.model || expert.model || '',
+        model: currentModel,
         providerName: mc.providerName || '',
         baseUrl: mc.baseUrl || ''
-      } : (expert.model ? { model: expert.model, providerName: '', baseUrl: '' } : null);
-      editModelMode.value = 'keep';
-      editModelConfig.value = { baseUrl: '', apiKey: '', model: '', providerName: '' };
+      } : (currentModel ? { model: currentModel, providerName: '', baseUrl: '' } : null);
+      var catalogHit = window.findModelInCatalog ? window.findModelInCatalog(currentModel) : null;
+      var modelId = catalogHit ? catalogHit.id : currentModel;
+      editSelectedModelId.value = modelId;
+      editOriginalModelId.value = modelId;
       showEditDialog.value = true;
     }
 
@@ -92,32 +95,41 @@
         ElementPlus.ElMessage.warning('请填写专家名称和介绍');
         return;
       }
+      if (!String(editSelectedModelId.value || '').trim()) {
+        ElementPlus.ElMessage.warning('请选择默认模型');
+        return;
+      }
+      var modelChanged = String(editSelectedModelId.value) !== String(editOriginalModelId.value);
       var updatedModelConfig = expert.modelConfig || null;
-      if (editModelMode.value === 'new') {
-        var mc = editModelConfig.value;
-        if (!mc.baseUrl.trim()) {
-          ElementPlus.ElMessage.warning('请填写 Base URL');
-          return;
+      if (modelChanged) {
+        var selected = window.findModelInCatalog
+          ? window.findModelInCatalog(editSelectedModelId.value)
+          : null;
+        if (!selected && editSelectedModelId.value) {
+          selected = {
+            id: editSelectedModelId.value,
+            name: editSelectedModelId.value,
+            providerName: (updatedModelConfig && updatedModelConfig.providerName) || '',
+            providerSlug: (updatedModelConfig && updatedModelConfig.providerSlug) || 'custom',
+            baseUrl: (updatedModelConfig && updatedModelConfig.baseUrl) || ''
+          };
         }
-        try { new URL(mc.baseUrl.trim()); }
-        catch (e) {
-          ElementPlus.ElMessage.warning('Base URL 格式不正确');
-          return;
+        updatedModelConfig = window.modelCatalogToConfig
+          ? window.modelCatalogToConfig(selected)
+          : {
+              baseUrl: (selected && selected.baseUrl) || '',
+              apiKey: '',
+              model: (selected && (selected.name || selected.id)) || editSelectedModelId.value,
+              providerName: (selected && selected.providerName) || ''
+            };
+        if (updatedModelConfig && store && store.resolveProviderSlug) {
+          updatedModelConfig.providerSlug = store.resolveProviderSlug(
+            updatedModelConfig.providerName,
+            updatedModelConfig.baseUrl
+          );
+        } else if (updatedModelConfig && !updatedModelConfig.providerSlug) {
+          updatedModelConfig.providerSlug = (selected && selected.providerSlug) || 'custom';
         }
-        if (!mc.apiKey.trim()) {
-          ElementPlus.ElMessage.warning('请填写 API Key');
-          return;
-        }
-        if (!mc.model.trim()) {
-          ElementPlus.ElMessage.warning('请填写模型名称');
-          return;
-        }
-        updatedModelConfig = {
-          baseUrl: mc.baseUrl.trim(),
-          apiKey: mc.apiKey.trim(),
-          model: mc.model.trim(),
-          providerName: mc.providerName.trim()
-        };
       }
       var updated = Object.assign({}, expert, {
         name: editForm.value.name.trim(),
@@ -125,12 +137,7 @@
         avatar: editForm.value.avatar || expert.avatar,
         expertise: editForm.value.expertise.slice(0, 10)
       });
-      if (editModelMode.value === 'new' && updatedModelConfig) {
-        if (store && store.resolveProviderSlug) {
-          updatedModelConfig.providerSlug = store.resolveProviderSlug(updatedModelConfig.providerName, updatedModelConfig.baseUrl);
-        } else {
-          updatedModelConfig.providerSlug = 'custom';
-        }
+      if (modelChanged && updatedModelConfig) {
         updated.modelConfig = updatedModelConfig;
         updated.model = updatedModelConfig.model;
         updated.provider = updatedModelConfig.providerSlug;
@@ -138,7 +145,7 @@
       store.saveExpert(updated);
       closeEditDialog();
       if (options.onSaved) options.onSaved();
-      if (editModelMode.value === 'new' && expert.modelConfig) {
+      if (modelChanged) {
         var count = (options.getRunningSessionCount && options.getRunningSessionCount()) || 0;
         ElementPlus.ElMessage.success(count > 0
           ? '已保存。该专家当前有 ' + count + ' 个运行中会话，修改将在新会话生效。'
@@ -153,8 +160,7 @@
       editForm: editForm,
       editAvatarInput: editAvatarInput,
       editExpertiseTagInput: editExpertiseTagInput,
-      editModelMode: editModelMode,
-      editModelConfig: editModelConfig,
+      editSelectedModelId: editSelectedModelId,
       editModelCurrent: editModelCurrent,
       resetEditForm: resetEditForm,
       openEdit: openEdit,
@@ -180,11 +186,10 @@
       headerTitle: { type: String, default: '编辑专家' },
       headerSubtitle: { type: String, default: '修改专家名称、介绍、头像与擅长领域' },
       tagColors: { type: Array, default: function () { return window.TAG_COLORS || []; } },
-      modelMode: { type: String, default: 'keep' },
-      modelConfig: { type: Object, default: null },
+      selectedModelId: { type: String, default: '' },
       modelCurrent: { type: Object, default: null }
     },
-    emits: ['update:visible', 'update:tagInput', 'update:modelMode', 'update:modelConfig', 'submit', 'closed', 'avatar-change', 'add-tag', 'remove-tag', 'tag-keydown'],
+    emits: ['update:visible', 'update:tagInput', 'update:selectedModelId', 'submit', 'closed', 'avatar-change', 'add-tag', 'remove-tag', 'tag-keydown'],
     setup: function (props, ctx) {
       var editAvatarInput = Vue.ref(null);
 
@@ -216,8 +221,8 @@
         ctx.emit('add-tag');
       }
 
-      function onModelModeChange(val) {
-        ctx.emit('update:modelMode', val);
+      function onSelectedModelId(val) {
+        ctx.emit('update:selectedModelId', val || '');
       }
 
       return {
@@ -229,7 +234,7 @@
         removeTag: removeTag,
         onTagKeydown: onTagKeydown,
         addTag: addTag,
-        onModelModeChange: onModelModeChange
+        onSelectedModelId: onSelectedModelId
       };
     },
     template: '\
@@ -307,36 +312,14 @@
             </div>\
             <p class="form-dialog-hint expertise-tag-hint">可添加多个标签，如「SPC」「良率分析」「工艺优化」</p>\
           </div>\
-                    <div v-if="modelCurrent" class="edit-model-section">\
-            <div class="create-model-section-title">默认模型</div>\
-            <div class="edit-model-current">\
-              <span class="edit-model-current-label">当前默认模型：</span>\
-              <span class="edit-model-current-value">{{ modelCurrent.model || "未配置" }}</span>\
-              <span v-if="modelCurrent.providerName" class="edit-model-current-url">via {{ modelCurrent.providerName }}</span>\
-              <span v-if="modelCurrent.baseUrl" class="edit-model-current-url">{{ modelCurrent.baseUrl }}</span>\
-            </div>\
-            <el-form label-position="top" class="form-dialog-form">\
-              <el-form-item label="修改默认模型？">\
-                <el-radio-group :model-value="modelMode" @update:model-value="onModelModeChange">\
-                  <el-radio label="keep">保持当前配置</el-radio>\
-                  <el-radio label="new">修改为新的配置</el-radio>\
-                </el-radio-group>\
-              </el-form-item>\
-              <div v-if="modelMode === \'new\'" class="edit-model-new-fields create-model-fields">\
-                <el-form-item label="Base URL" required>\
-                  <el-input :model-value="modelConfig.baseUrl" @update:model-value="modelConfig.baseUrl = $event" placeholder="https://api.openai.com/v1" size="large" />\
-                </el-form-item>\
-                <el-form-item label="API Key" required>\
-                  <el-input :model-value="modelConfig.apiKey" @update:model-value="modelConfig.apiKey = $event" type="password" show-password placeholder="输入 API Key" size="large" />\
-                </el-form-item>\
-                <el-form-item label="模型名称" required>\
-                  <el-input :model-value="modelConfig.model" @update:model-value="modelConfig.model = $event" placeholder="如：gpt-4o、deepseek-chat" size="large" />\
-                </el-form-item>\
-                <el-form-item label="Provider 名称（可选）">\
-                  <el-input :model-value="modelConfig.providerName" @update:model-value="modelConfig.providerName = $event" placeholder="留空则从 Base URL 自动生成" size="large" />\
-                </el-form-item>\
-              </div>\
-            </el-form>\
+                    <div class="edit-model-section">\
+            <model-select\
+              :model-value="selectedModelId"\
+              title="模型选择"\
+              placeholder="搜索或选择默认模型"\
+              required\
+              @update:model-value="onSelectedModelId" />\
+            <p class="form-dialog-hint">作为专家的默认模型，对话任务未选择其他模型时使用此模型</p>\
           </div>\
                 </div>\
         <template #footer>\
@@ -359,8 +342,7 @@
         showEditDialog: props.edit.showEditDialog,
         editForm: props.edit.editForm,
         editExpertiseTagInput: props.edit.editExpertiseTagInput,
-        editModelMode: props.edit.editModelMode,
-        editModelConfig: props.edit.editModelConfig,
+        editSelectedModelId: props.edit.editSelectedModelId,
         editModelCurrent: props.edit.editModelCurrent,
         resetEditForm: props.edit.resetEditForm,
         submitEdit: props.edit.submitEdit,
@@ -379,10 +361,8 @@
         v-model:tag-input="editExpertiseTagInput"\
         :header-title="headerTitle"\
         :tag-colors="tagColors"\
-        :model-mode="editModelMode"\
-        :model-config="editModelConfig"\
+        v-model:selected-model-id="editSelectedModelId"\
         :model-current="editModelCurrent"\
-        @update:model-mode="editModelMode = $event"\
         @submit="submitEdit"\
         @closed="resetEditForm"\
         @avatar-change="handleEditAvatarChange"\

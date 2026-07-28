@@ -59,6 +59,7 @@
         slugEdited: false,
         description: '',
         expertise: [],
+        selectedModelId: '',
         modelConfig: {
           baseUrl: '',
           apiKey: '',
@@ -241,23 +242,15 @@
         return false;
       }
       if (f.source === 'blank') {
-        var mc = f.modelConfig;
-        if (!mc.baseUrl.trim()) {
-          ElementPlus.ElMessage.warning('请填写 Base URL');
+        if (!String(f.selectedModelId || '').trim()) {
+          ElementPlus.ElMessage.warning('请选择默认模型');
           return false;
         }
-        try {
-          new URL(mc.baseUrl.trim());
-        } catch (e) {
-          ElementPlus.ElMessage.warning('Base URL 格式不正确');
-          return false;
-        }
-        if (!mc.apiKey.trim()) {
-          ElementPlus.ElMessage.warning('请填写 API Key');
-          return false;
-        }
-        if (!mc.model.trim()) {
-          ElementPlus.ElMessage.warning('请填写模型名称');
+        var catalogModel = window.findModelInCatalog
+          ? window.findModelInCatalog(f.selectedModelId)
+          : null;
+        if (!catalogModel) {
+          ElementPlus.ElMessage.warning('所选模型无效，请重新选择');
           return false;
         }
       }
@@ -274,12 +267,17 @@
       var f = createForm.value;
       var modelConfig = null;
       if (f.source === 'blank') {
-        modelConfig = {
-          baseUrl: f.modelConfig.baseUrl.trim(),
-          apiKey: f.modelConfig.apiKey.trim(),
-          model: f.modelConfig.model.trim(),
-          providerName: f.modelConfig.providerName.trim()
-        };
+        var selected = window.findModelInCatalog
+          ? window.findModelInCatalog(f.selectedModelId)
+          : null;
+        modelConfig = window.modelCatalogToConfig
+          ? window.modelCatalogToConfig(selected)
+          : {
+              baseUrl: (selected && selected.baseUrl) || '',
+              apiKey: '',
+              model: (selected && (selected.name || selected.id)) || f.selectedModelId,
+              providerName: (selected && selected.providerName) || ''
+            };
       }
       var expert = store.createExpert({
         slug: f.slug,
@@ -314,6 +312,23 @@
       selectCloneExpert: selectCloneExpert,
       isCloneMode: isCloneMode,
       modelFormDisabled: modelFormDisabled,
+      onSelectedModelChange: function (model) {
+        if (!model) {
+          createForm.value.selectedModelId = '';
+          createForm.value.modelConfig = { baseUrl: '', apiKey: '', model: '', providerName: '' };
+          return;
+        }
+        createForm.value.selectedModelId = model.id;
+        var cfg = window.modelCatalogToConfig
+          ? window.modelCatalogToConfig(model)
+          : { baseUrl: model.baseUrl || '', apiKey: '', model: model.name || model.id, providerName: model.providerName || '' };
+        createForm.value.modelConfig = {
+          baseUrl: cfg.baseUrl || '',
+          apiKey: cfg.apiKey || '',
+          model: cfg.model || '',
+          providerName: cfg.providerName || ''
+        };
+      },
       onNameInput: onNameInput,
       onSlugInput: onSlugInput,
       onSourceChange: onSourceChange,
@@ -352,6 +367,7 @@
         selectCloneExpert: w.selectCloneExpert,
         isCloneMode: w.isCloneMode,
         modelFormDisabled: w.modelFormDisabled,
+        onSelectedModelChange: w.onSelectedModelChange,
         onNameInput: w.onNameInput,
         onSlugInput: w.onSlugInput,
         onSourceChange: w.onSourceChange,
@@ -378,7 +394,7 @@
       '      </div>',
       '      <div class="dialog-header-text">',
       '        <div class="dialog-header-title">新建专家</div>',
-      '        <div class="dialog-header-sub">填写身份信息与模型，即可创建可用专家</div>',
+      '        <div class="dialog-header-sub">填写身份信息并选择默认模型，即可创建可用专家</div>',
       '      </div>',
       '    </div>',
       '  </template>',
@@ -456,25 +472,18 @@
       '      </el-popover>',
       '    </div>',
       '    <div class="create-model-row">',
-      '      <el-form label-position="top" class="form-dialog-form create-model-form">',
-      '        <div class="create-model-section-title">默认模型 <span class="create-model-section-required" v-if="!isCloneMode">*</span></div>',
-      '        <div class="create-model-fields" :class="{ \'create-model-fields-disabled\': modelFormDisabled }">',
-      '          <el-form-item label="Base URL" :required="!isCloneMode">',
-      '            <el-input v-model="createForm.modelConfig.baseUrl" :disabled="modelFormDisabled" placeholder="https://api.openai.com/v1" size="large" />',
-      '          </el-form-item>',
-      '          <el-form-item label="API Key" :required="!isCloneMode">',
-      '            <el-input v-model="createForm.modelConfig.apiKey" :disabled="modelFormDisabled" type="password" show-password placeholder="输入 API Key" size="large" />',
-      '          </el-form-item>',
-      '          <el-form-item label="模型名称" :required="!isCloneMode">',
-      '            <el-input v-model="createForm.modelConfig.model" :disabled="modelFormDisabled" placeholder="如：gpt-4o、deepseek-chat" size="large" />',
-      '          </el-form-item>',
-      '          <el-form-item label="Provider 名称（可选）">',
-      '            <el-input v-model="createForm.modelConfig.providerName" :disabled="modelFormDisabled" placeholder="留空则从 Base URL 自动生成" size="large" />',
-      '          </el-form-item>',
-      '        </div>',
-      '        <p v-if="isCloneMode" class="form-dialog-hint">默认模型沿用自源 profile</p>',
-      '        <p v-else class="form-dialog-hint">作为专家的默认模型，对话任务未选择其他模型时使用此模型</p>',
-      '      </el-form>',
+      '      <div class="create-model-fields" :class="{ \'create-model-fields-disabled\': modelFormDisabled }">',
+      '        <model-select',
+      '          v-model="createForm.selectedModelId"',
+      '          :disabled="modelFormDisabled"',
+      '          :required="!isCloneMode"',
+      '          title="模型选择"',
+      '          placeholder="搜索或选择默认模型"',
+      '          @change="onSelectedModelChange"',
+      '        />',
+      '      </div>',
+      '      <p v-if="isCloneMode" class="form-dialog-hint">默认模型沿用自源 profile</p>',
+      '      <p v-else class="form-dialog-hint">作为专家的默认模型，对话任务未选择其他模型时使用此模型</p>',
       '    </div>',
       '  </div>',
       '  <template #footer>',

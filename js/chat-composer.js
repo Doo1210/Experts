@@ -28,7 +28,9 @@
         showPathPopover: false,
         pathQuery: '',
         pathSelectedIndex: 0,
-        pathAnchorPos: -1
+        pathAnchorPos: -1,
+        modelPickerVisible: false,
+        modelSearchQuery: ''
       };
     },
     computed: {
@@ -49,6 +51,30 @@
         if (this.expertStatus === 'error') return '专家出错，请重试';
         if (this.expertStatus === 'running') return '专家执行中，可点击停止';
         return '向专家发起任务指令…';
+      },
+      resolvedModelList: function () {
+        var list = this.modelList && this.modelList.length
+          ? this.modelList
+          : (window.MODELS_CATALOG || []);
+        return list.map(function (m) {
+          return {
+            id: m.id || m.name,
+            name: m.name || m.id,
+            visibility: m.visibility || 'public',
+            capabilities: m.capabilities || (m.reasoning ? ['文本生成', '工具调用'] : ['文本生成']),
+            contextLabel: m.contextLabel || '—',
+            reasoning: !!m.reasoning
+          };
+        });
+      },
+      filteredModelList: function () {
+        var q = String(this.modelSearchQuery || '').trim().toLowerCase();
+        var list = this.resolvedModelList;
+        if (!q) return list;
+        return list.filter(function (m) {
+          return String(m.name || '').toLowerCase().indexOf(q) >= 0
+            || String(m.id || '').toLowerCase().indexOf(q) >= 0;
+        });
       },
       displayModel: function () {
         return this.modelOverride || 'gpt-4o';
@@ -82,6 +108,11 @@
       }
     },
     methods: {
+      visibilityLabel: function (v) {
+        return window.modelVisibilityLabel
+          ? window.modelVisibilityLabel(v)
+          : (v === 'personal' ? '个人' : '全局公开');
+      },
       onMainBtnClick: function () {
         if (this.isRunning) {
           this.$emit('interrupt');
@@ -102,7 +133,13 @@
         this.onSubmit();
       },
       onSelectModel: function (id) {
+        this.modelPickerVisible = false;
+        this.modelSearchQuery = '';
         this.$emit('selectModel', id);
+      },
+      onModelPickerVisible: function (visible) {
+        this.modelPickerVisible = visible;
+        if (!visible) this.modelSearchQuery = '';
       },
       onSelectCwd: function (cwd) {
         if (cwd === '__workspace__') {
@@ -282,23 +319,54 @@
           </div>\
           <div v-if="remoteError" class="task-remote-error">{{ remoteError }}</div>\
           <div class="chat-composer-config">\
-            <el-dropdown trigger="click" @command="onSelectModel">\
-              <span class="chat-config-trigger chat-config-model">\
-                模型: {{ displayModel }} ▾\
-              </span>\
-              <template #dropdown>\
-                <el-dropdown-menu>\
-                  <el-dropdown-item\
-                    v-for="m in modelList"\
-                    :key="m.id"\
-                    :command="m.id"\
-                    :class="{ \'is-active\': m.id === displayModel }">\
-                    {{ m.name }}\
-                    <span v-if="m.reasoning" class="chat-config-tag">推理</span>\
-                  </el-dropdown-item>\
-                </el-dropdown-menu>\
+            <el-popover\
+              :visible="modelPickerVisible"\
+              placement="top-start"\
+              :width="560"\
+              trigger="click"\
+              popper-class="chat-model-picker-popper"\
+              @update:visible="onModelPickerVisible">\
+              <template #reference>\
+                <span class="chat-config-trigger chat-config-model" :class="{ \'is-open\': modelPickerVisible }">\
+                  <span>模型: {{ displayModel }}</span>\
+                  <span class="chat-config-caret">{{ modelPickerVisible ? "▴" : "▾" }}</span>\
+                </span>\
               </template>\
-            </el-dropdown>\
+              <div class="chat-model-picker">\
+                <div class="chat-model-picker-head">\
+                  <span class="chat-model-picker-title">模型选择</span>\
+                  <span class="model-select-gear" aria-hidden="true">\
+                    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8">\
+                      <circle cx="12" cy="12" r="3"/>\
+                      <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/>\
+                    </svg>\
+                  </span>\
+                </div>\
+                <el-input\
+                  v-model="modelSearchQuery"\
+                  size="small"\
+                  clearable\
+                  placeholder="搜索模型"\
+                  class="chat-model-picker-search" />\
+                <div class="chat-model-picker-list">\
+                  <button\
+                    v-for="m in filteredModelList"\
+                    :key="m.id"\
+                    type="button"\
+                    class="model-option-row chat-model-option"\
+                    :class="{ \'is-active\': m.id === displayModel }"\
+                    @click="onSelectModel(m.id)">\
+                    <span class="model-option-name">{{ m.name }}</span>\
+                    <span class="model-option-tags">\
+                      <span class="model-option-tag model-option-tag--visibility">{{ visibilityLabel(m.visibility) }}</span>\
+                      <span v-for="cap in m.capabilities" :key="cap" class="model-option-tag">{{ cap }}</span>\
+                    </span>\
+                    <span class="model-option-ctx">{{ m.contextLabel }}</span>\
+                  </button>\
+                  <div v-if="filteredModelList.length === 0" class="chat-model-picker-empty">无匹配模型</div>\
+                </div>\
+              </div>\
+            </el-popover>\
             <el-dropdown trigger="click" @command="onSelectCwd">\
               <span class="chat-config-trigger chat-config-cwd">\
                 工作目录: {{ cwdDisplay }} ▾\

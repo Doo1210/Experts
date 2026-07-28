@@ -2899,14 +2899,15 @@
     },
     createExpert: function (payload) {
       var modelConfig = null;
-      if (payload.modelConfig && payload.modelConfig.baseUrl) {
-        var pslug = resolveProviderSlug(payload.modelConfig.providerName, payload.modelConfig.baseUrl);
+      if (payload.modelConfig && (payload.modelConfig.baseUrl || payload.modelConfig.model)) {
+        var pslug = payload.modelConfig.providerSlug
+          || resolveProviderSlug(payload.modelConfig.providerName, payload.modelConfig.baseUrl);
         modelConfig = {
           providerSlug: pslug,
           providerName: (payload.modelConfig.providerName || '').trim(),
-          baseUrl: payload.modelConfig.baseUrl.trim(),
+          baseUrl: (payload.modelConfig.baseUrl || '').trim(),
           apiKey: payload.modelConfig.apiKey || '',
-          model: payload.modelConfig.model.trim()
+          model: (payload.modelConfig.model || '').trim()
         };
       }
       var expert = {

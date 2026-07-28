@@ -141,12 +141,9 @@
           };
         });
       });
-      var modelList = Vue.ref([
-        { id: 'gpt-4o', name: 'gpt-4o', reasoning: true },
-        { id: 'gpt-4o-mini', name: 'gpt-4o-mini', reasoning: false },
-        { id: 'claude-sonnet-4', name: 'claude-sonnet-4', reasoning: true },
-        { id: 'qwen-max', name: 'qwen-max', reasoning: false }
-      ]);
+      var modelList = Vue.computed(function () {
+        return (window.MODELS_CATALOG || []).slice();
+      });
       var showExpertPreviewDialog = Vue.ref(false);
       var previewStats = Vue.ref({ tasks: 0, projects: 0, skills: 0, tools: 0 });
       // 顶部状态栏状态（阶段0先用默认值，阶段2接 session.info）
