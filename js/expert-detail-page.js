@@ -31,6 +31,8 @@
       var mcpServers = Vue.ref([]);
       var mcpSaving = Vue.ref(false);
       var mcpFormVisible = Vue.ref(false);
+      var mcpFormMode = Vue.ref('create');
+      var mcpEditingName = Vue.ref('');
       var mcpSecretVisible = Vue.ref(false);
       var mcpSecretTarget = Vue.ref(null);
       var mcpSecretDraft = Vue.ref({});
@@ -43,10 +45,8 @@
       var mcpHubSelectionSyncing = false;
       var mcpForm = Vue.ref({
         name: '',
-        type: 'stdio',
+        transport: 'streamable_http',
         url: '',
-        command: '',
-        argsText: '',
         envText: '',
         secretKey: '',
         secretValue: '',
@@ -123,7 +123,6 @@
 
       var detailMeta = Vue.ref({ skillsDetail: [], skillsCatalog: [], toolsDetail: {}, toolsCatalog: [], memoryMeta: {}, gateway: {} });
       var skillSearchQuery = Vue.ref('');
-      var skillCategoryFilter = Vue.ref('all');
       var skillEnabledFilter = Vue.ref('all');
       var toolSearchQuery = Vue.ref('');
       var toolEnabledFilter = Vue.ref('all');
@@ -658,6 +657,30 @@
         }).finally(function () { capabilitySaving.value = false; });
       }
 
+      function deleteSkill(row) {
+        if (!row || !row.skillId) return;
+        var label = row.name || row.skillId;
+        ElementPlus.ElMessageBox.confirm(
+          '确定删除技能「' + label + '」？删除后可从平台重新导入或本地上传。',
+          '删除技能',
+          { confirmButtonText: '删除', cancelButtonText: '取消', type: 'warning' }
+        ).then(function () {
+          capabilitySaving.value = true;
+          return store.uninstallSkill(props.expertId, row.skillId);
+        }).then(function () {
+          skillBindings.value = store.getSkillBindings(props.expertId).slice();
+          var count = runningSessionCount.value;
+          var msg = count > 0
+            ? '已删除技能「' + label + '」。该专家当前有 ' + count + ' 个运行中会话，修改将在新会话生效。'
+            : '已删除技能「' + label + '」。修改将在新会话生效。';
+          ElementPlus.ElMessage.success(msg);
+        }).catch(function (err) {
+          if (err === 'cancel' || (err && err === 'close')) return;
+          skillBindings.value = store.getSkillBindings(props.expertId).slice();
+          ElementPlus.ElMessage.error((err && err.message) || '删除失败，请重试');
+        }).finally(function () { capabilitySaving.value = false; });
+      }
+
       function formatSkillLastUsed(iso) {
         if (!iso) return '—';
         var t = new Date(iso).getTime();
@@ -725,12 +748,12 @@
       }
 
       function resetMcpForm() {
+        mcpFormMode.value = 'create';
+        mcpEditingName.value = '';
         mcpForm.value = {
           name: '',
-          type: 'stdio',
+          transport: 'streamable_http',
           url: '',
-          command: '',
-          argsText: '',
           envText: '',
           secretKey: '',
           secretValue: '',
@@ -742,6 +765,55 @@
       function openMcpForm() {
         resetMcpForm();
         mcpFormVisible.value = true;
+      }
+
+      function resolveMcpTransport(row) {
+        if (!row) return 'streamable_http';
+        if (row.transport === 'sse' || row.transport === 'SSE') return 'sse';
+        if (row.transport === 'streamable_http' || row.transport === 'streamable-http') return 'streamable_http';
+        return 'streamable_http';
+      }
+
+      function openMcpEditForm(row) {
+        if (!row) return;
+        var env = row.env || {};
+        var envText = Object.keys(env).map(function (k) {
+          return k + '=' + (env[k] == null ? '' : env[k]);
+        }).join('\n');
+        var missing = row.missingEnv || [];
+        mcpFormMode.value = 'edit';
+        mcpEditingName.value = row.name || '';
+        mcpForm.value = {
+          name: row.name || '',
+          transport: resolveMcpTransport(row),
+          url: row.url || '',
+          envText: envText,
+          secretKey: missing[0] || '',
+          secretValue: '',
+          asSecret: missing.length > 0,
+          enabled: row.enabled !== false
+        };
+        mcpFormVisible.value = true;
+      }
+
+      function buildMcpFormPayload() {
+        var f = mcpForm.value;
+        return {
+          name: (f.name || '').trim(),
+          type: 'http',
+          transport: f.transport === 'sse' ? 'sse' : 'streamable_http',
+          url: (f.url || '').trim(),
+          envText: f.envText || '',
+          secretKey: f.asSecret ? (f.secretKey || '').trim() : '',
+          secretValue: f.asSecret ? (f.secretValue || '') : '',
+          enabled: !!f.enabled
+        };
+      }
+
+      function mcpUrlPlaceholder() {
+        return mcpForm.value.transport === 'sse'
+          ? 'https://example.com/sse'
+          : 'https://example.com/mcp';
       }
 
       function openMcpPlatformImportDialog() {
@@ -825,10 +897,9 @@
               }).join('\n');
               return store.addMcpServer(props.expertId, {
                 name: mcpHubEnglishId(item),
-                type: item.type === 'http' ? 'http' : 'stdio',
+                type: 'http',
+                transport: item.transport === 'sse' ? 'sse' : 'streamable_http',
                 url: item.url || '',
-                command: item.command || '',
-                args: item.args || [],
                 envText: envText,
                 enabled: true
               });
@@ -849,33 +920,29 @@
       }
 
       function submitMcpForm() {
-        var f = mcpForm.value;
+        var payload = buildMcpFormPayload();
+        var isEdit = mcpFormMode.value === 'edit';
+        var editingName = mcpEditingName.value;
         mcpSaving.value = true;
-        store.addMcpServer(props.expertId, {
-          name: (f.name || '').trim(),
-          type: f.type,
-          url: (f.url || '').trim(),
-          command: (f.command || '').trim(),
-          args: (f.argsText || '').trim() ? f.argsText.trim().split(/[\s,]+/) : [],
-          envText: f.envText || '',
-          secretKey: f.asSecret ? (f.secretKey || '').trim() : '',
-          secretValue: f.asSecret ? (f.secretValue || '') : '',
-          enabled: !!f.enabled
-        }).then(function () {
+        var action = isEdit
+          ? store.updateMcpServerFromForm(props.expertId, editingName, payload)
+          : store.addMcpServer(props.expertId, payload);
+        action.then(function () {
           refreshMcpServers();
           mcpFormVisible.value = false;
-          ElementPlus.ElMessage.success(mcpEffectToast('已添加 MCP 服务'));
+          ElementPlus.ElMessage.success(mcpEffectToast(isEdit ? '已更新 MCP 服务' : '已添加 MCP 服务'));
         }).catch(function (err) {
-          ElementPlus.ElMessage.error((err && err.message) || '添加失败');
+          ElementPlus.ElMessage.error((err && err.message) || (isEdit ? '保存失败' : '添加失败'));
         }).finally(function () { mcpSaving.value = false; });
       }
 
-      function toggleMcpEnabled(row) {
-        var next = !row.enabled;
+      function toggleMcpEnabled(row, enabled) {
+        var next = enabled !== undefined ? !!enabled : !row.enabled;
+        mcpSaving.value = true;
         store.toggleMcpServerEnabled(props.expertId, row.name, next).then(function () {
           refreshMcpServers();
           ElementPlus.ElMessage.success(mcpEffectToast(next ? '已启用' : '已禁用'));
-        });
+        }).finally(function () { mcpSaving.value = false; });
       }
 
       function openMcpSecretForm(row) {
@@ -938,7 +1005,10 @@
       }
 
       function mcpTypeLabel(row) {
-        return row.type === 'http' ? 'HTTP' : 'stdio';
+        if (!row) return '';
+        if (row.type === 'stdio') return 'stdio';
+        if (row.transport === 'sse') return 'SSE';
+        return 'Streamable HTTP';
       }
 
       var mcpEnabledCount = Vue.computed(function () {
@@ -1968,28 +2038,12 @@
         return skillBindings.value.filter(function (s) { return s.enabled !== false; }).length;
       });
 
-      var skillCategoryOptions = Vue.computed(function () {
-        var set = {};
-        skillBindings.value.forEach(function (s) {
-          var c = (s.category || '').trim();
-          set[c || '__uncategorized'] = c || '未分类';
-        });
-        return Object.keys(set).sort().map(function (k) {
-          return { value: k, label: set[k] };
-        });
-      });
-
       var filteredSkills = Vue.computed(function () {
         var q = skillSearchQuery.value.trim().toLowerCase();
-        var cat = skillCategoryFilter.value;
         var en = skillEnabledFilter.value;
         return skillBindings.value.filter(function (s) {
           if (en === 'enabled' && s.enabled === false) return false;
           if (en === 'disabled' && s.enabled !== false) return false;
-          if (cat && cat !== 'all') {
-            var sc = (s.category || '').trim() || '__uncategorized';
-            if (sc !== cat) return false;
-          }
           if (!q) return true;
           var name = (s.name || s.skillId || '').toLowerCase();
           var desc = (s.description || '').toLowerCase();
@@ -2589,6 +2643,7 @@
         renderMarkdown: renderMarkdown, insertMarkdown: insertMarkdown, insertPersonaMarkdown: insertPersonaMarkdown,
         // 技能 Tab
         toggleSkillEnabled: toggleSkillEnabled,
+        deleteSkill: deleteSkill,
         formatSkillLastUsed: formatSkillLastUsed,
         skillProvenanceLabel: skillProvenanceLabel,
         skillProvenanceTagType: skillProvenanceTagType,
@@ -2597,9 +2652,7 @@
         filteredSkills: filteredSkills,
         installedSkillCount: installedSkillCount,
         enabledSkillCount: enabledSkillCount,
-        skillCategoryOptions: skillCategoryOptions,
         skillSearchQuery: skillSearchQuery,
-        skillCategoryFilter: skillCategoryFilter,
         skillEnabledFilter: skillEnabledFilter,
         // 工具 Tab
         toggleToolEnabled: toggleToolEnabled,
@@ -2631,6 +2684,7 @@
         mcpServers: mcpServers,
         mcpSaving: mcpSaving,
         mcpFormVisible: mcpFormVisible,
+        mcpFormMode: mcpFormMode,
         mcpSecretVisible: mcpSecretVisible,
         mcpSecretTarget: mcpSecretTarget,
         mcpSecretDraft: mcpSecretDraft,
@@ -2638,7 +2692,9 @@
         mcpEnabledCount: mcpEnabledCount,
         mcpNeedsAttentionCount: mcpNeedsAttentionCount,
         openMcpForm: openMcpForm,
+        openMcpEditForm: openMcpEditForm,
         openMcpPlatformImportDialog: openMcpPlatformImportDialog,
+        mcpUrlPlaceholder: mcpUrlPlaceholder,
         mcpHubDialogVisible: mcpHubDialogVisible,
         mcpHubTab: mcpHubTab,
         mcpHubInstalling: mcpHubInstalling,
@@ -2915,21 +2971,23 @@
                         <div class="workspace-list-cell workspace-list-updater-cell">{{ workspaceSourceLabel(file) }}</div>\
                         <div class="workspace-list-cell workspace-list-time-cell">{{ workspaceUpdatedAt(file) }}</div>\
                         <div class="workspace-list-cell workspace-list-size-cell">{{ workspaceSizeLabel(file) }}</div>\
-                        <div class="workspace-list-cell workspace-list-action-cell">\
-                          <template v-if="file.kind !== \'folder\'">\
-                            <el-button link type="primary" size="small" @click="openWorkspaceFilePreview(file)">预览</el-button>\
-                            <el-button link type="primary" size="small" @click="downloadWorkspaceFile(file)">下载</el-button>\
-                            <el-button v-if="file.taskId" link type="primary" size="small" @click="goToArtifactTask(file.taskId)">跳转至任务</el-button>\
-                          </template>\
-                          <el-dropdown trigger="click" @command="handleWorkspaceItemCommand($event, file)">\
-                            <button type="button" class="workspace-more-btn workspace-more-btn-vertical" aria-label="更多操作">⋮</button>\
-                            <template #dropdown>\
-                              <el-dropdown-menu>\
-                                <el-dropdown-item command="rename">重命名</el-dropdown-item>\
-                                <el-dropdown-item command="delete" class="workspace-danger-dropdown-item">删除</el-dropdown-item>\
-                              </el-dropdown-menu>\
+                        <div class="workspace-list-cell workspace-list-action-cell detail-table-action-cell">\
+                          <div class="detail-table-actions">\
+                            <template v-if="file.kind !== \'folder\'">\
+                              <el-button link type="primary" size="small" @click="openWorkspaceFilePreview(file)">预览</el-button>\
+                              <el-button link type="primary" size="small" @click="downloadWorkspaceFile(file)">下载</el-button>\
+                              <el-button v-if="file.taskId" link type="primary" size="small" @click="goToArtifactTask(file.taskId)">跳转至任务</el-button>\
                             </template>\
-                          </el-dropdown>\
+                            <el-dropdown trigger="click" @command="handleWorkspaceItemCommand($event, file)">\
+                              <button type="button" class="workspace-more-btn workspace-more-btn-vertical" aria-label="更多操作">⋮</button>\
+                              <template #dropdown>\
+                                <el-dropdown-menu>\
+                                  <el-dropdown-item command="rename">重命名</el-dropdown-item>\
+                                  <el-dropdown-item command="delete" class="workspace-danger-dropdown-item">删除</el-dropdown-item>\
+                                </el-dropdown-menu>\
+                              </template>\
+                            </el-dropdown>\
+                          </div>\
                         </div>\
                       </div>\
                     </div>\
@@ -2978,9 +3036,9 @@
                     <el-table-column label="最近活跃" width="190">\
                       <template #default="{ row }">{{ taskLastActivityLabel(row) }}</template>\
                     </el-table-column>\
-                    <el-table-column label="操作" width="152" fixed="right" align="left" class-name="task-tab-action-cell">\
+                    <el-table-column label="操作" width="168" align="left" class-name="task-tab-action-cell detail-table-action-cell">\
                       <template #default="{ row }">\
-                        <div class="task-tab-actions">\
+                        <div class="detail-table-actions">\
                           <el-button link type="primary" size="small" @click="$emit(\'nav\', \'/experts/\' + expert.id + \'/tasks/\' + row.id)">打开</el-button>\
                           <el-button link type="primary" size="small" @click="editTaskTitle(row)">编辑</el-button>\
                           <el-button link type="danger" size="small" @click="deleteTaskItem(row)">删除</el-button>\
@@ -3023,10 +3081,6 @@
                     </div>\
                     <div class="detail-action-right skill-toolbar">\
                       <el-input v-model="skillSearchQuery" placeholder="搜索技能" size="small" clearable class="skill-toolbar-search" />\
-                      <el-select v-model="skillCategoryFilter" size="small" class="skill-toolbar-select" placeholder="分类">\
-                        <el-option label="全部分类" value="all" />\
-                        <el-option v-for="opt in skillCategoryOptions" :key="opt.value" :label="opt.label" :value="opt.value" />\
-                      </el-select>\
                       <el-select v-model="skillEnabledFilter" size="small" class="skill-toolbar-select skill-toolbar-select--narrow" placeholder="状态">\
                         <el-option label="全部" value="all" />\
                         <el-option label="仅已启用" value="enabled" />\
@@ -3067,21 +3121,11 @@
                         <el-table-column label="描述" min-width="200" show-overflow-tooltip>\
                           <template #default="{ row }">{{ row.description || \'暂无描述\' }}</template>\
                         </el-table-column>\
-                        <el-table-column label="分类" width="130" show-overflow-tooltip>\
-                          <template #default="{ row }">{{ row.category || \'未分类\' }}</template>\
-                        </el-table-column>\
-                        <el-table-column label="使用" width="72" align="center">\
-                          <template #default="{ row }">{{ row.useCount || 0 }}</template>\
-                        </el-table-column>\
-                        <el-table-column label="补丁" width="72" align="center">\
-                          <template #default="{ row }">{{ row.patchCount || 0 }}</template>\
-                        </el-table-column>\
-                        <el-table-column label="最近使用" width="100" align="center">\
-                          <template #default="{ row }">{{ formatSkillLastUsed(row.lastUsedAt) }}</template>\
-                        </el-table-column>\
-                        <el-table-column label="来源" width="88" align="center">\
+                        <el-table-column label="操作" width="88" align="left" class-name="detail-table-action-cell">\
                           <template #default="{ row }">\
-                            <el-tag size="small" :type="skillProvenanceTagType(row.provenance)" effect="plain">{{ skillProvenanceLabel(row.provenance) }}</el-tag>\
+                            <div class="detail-table-actions">\
+                              <el-button link type="danger" size="small" :disabled="capabilitySaving" @click="deleteSkill(row)">删除</el-button>\
+                            </div>\
                           </template>\
                         </el-table-column>\
                       </el-table>\
@@ -3145,10 +3189,12 @@
                             </span>\
                           </template>\
                         </el-table-column>\
-                        <el-table-column label="操作" width="120" align="right">\
+                        <el-table-column label="操作" width="128" align="left" class-name="detail-table-action-cell">\
                           <template #default="{ row }">\
-                            <el-button link size="small" @click="openToolDetail(row)">详情</el-button>\
-                            <el-button v-if="!toolConfigured(row)" link type="primary" size="small" @click="openToolConfigDrawer(row)">配置</el-button>\
+                            <div class="detail-table-actions">\
+                              <el-button link type="primary" size="small" @click="openToolDetail(row)">详情</el-button>\
+                              <el-button v-if="!toolConfigured(row)" link type="primary" size="small" @click="openToolConfigDrawer(row)">配置</el-button>\
+                            </div>\
                           </template>\
                         </el-table-column>\
                       </el-table>\
@@ -3160,7 +3206,6 @@
                 <template #label>\
                   <span class="tab-label-with-dot">\
                     MCP <span v-if="tabBadges.mcp" class="tab-count-badge">{{ tabBadges.mcp }}</span>\
-                    <span v-if="tabBadges.mcpAlert" class="tab-alert-dot" title="存在缺密钥或连通失败项"></span>\
                   </span>\
                 </template>\
                 <div class="detail-tab-pane">\
@@ -3183,29 +3228,30 @@
                   </div>\
                   <div v-else class="detail-table-wrap">\
                     <el-table :data="mcpServers" stripe class="toolset-table">\
-                      <el-table-column label="服务器名" min-width="140">\
+                      <el-table-column label="启用" width="72" align="center">\
+                        <template #default="{ row }">\
+                          <el-switch\
+                            :model-value="row.enabled !== false"\
+                            :disabled="mcpSaving"\
+                            size="small"\
+                            @change="(v) => toggleMcpEnabled(row, v)"\
+                          />\
+                        </template>\
+                      </el-table-column>\
+                      <el-table-column label="服务器名" min-width="200">\
                         <template #default="{ row }">\
                           <div class="toolset-name-cell">{{ row.name }}</div>\
                         </template>\
                       </el-table-column>\
-                      <el-table-column label="类型" width="90" align="center">\
+                      <el-table-column label="类型" min-width="180" align="center">\
                         <template #default="{ row }">{{ mcpTypeLabel(row) }}</template>\
                       </el-table-column>\
-                      <el-table-column label="状态" min-width="160">\
+                      <el-table-column label="操作" width="128" align="left" class-name="detail-table-action-cell">\
                         <template #default="{ row }">\
-                          <span class="mcp-status" :class="mcpStatusClass(row)">\
-                            <span class="mcp-status-dot"></span>{{ mcpStatusLabel(row) }}\
-                          </span>\
-                          <div v-if="row.status === \'connection_failed\' && row.errorSummary" class="toolset-id-cell">{{ row.errorSummary }}</div>\
-                          <div v-else-if="row.status === \'missing_secret\'" class="toolset-id-cell">缺：{{ (row.missingEnv || []).join(\', \') || \'密钥\' }}</div>\
-                        </template>\
-                      </el-table-column>\
-                      <el-table-column label="操作" width="220" align="right">\
-                        <template #default="{ row }">\
-                          <el-button v-if="row.status === \'missing_secret\'" link type="primary" size="small" @click="openMcpSecretForm(row)">填写密钥</el-button>\
-                          <el-button v-if="row.status === \'connection_failed\'" link type="primary" size="small" @click="retryMcpConnection(row)">重试</el-button>\
-                          <el-button link size="small" @click="toggleMcpEnabled(row)">{{ row.enabled ? \'禁用\' : \'启用\' }}</el-button>\
-                          <el-button link type="danger" size="small" @click="deleteMcpServer(row)">删除</el-button>\
+                          <div class="detail-table-actions">\
+                            <el-button link type="primary" size="small" @click="openMcpEditForm(row)">编辑</el-button>\
+                            <el-button link type="danger" size="small" @click="deleteMcpServer(row)">删除</el-button>\
+                          </div>\
                         </template>\
                       </el-table-column>\
                     </el-table>\
@@ -3673,7 +3719,7 @@
             </div>\
           </template>\
         </el-dialog>\
-        <!-- 添加 MCP -->\
+        <!-- 添加 / 编辑 MCP -->\
         <el-dialog v-model="mcpFormVisible" width="560px" append-to-body class="form-dialog ed-dialog ed-dialog-mcp" :close-on-click-modal="false">\
           <template #header>\
             <div class="dialog-header-custom dialog-header-mcp">\
@@ -3681,8 +3727,8 @@
                 <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/><path d="M7 8h2M11 8h6M7 12h10"/></svg>\
               </div>\
               <div class="dialog-header-text">\
-                <div class="dialog-header-title">添加 MCP 服务</div>\
-                <div class="dialog-header-sub">配置 stdio 或 HTTP 服务，扩展专家能力</div>\
+                <div class="dialog-header-title">{{ mcpFormMode === \'edit\' ? \'编辑 MCP 服务\' : \'添加 MCP 服务\' }}</div>\
+                <div class="dialog-header-sub">{{ mcpFormMode === \'edit\' ? \'修改配置后将在新会话生效\' : \'配置 HTTP MCP 服务（Streamable HTTP / SSE）\' }}</div>\
               </div>\
             </div>\
           </template>\
@@ -3691,23 +3737,15 @@
               <el-form-item label="名称" required>\
                 <el-input v-model="mcpForm.name" placeholder="如 filesystem、github-api（小写字母/数字/_/-）" />\
               </el-form-item>\
-              <el-form-item label="类型" required>\
-                <el-radio-group v-model="mcpForm.type" class="ed-mcp-type-group">\
-                  <el-radio-button label="stdio">本地命令（stdio）</el-radio-button>\
-                  <el-radio-button label="http">HTTP</el-radio-button>\
+              <el-form-item label="传输类型" required>\
+                <el-radio-group v-model="mcpForm.transport" class="ed-mcp-type-group">\
+                  <el-radio-button label="streamable_http">Streamable HTTP</el-radio-button>\
+                  <el-radio-button label="sse">SSE</el-radio-button>\
                 </el-radio-group>\
               </el-form-item>\
-              <el-form-item v-if="mcpForm.type === \'http\'" label="URL" required>\
-                <el-input v-model="mcpForm.url" placeholder="https://..." />\
+              <el-form-item label="URL" required>\
+                <el-input v-model="mcpForm.url" :placeholder="mcpUrlPlaceholder()" />\
               </el-form-item>\
-              <template v-else>\
-                <el-form-item label="Command" required>\
-                  <el-input v-model="mcpForm.command" placeholder="如 npx" />\
-                </el-form-item>\
-                <el-form-item label="Args">\
-                  <el-input v-model="mcpForm.argsText" placeholder="空格或逗号分隔，如 -y @modelcontextprotocol/server-filesystem /path" />\
-                </el-form-item>\
-              </template>\
               <el-form-item label="Env">\
                 <el-input v-model="mcpForm.envText" type="textarea" :rows="3" placeholder="多行 KEY=VALUE；密钥建议勾选下方「作为密钥」" />\
               </el-form-item>\
@@ -3733,7 +3771,7 @@
             <div class="dialog-footer-custom dialog-footer-wizard">\
               <div class="dialog-footer-actions">\
                 <el-button class="wizard-btn wizard-btn-cancel" @click="mcpFormVisible = false">取消</el-button>\
-                <el-button type="primary" class="wizard-btn wizard-btn-submit wizard-btn-submit-expert" :loading="mcpSaving" @click="submitMcpForm">添加</el-button>\
+                <el-button type="primary" class="wizard-btn wizard-btn-submit wizard-btn-submit-expert" :loading="mcpSaving" @click="submitMcpForm">{{ mcpFormMode === \'edit\' ? \'保存\' : \'添加\' }}</el-button>\
               </div>\
             </div>\
           </template>\

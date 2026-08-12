@@ -11,7 +11,7 @@
       placeholder: { type: String, default: '搜索或选择模型' },
       size: { type: String, default: 'large' },
       showTitle: { type: Boolean, default: true },
-      title: { type: String, default: '模型选择' },
+      title: { type: String, default: '默认模型配置' },
       required: { type: Boolean, default: false },
       extraOptions: { type: Array, default: function () { return []; } }
     },
@@ -206,7 +206,7 @@
     template: [
       '<div class="model-config-section" :class="{ \'is-disabled\': disabled }">',
       '  <div class="model-config-section-head">',
-      '    <span class="model-config-section-title">模型选择<span v-if="required" class="create-model-section-required">*</span></span>',
+      '    <span class="model-config-section-title">默认模型配置<span v-if="required" class="create-model-section-required">*</span></span>',
       '    <div v-if="showModeSwitch" class="model-config-mode-switch" role="tablist">',
       '      <button',
       '        type="button"',

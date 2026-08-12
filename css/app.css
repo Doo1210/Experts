@@ -1883,19 +1883,25 @@ body {
   background: #fff; box-shadow: 0 1px 3px rgba(15, 23, 42, 0.03);
 }
 .detail-table-wrap .el-table { --el-table-border-color: #f0f2f5; }
-.task-tab-table .el-table__cell { padding: 9px 0; }
-.task-tab-table .task-tab-action-cell .cell { padding-left: 6px; padding-right: 6px; }
+.detail-table-wrap .detail-table-action-cell .cell,
+.task-tab-table .task-tab-action-cell .cell {
+  padding-left: 12px;
+  padding-right: 12px;
+}
+.detail-table-actions,
 .task-tab-actions {
   display: inline-flex;
   align-items: center;
   justify-content: flex-start;
-  gap: 10px;
+  gap: 12px;
   white-space: nowrap;
 }
+.detail-table-actions .el-button,
 .task-tab-actions .el-button {
   margin-left: 0;
   padding: 0;
 }
+.task-tab-table .el-table__cell { padding: 9px 0; }
 .detail-config-panel {
   padding: 20px; background: #fafbfc; border: 1px solid #eef1f5; border-radius: 12px;
 }
@@ -2243,9 +2249,35 @@ body {
 .workspace-list-action-cell {
   display: flex;
   align-items: center;
-  justify-content: flex-end;
-  gap: 8px;
+  justify-content: flex-start;
+  gap: 0;
   overflow: visible;
+  padding-left: 12px;
+  padding-right: 12px;
+}
+.workspace-list-action-cell .detail-table-actions {
+  gap: 12px;
+}
+.workspace-list-action-cell .detail-table-actions .el-button {
+  margin-left: 0;
+  padding: 0;
+}
+.workspace-list-action-cell .detail-table-actions .el-dropdown {
+  margin-left: 8px;
+}
+.workspace-list-action-cell .workspace-more-btn {
+  width: auto;
+  height: auto;
+  min-width: 0;
+  padding: 0 2px;
+  border-radius: 0;
+  font-size: 16px;
+  line-height: 1;
+  color: var(--el-color-primary, #409eff);
+}
+.workspace-list-action-cell .workspace-more-btn:hover {
+  background: transparent;
+  color: var(--el-color-primary-light-3, #79bbff);
 }
 .workspace-list-size-cell,
 .workspace-list-type-cell,

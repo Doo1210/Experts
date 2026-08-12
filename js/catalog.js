@@ -62,9 +62,9 @@ window.TOOLS_CATALOG = [
 window.DEFAULT_MCP_SERVERS = [
   {
     name: 'filesystem',
-    type: 'stdio',
-    command: 'npx',
-    args: ['-y', '@modelcontextprotocol/server-filesystem', '/data/workspace'],
+    type: 'http',
+    transport: 'streamable_http',
+    url: 'https://fs.internal/mcp',
     env: {},
     enabled: true,
     status: 'ok',
@@ -73,9 +73,8 @@ window.DEFAULT_MCP_SERVERS = [
   {
     name: 'github-api',
     type: 'http',
+    transport: 'streamable_http',
     url: 'https://api.githubcopilot.com/mcp/',
-    command: '',
-    args: [],
     env: { GITHUB_TOKEN: '' },
     enabled: true,
     status: 'missing_secret',
@@ -86,55 +85,58 @@ window.DEFAULT_MCP_SERVERS = [
 /**
  * 平台 MCP 库（Mock）—「从平台导入」弹窗
  * scope: imported=我导入的 | created=我创建的
+ * type 固定 http；transport: streamable_http | sse
  * 列表展示：icon + nameZh(englishId)；导入时以 englishId 作为服务器 name
  */
 window.MCP_HUB_CATALOG = [
   // —— 我导入的 ——
-  { id: 'hub-mcp-github', englishId: 'github-api', nameZh: 'GitHub API', icon: '🐙', scope: 'imported', type: 'http', url: 'https://api.githubcopilot.com/mcp/', command: '', args: [], env: { GITHUB_TOKEN: '' }, missingEnv: ['GITHUB_TOKEN'] },
-  { id: 'hub-mcp-filesystem', englishId: 'filesystem', nameZh: '文件系统', icon: '📁', scope: 'imported', type: 'stdio', command: 'npx', args: ['-y', '@modelcontextprotocol/server-filesystem', '/data/workspace'], url: '', env: {} },
-  { id: 'hub-mcp-postgres', englishId: 'postgres', nameZh: 'PostgreSQL', icon: '🗄️', scope: 'imported', type: 'stdio', command: 'npx', args: ['-y', '@modelcontextprotocol/server-postgres', 'postgresql://localhost/fab'], url: '', env: {} },
-  { id: 'hub-mcp-brave-search', englishId: 'brave-search', nameZh: 'Brave 搜索', icon: '🔎', scope: 'imported', type: 'stdio', command: 'npx', args: ['-y', '@modelcontextprotocol/server-brave-search'], url: '', env: { BRAVE_API_KEY: '' }, missingEnv: ['BRAVE_API_KEY'] },
-  { id: 'hub-mcp-slack', englishId: 'slack', nameZh: 'Slack', icon: '💬', scope: 'imported', type: 'stdio', command: 'npx', args: ['-y', '@modelcontextprotocol/server-slack'], url: '', env: { SLACK_BOT_TOKEN: '' }, missingEnv: ['SLACK_BOT_TOKEN'] },
-  { id: 'hub-mcp-memory', englishId: 'memory-kv', nameZh: '键值记忆', icon: '🧠', scope: 'imported', type: 'stdio', command: 'npx', args: ['-y', '@modelcontextprotocol/server-memory'], url: '', env: {} },
-  { id: 'hub-mcp-puppeteer', englishId: 'puppeteer', nameZh: '浏览器自动化', icon: '🌐', scope: 'imported', type: 'stdio', command: 'npx', args: ['-y', '@modelcontextprotocol/server-puppeteer'], url: '', env: {} },
-  { id: 'hub-mcp-sqlite', englishId: 'sqlite', nameZh: 'SQLite', icon: '💾', scope: 'imported', type: 'stdio', command: 'npx', args: ['-y', '@modelcontextprotocol/server-sqlite', '/data/app.db'], url: '', env: {} },
-  { id: 'hub-mcp-fetch', englishId: 'fetch', nameZh: 'HTTP 抓取', icon: '📡', scope: 'imported', type: 'stdio', command: 'npx', args: ['-y', '@modelcontextprotocol/server-fetch'], url: '', env: {} },
-  { id: 'hub-mcp-git', englishId: 'git', nameZh: 'Git 仓库', icon: '🌿', scope: 'imported', type: 'stdio', command: 'uvx', args: ['mcp-server-git', '--repository', '/data/repo'], url: '', env: {} },
-  { id: 'hub-mcp-notion', englishId: 'notion', nameZh: 'Notion', icon: '📓', scope: 'imported', type: 'http', url: 'https://mcp.notion.com/v1', command: '', args: [], env: { NOTION_TOKEN: '' }, missingEnv: ['NOTION_TOKEN'] },
-  { id: 'hub-mcp-sentry', englishId: 'sentry', nameZh: 'Sentry', icon: '🐛', scope: 'imported', type: 'http', url: 'https://mcp.sentry.dev/sse', command: '', args: [], env: { SENTRY_AUTH_TOKEN: '' }, missingEnv: ['SENTRY_AUTH_TOKEN'] },
+  { id: 'hub-mcp-github', englishId: 'github-api', nameZh: 'GitHub API', icon: '🐙', scope: 'imported', type: 'http', transport: 'streamable_http', url: 'https://api.githubcopilot.com/mcp/', env: { GITHUB_TOKEN: '' }, missingEnv: ['GITHUB_TOKEN'] },
+  { id: 'hub-mcp-filesystem', englishId: 'filesystem', nameZh: '文件系统', icon: '📁', scope: 'imported', type: 'http', transport: 'streamable_http', url: 'https://fs.internal/mcp', env: {} },
+  { id: 'hub-mcp-postgres', englishId: 'postgres', nameZh: 'PostgreSQL', icon: '🗄️', scope: 'imported', type: 'http', transport: 'streamable_http', url: 'https://db.internal/mcp/postgres', env: {} },
+  { id: 'hub-mcp-brave-search', englishId: 'brave-search', nameZh: 'Brave 搜索', icon: '🔎', scope: 'imported', type: 'http', transport: 'sse', url: 'https://search.brave.internal/mcp/sse', env: { BRAVE_API_KEY: '' }, missingEnv: ['BRAVE_API_KEY'] },
+  { id: 'hub-mcp-slack', englishId: 'slack', nameZh: 'Slack', icon: '💬', scope: 'imported', type: 'http', transport: 'sse', url: 'https://slack.internal/mcp/sse', env: { SLACK_BOT_TOKEN: '' }, missingEnv: ['SLACK_BOT_TOKEN'] },
+  { id: 'hub-mcp-memory', englishId: 'memory-kv', nameZh: '键值记忆', icon: '🧠', scope: 'imported', type: 'http', transport: 'streamable_http', url: 'https://memory.internal/mcp', env: {} },
+  { id: 'hub-mcp-puppeteer', englishId: 'puppeteer', nameZh: '浏览器自动化', icon: '🌐', scope: 'imported', type: 'http', transport: 'streamable_http', url: 'https://browser.internal/mcp', env: {} },
+  { id: 'hub-mcp-sqlite', englishId: 'sqlite', nameZh: 'SQLite', icon: '💾', scope: 'imported', type: 'http', transport: 'streamable_http', url: 'https://db.internal/mcp/sqlite', env: {} },
+  { id: 'hub-mcp-fetch', englishId: 'fetch', nameZh: 'HTTP 抓取', icon: '📡', scope: 'imported', type: 'http', transport: 'streamable_http', url: 'https://fetch.internal/mcp', env: {} },
+  { id: 'hub-mcp-git', englishId: 'git', nameZh: 'Git 仓库', icon: '🌿', scope: 'imported', type: 'http', transport: 'sse', url: 'https://git.internal/mcp/sse', env: {} },
+  { id: 'hub-mcp-notion', englishId: 'notion', nameZh: 'Notion', icon: '📓', scope: 'imported', type: 'http', transport: 'streamable_http', url: 'https://mcp.notion.com/v1', env: { NOTION_TOKEN: '' }, missingEnv: ['NOTION_TOKEN'] },
+  { id: 'hub-mcp-sentry', englishId: 'sentry', nameZh: 'Sentry', icon: '🐛', scope: 'imported', type: 'http', transport: 'sse', url: 'https://mcp.sentry.dev/sse', env: { SENTRY_AUTH_TOKEN: '' }, missingEnv: ['SENTRY_AUTH_TOKEN'] },
 
   // —— 我创建的 ——
-  { id: 'hub-mcp-mes', englishId: 'mes-bridge', nameZh: 'MES 桥接', icon: '🏭', scope: 'created', type: 'http', url: 'https://mes.fab-a.internal/mcp', command: '', args: [], env: { MES_API_KEY: '' }, missingEnv: ['MES_API_KEY'] },
-  { id: 'hub-mcp-spc', englishId: 'spc-qms', nameZh: 'SPC 质控', icon: '📊', scope: 'created', type: 'http', url: 'https://spc.qms.internal/mcp', command: '', args: [], env: {} },
-  { id: 'hub-mcp-cmms', englishId: 'cmms', nameZh: '设备维保', icon: '🔧', scope: 'created', type: 'http', url: 'https://cmms.fab-a.internal/mcp', command: '', args: [], env: { CMMS_TOKEN: '' }, missingEnv: ['CMMS_TOKEN'] },
-  { id: 'hub-mcp-scada', englishId: 'scada-bridge', nameZh: 'SCADA 桥接', icon: '📡', scope: 'created', type: 'stdio', command: 'node', args: ['/opt/mcp/scada-bridge/index.js'], url: '', env: {} },
-  { id: 'hub-mcp-wms', englishId: 'wms-bridge', nameZh: 'WMS 仓储', icon: '📦', scope: 'created', type: 'http', url: 'https://wms.corp.internal/mcp', command: '', args: [], env: {} },
-  { id: 'hub-mcp-erp', englishId: 'erp-gateway', nameZh: 'ERP 网关', icon: '🏢', scope: 'created', type: 'http', url: 'https://erp.corp.internal/mcp', command: '', args: [], env: { ERP_CLIENT_SECRET: '' }, missingEnv: ['ERP_CLIENT_SECRET'] },
-  { id: 'hub-mcp-ehs', englishId: 'ehs-portal', nameZh: 'EHS 门户', icon: '🛡️', scope: 'created', type: 'http', url: 'https://ehs.fab-a.internal/mcp', command: '', args: [], env: {} },
-  { id: 'hub-mcp-agv', englishId: 'agv-fleet', nameZh: 'AGV 车队', icon: '🤖', scope: 'created', type: 'http', url: 'https://agv.fab-a.internal/mcp', command: '', args: [], env: {} },
-  { id: 'hub-mcp-mlflow', englishId: 'mlflow', nameZh: 'MLflow 实验', icon: '🧪', scope: 'created', type: 'http', url: 'https://mlflow.ai-lab.internal/mcp', command: '', args: [], env: {} },
-  { id: 'hub-mcp-energy', englishId: 'ems', nameZh: '能耗管理', icon: '⚡', scope: 'created', type: 'http', url: 'https://ems.fab-a.internal/mcp', command: '', args: [], env: {} },
-  { id: 'hub-mcp-mdm', englishId: 'mdm', nameZh: '主数据', icon: '🗂️', scope: 'created', type: 'http', url: 'https://mdm.corp.internal/mcp', command: '', args: [], env: {} },
-  { id: 'hub-mcp-chem', englishId: 'chem-inventory', nameZh: '危化品台账', icon: '⚗️', scope: 'created', type: 'stdio', command: 'node', args: ['/opt/mcp/chem-inventory/index.js', '--db', '/data/ehs/chem.db'], url: '', env: {} }
+  { id: 'hub-mcp-mes', englishId: 'mes-bridge', nameZh: 'MES 桥接', icon: '🏭', scope: 'created', type: 'http', transport: 'streamable_http', url: 'https://mes.fab-a.internal/mcp', env: { MES_API_KEY: '' }, missingEnv: ['MES_API_KEY'] },
+  { id: 'hub-mcp-spc', englishId: 'spc-qms', nameZh: 'SPC 质控', icon: '📊', scope: 'created', type: 'http', transport: 'streamable_http', url: 'https://spc.qms.internal/mcp', env: {} },
+  { id: 'hub-mcp-cmms', englishId: 'cmms', nameZh: '设备维保', icon: '🔧', scope: 'created', type: 'http', transport: 'sse', url: 'https://cmms.fab-a.internal/mcp/sse', env: { CMMS_TOKEN: '' }, missingEnv: ['CMMS_TOKEN'] },
+  { id: 'hub-mcp-scada', englishId: 'scada-bridge', nameZh: 'SCADA 桥接', icon: '📡', scope: 'created', type: 'http', transport: 'sse', url: 'https://scada.fab-a.internal/mcp/sse', env: {} },
+  { id: 'hub-mcp-wms', englishId: 'wms-bridge', nameZh: 'WMS 仓储', icon: '📦', scope: 'created', type: 'http', transport: 'streamable_http', url: 'https://wms.corp.internal/mcp', env: {} },
+  { id: 'hub-mcp-erp', englishId: 'erp-gateway', nameZh: 'ERP 网关', icon: '🏢', scope: 'created', type: 'http', transport: 'streamable_http', url: 'https://erp.corp.internal/mcp', env: { ERP_CLIENT_SECRET: '' }, missingEnv: ['ERP_CLIENT_SECRET'] },
+  { id: 'hub-mcp-ehs', englishId: 'ehs-portal', nameZh: 'EHS 门户', icon: '🛡️', scope: 'created', type: 'http', transport: 'streamable_http', url: 'https://ehs.fab-a.internal/mcp', env: {} },
+  { id: 'hub-mcp-agv', englishId: 'agv-fleet', nameZh: 'AGV 车队', icon: '🤖', scope: 'created', type: 'http', transport: 'sse', url: 'https://agv.fab-a.internal/mcp/sse', env: {} },
+  { id: 'hub-mcp-mlflow', englishId: 'mlflow', nameZh: 'MLflow 实验', icon: '🧪', scope: 'created', type: 'http', transport: 'streamable_http', url: 'https://mlflow.ai-lab.internal/mcp', env: {} },
+  { id: 'hub-mcp-energy', englishId: 'ems', nameZh: '能耗管理', icon: '⚡', scope: 'created', type: 'http', transport: 'streamable_http', url: 'https://ems.fab-a.internal/mcp', env: {} },
+  { id: 'hub-mcp-mdm', englishId: 'mdm', nameZh: '主数据', icon: '🗂️', scope: 'created', type: 'http', transport: 'streamable_http', url: 'https://mdm.corp.internal/mcp', env: {} },
+  { id: 'hub-mcp-chem', englishId: 'chem-inventory', nameZh: '危化品台账', icon: '⚗️', scope: 'created', type: 'http', transport: 'sse', url: 'https://ehs.fab-a.internal/chem/mcp/sse', env: {} }
 ];
 
 /**
  * DEV_MOCK 专家详情「MCP」Tab 演示数据（按专家在 EXPERTS_DATA 中的下标）。
  * 覆盖 PRD 四种状态：正常 / 未配置密钥 / 连接失败 / 已禁用。
+ * 全部为 HTTP；transport: streamable_http | sse
  */
 window.DEMO_MCP_SERVERS_BY_INDEX = {
   0: [
     {
       name: 'filesystem',
-      type: 'stdio',
-      command: 'npx',
-      args: ['-y', '@modelcontextprotocol/server-filesystem', '/data/fab-a/process'],
+      type: 'http',
+      transport: 'streamable_http',
+      url: 'https://fs.fab-a.internal/mcp',
       enabled: true,
       status: 'ok'
     },
     {
       name: 'github-api',
       type: 'http',
+      transport: 'streamable_http',
       url: 'https://api.githubcopilot.com/mcp/',
       env: { GITHUB_TOKEN: '' },
       enabled: true,
@@ -144,6 +146,7 @@ window.DEMO_MCP_SERVERS_BY_INDEX = {
     {
       name: 'mes-query',
       type: 'http',
+      transport: 'streamable_http',
       url: 'https://mes.fab-a.internal/mcp',
       env: { MES_API_KEY: '' },
       enabled: true,
@@ -152,9 +155,9 @@ window.DEMO_MCP_SERVERS_BY_INDEX = {
     },
     {
       name: 'legacy-fs',
-      type: 'stdio',
-      command: 'npx',
-      args: ['-y', '@modelcontextprotocol/server-filesystem', '/Users/old/profile/workspace'],
+      type: 'http',
+      transport: 'sse',
+      url: 'https://legacy-fs.internal/mcp/sse',
       enabled: true,
       status: 'connection_failed',
       errorSummary: '路径无效或服务不可达（clone 后绝对路径失效）'
@@ -162,6 +165,7 @@ window.DEMO_MCP_SERVERS_BY_INDEX = {
     {
       name: 'old-svc',
       type: 'http',
+      transport: 'streamable_http',
       url: 'https://mcp.example.com/v1',
       enabled: false,
       status: 'disabled'
@@ -170,17 +174,17 @@ window.DEMO_MCP_SERVERS_BY_INDEX = {
   1: [
     {
       name: 'filesystem',
-      type: 'stdio',
-      command: 'npx',
-      args: ['-y', '@modelcontextprotocol/server-filesystem', '/data/ai-lab'],
+      type: 'http',
+      transport: 'streamable_http',
+      url: 'https://fs.ai-lab.internal/mcp',
       enabled: true,
       status: 'ok'
     },
     {
       name: 'postgres',
-      type: 'stdio',
-      command: 'npx',
-      args: ['-y', '@modelcontextprotocol/server-postgres', 'postgresql://localhost/vision_metrics'],
+      type: 'http',
+      transport: 'streamable_http',
+      url: 'https://db.ai-lab.internal/mcp/postgres',
       env: { POSTGRES_PASSWORD: '' },
       enabled: true,
       status: 'missing_secret',
@@ -189,7 +193,8 @@ window.DEMO_MCP_SERVERS_BY_INDEX = {
     {
       name: 'mlflow',
       type: 'http',
-      url: 'https://mlflow.ai-lab.internal/mcp',
+      transport: 'sse',
+      url: 'https://mlflow.ai-lab.internal/mcp/sse',
       enabled: true,
       status: 'ok'
     }
@@ -198,6 +203,7 @@ window.DEMO_MCP_SERVERS_BY_INDEX = {
     {
       name: 'cmms-api',
       type: 'http',
+      transport: 'streamable_http',
       url: 'https://cmms.fab-a.internal/mcp',
       env: { CMMS_TOKEN: '' },
       enabled: true,
@@ -206,9 +212,9 @@ window.DEMO_MCP_SERVERS_BY_INDEX = {
     },
     {
       name: 'scada-bridge',
-      type: 'stdio',
-      command: 'node',
-      args: ['/opt/mcp/scada-bridge/index.js'],
+      type: 'http',
+      transport: 'sse',
+      url: 'https://scada.fab-a.internal/mcp/sse',
       enabled: true,
       status: 'connection_failed',
       errorSummary: '命令退出码 1：无法连接 OPC UA 端点'
@@ -217,15 +223,16 @@ window.DEMO_MCP_SERVERS_BY_INDEX = {
   3: [
     {
       name: 'filesystem',
-      type: 'stdio',
-      command: 'npx',
-      args: ['-y', '@modelcontextprotocol/server-filesystem', '/data/supply-chain'],
+      type: 'http',
+      transport: 'streamable_http',
+      url: 'https://fs.supply.internal/mcp',
       enabled: true,
       status: 'ok'
     },
     {
       name: 'erp-api',
       type: 'http',
+      transport: 'streamable_http',
       url: 'https://erp.corp.internal/mcp',
       env: { ERP_CLIENT_ID: 'supply-planner', ERP_CLIENT_SECRET: '' },
       enabled: true,
@@ -236,16 +243,17 @@ window.DEMO_MCP_SERVERS_BY_INDEX = {
   4: [
     {
       name: 'qms-docs',
-      type: 'stdio',
-      command: 'npx',
-      args: ['-y', '@modelcontextprotocol/server-filesystem', '/data/qms/docs'],
+      type: 'http',
+      transport: 'streamable_http',
+      url: 'https://qms.docs.internal/mcp',
       enabled: true,
       status: 'ok'
     },
     {
       name: 'spc-service',
       type: 'http',
-      url: 'https://spc.qms.internal/mcp',
+      transport: 'sse',
+      url: 'https://spc.qms.internal/mcp/sse',
       enabled: false,
       status: 'disabled'
     }
@@ -254,15 +262,16 @@ window.DEMO_MCP_SERVERS_BY_INDEX = {
   5: [
     {
       name: 'filesystem',
-      type: 'stdio',
-      command: 'npx',
-      args: ['-y', '@modelcontextprotocol/server-filesystem', '/data/digital-blueprint'],
+      type: 'http',
+      transport: 'streamable_http',
+      url: 'https://fs.digital.internal/mcp',
       enabled: true,
       status: 'ok'
     },
     {
       name: 'mes-integration',
       type: 'http',
+      transport: 'streamable_http',
       url: 'https://mes.integration.internal/mcp',
       env: { MES_CLIENT_SECRET: '' },
       enabled: true,
@@ -272,15 +281,16 @@ window.DEMO_MCP_SERVERS_BY_INDEX = {
     {
       name: 'mdm-gateway',
       type: 'http',
+      transport: 'streamable_http',
       url: 'https://mdm.corp.internal/mcp',
       enabled: true,
       status: 'ok'
     },
     {
       name: 'legacy-esb',
-      type: 'stdio',
-      command: 'node',
-      args: ['/opt/mcp/esb-bridge/index.js'],
+      type: 'http',
+      transport: 'sse',
+      url: 'https://esb.corp.internal/mcp/sse',
       enabled: true,
       status: 'connection_failed',
       errorSummary: 'ESB 端点超时（10.0.12.8:8080）'
@@ -291,6 +301,7 @@ window.DEMO_MCP_SERVERS_BY_INDEX = {
     {
       name: 'ems-telemetry',
       type: 'http',
+      transport: 'streamable_http',
       url: 'https://ems.fab-a.internal/mcp',
       env: { EMS_API_KEY: '' },
       enabled: true,
@@ -299,16 +310,17 @@ window.DEMO_MCP_SERVERS_BY_INDEX = {
     },
     {
       name: 'carbon-ledger',
-      type: 'stdio',
-      command: 'npx',
-      args: ['-y', '@modelcontextprotocol/server-filesystem', '/data/carbon/ledger'],
+      type: 'http',
+      transport: 'streamable_http',
+      url: 'https://carbon.corp.internal/mcp',
       enabled: true,
       status: 'ok'
     },
     {
       name: 'peak-valley-opt',
       type: 'http',
-      url: 'https://energy-opt.corp.internal/mcp',
+      transport: 'sse',
+      url: 'https://energy-opt.corp.internal/mcp/sse',
       enabled: false,
       status: 'disabled'
     }
@@ -317,15 +329,16 @@ window.DEMO_MCP_SERVERS_BY_INDEX = {
   7: [
     {
       name: 'ehs-docs',
-      type: 'stdio',
-      command: 'npx',
-      args: ['-y', '@modelcontextprotocol/server-filesystem', '/data/ehs/policies'],
+      type: 'http',
+      transport: 'streamable_http',
+      url: 'https://ehs.docs.internal/mcp',
       enabled: true,
       status: 'ok'
     },
     {
       name: 'hazard-tracker',
       type: 'http',
+      transport: 'streamable_http',
       url: 'https://ehs.fab-a.internal/mcp',
       env: { EHS_TOKEN: '' },
       enabled: true,
@@ -334,9 +347,9 @@ window.DEMO_MCP_SERVERS_BY_INDEX = {
     },
     {
       name: 'chem-inventory',
-      type: 'stdio',
-      command: 'node',
-      args: ['/opt/mcp/chem-inventory/index.js', '--db', '/data/ehs/chem.db'],
+      type: 'http',
+      transport: 'sse',
+      url: 'https://ehs.fab-a.internal/chem/mcp/sse',
       enabled: true,
       status: 'connection_failed',
       errorSummary: '危化品库文件不存在或权限不足'
@@ -344,6 +357,7 @@ window.DEMO_MCP_SERVERS_BY_INDEX = {
     {
       name: 'training-lms',
       type: 'http',
+      transport: 'streamable_http',
       url: 'https://lms.corp.internal/mcp',
       enabled: false,
       status: 'disabled'
@@ -353,16 +367,17 @@ window.DEMO_MCP_SERVERS_BY_INDEX = {
   8: [
     {
       name: 'filesystem',
-      type: 'stdio',
-      command: 'npx',
-      args: ['-y', '@modelcontextprotocol/server-filesystem', '/data/cobot-cell'],
+      type: 'http',
+      transport: 'streamable_http',
+      url: 'https://fs.cobot.internal/mcp',
       enabled: true,
       status: 'ok'
     },
     {
       name: 'agv-fleet',
       type: 'http',
-      url: 'https://agv.fab-a.internal/mcp',
+      transport: 'sse',
+      url: 'https://agv.fab-a.internal/mcp/sse',
       env: { AGV_API_TOKEN: '' },
       enabled: true,
       status: 'missing_secret',
@@ -370,9 +385,9 @@ window.DEMO_MCP_SERVERS_BY_INDEX = {
     },
     {
       name: 'ur-polyscope',
-      type: 'stdio',
-      command: 'node',
-      args: ['/opt/mcp/ur-polyscope/index.js', '--host', '192.168.10.42'],
+      type: 'http',
+      transport: 'sse',
+      url: 'https://ur.fab-a.internal/mcp/sse',
       enabled: true,
       status: 'connection_failed',
       errorSummary: '无法连接 UR 控制器（192.168.10.42:30004）'
@@ -380,6 +395,7 @@ window.DEMO_MCP_SERVERS_BY_INDEX = {
     {
       name: 'layout-cad',
       type: 'http',
+      transport: 'streamable_http',
       url: 'https://cad.plant.internal/mcp',
       enabled: false,
       status: 'disabled'

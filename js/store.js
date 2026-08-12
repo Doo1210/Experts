@@ -155,15 +155,20 @@
     };
   }
 
-  /** 保证 DEV_MOCK 下展示「全部已安装」：合并目录缺失项 */
-  function ensureFullInstalledSkills(rawList) {
+  /** 保证 DEV_MOCK 下展示「全部已安装」：合并目录缺失项（已卸载的除外） */
+  function ensureFullInstalledSkills(rawList, expertId) {
     var byId = {};
     (rawList || []).forEach(function (b) {
       var rec = normalizeInstalledSkillRecord(b);
       if (rec) byId[rec.skillId] = rec;
     });
+    var uninstalled = {};
+    if (expertId != null && state.skillUninstalled && state.skillUninstalled[String(expertId)]) {
+      uninstalled = state.skillUninstalled[String(expertId)] || {};
+    }
     if (DEV_MOCK && window.SKILLS_CATALOG) {
       window.SKILLS_CATALOG.forEach(function (s) {
+        if (uninstalled[s.id]) return;
         if (!byId[s.id]) {
           byId[s.id] = catalogEntryToInstalled(s, { clearUsage: true, enabled: true });
         } else {
@@ -174,6 +179,9 @@
         }
       });
     }
+    Object.keys(uninstalled).forEach(function (sid) {
+      if (uninstalled[sid]) delete byId[sid];
+    });
     return Object.keys(byId).map(function (k) { return byId[k]; }).sort(function (a, b) {
       var ca = (a.category || '').localeCompare(b.category || '');
       if (ca !== 0) return ca;
@@ -196,7 +204,17 @@
   function normalizeMcpServer(raw) {
     var s = raw || {};
     var name = String(s.name || s.id || '').trim();
-    var type = (s.type === 'http' || s.type === 'HTTP') ? 'http' : 'stdio';
+    var type = (s.type === 'stdio' || s.type === 'STDIO') ? 'stdio' : 'http';
+    var transport = 'streamable_http';
+    if (type === 'stdio') {
+      transport = '';
+    } else if (s.transport === 'sse' || s.transport === 'SSE') {
+      transport = 'sse';
+    } else if (s.transport === 'streamable_http' || s.transport === 'streamable-http' || s.transport === 'Streamable HTTP') {
+      transport = 'streamable_http';
+    } else {
+      transport = 'streamable_http';
+    }
     var enabled = s.enabled !== false;
     var missingEnv = Array.isArray(s.missingEnv) ? s.missingEnv.slice() : [];
     var env = s.env && typeof s.env === 'object' ? Object.assign({}, s.env) : {};
@@ -214,6 +232,7 @@
       id: name,
       name: name,
       type: type,
+      transport: transport,
       url: s.url || '',
       command: s.command || '',
       args: Array.isArray(s.args)
@@ -249,7 +268,7 @@
   }
 
   /** DEV_MOCK MCP 演示种子版本； bump 后会对「空列表」专家补种一次（不覆盖已有配置） */
-  var MCP_DEMO_SEED_VERSION = 4;
+  var MCP_DEMO_SEED_VERSION = 5;
 
   function demoMcpServersForSeed(index) {
     var byIndex = window.DEMO_MCP_SERVERS_BY_INDEX || {};
@@ -608,6 +627,7 @@
       favorites: [],
       personas: {},
       skillBindings: {},
+      skillUninstalled: {},
       toolBindings: {},
       toolsetConfigs: {},
       mcpServers: {},
@@ -929,11 +949,11 @@
             lastUsedAt: s.lastUsedAt || null,
             provenance: s.provenance || 'bundled'
           };
-        }));
+        }), expertId);
       } else if (DEV_MOCK && Array.isArray(e.skills) && !detail) {
         state.skillBindings[expertId] = ensureFullInstalledSkills(e.skills.map(function (sid) {
           return { skillId: sid, enabled: true, params: getDefaultSkillParams(sid) };
-        }));
+        }), expertId);
       } else if (detail && e.skillBindings && e.skillBindings.length) {
         state.skillBindings[expertId] = ensureFullInstalledSkills(e.skillBindings.map(function (b) {
           return {
@@ -945,7 +965,7 @@
             lastUsedAt: b.lastUsedAt || null,
             provenance: b.provenance || 'bundled'
           };
-        }));
+        }), expertId);
       }
       if (detail && e.toolsDetail !== undefined && Array.isArray(e.toolsDetail.toolsets)) {
         state.toolBindings[expertId] = e.toolsDetail.toolsets.map(function (t) {
@@ -2734,7 +2754,10 @@
       var looksLegacy = raw.length > 0 && raw.every(function (b) {
         return typeof b === 'string' || (b && b.skillId && b.enabled === undefined && b.useCount === undefined && b.provenance === undefined);
       });
-      var tooFew = Array.isArray(raw) && (window.SKILLS_CATALOG || []).length > 0 && raw.length < (window.SKILLS_CATALOG || []).length;
+      var uninstalledMap = (state.skillUninstalled && state.skillUninstalled[id]) || {};
+      var uninstalledCount = Object.keys(uninstalledMap).filter(function (k) { return !!uninstalledMap[k]; }).length;
+      var catalogLen = (window.SKILLS_CATALOG || []).length;
+      var tooFew = Array.isArray(raw) && catalogLen > 0 && (raw.length + uninstalledCount) < catalogLen;
       if (looksLegacy || tooFew) {
         // 旧「绑定子集」→ 全量已安装 + 默认启用（对齐 seed）；保留显式 disabled
         var seeded = seedInstalledSkills({
@@ -2752,7 +2775,7 @@
         state.skillBindings[id] = seeded;
         updated = true;
       } else {
-        var normalized = ensureFullInstalledSkills(raw);
+        var normalized = ensureFullInstalledSkills(raw, id);
         if (normalized.length !== raw.length) {
           state.skillBindings[id] = normalized;
           updated = true;
@@ -2937,7 +2960,7 @@
           .map(normalizeInstalledSkillRecord)
           .filter(Boolean)
           .map(clearSkillUsageFields);
-        state.skillBindings[expert.id] = ensureFullInstalledSkills(state.skillBindings[expert.id])
+        state.skillBindings[expert.id] = ensureFullInstalledSkills(state.skillBindings[expert.id], expert.id)
           .map(clearSkillUsageFields);
       } else if (payload.skillIds && payload.skillIds.length) {
         // 兼容旧调用：仅传 id 列表时仍 seed 全量，列表内视为启用提示（其余也启用）
@@ -3052,6 +3075,7 @@
       state.experts = state.experts.filter(function (e) { return e.id !== id; });
       delete state.personas[id];
       delete state.skillBindings[id];
+      if (state.skillUninstalled) delete state.skillUninstalled[id];
       delete state.toolBindings[id];
       if (state.toolsetConfigs) delete state.toolsetConfigs[id];
       if (state.mcpServers) delete state.mcpServers[id];
@@ -3260,11 +3284,11 @@
     },
     getSkillBindings: function (expertId) {
       var raw = state.skillBindings[expertId] || [];
-      return ensureFullInstalledSkills(raw);
+      return ensureFullInstalledSkills(raw, expertId);
     },
     setSkillBindings: function (expertId, bindings) {
       var key = String(expertId);
-      state.skillBindings[key] = ensureFullInstalledSkills(bindings || []);
+      state.skillBindings[key] = ensureFullInstalledSkills(bindings || [], key);
       persist();
       var assigned = this.getSkillIds(key);
       if (!DEV_MOCK && window.SidecarApi && window.SidecarApi.putExpertSkills) {
@@ -3288,6 +3312,9 @@
       (skillIds || []).forEach(function (skillId) {
         if (!skillId) return;
         var sid = String(skillId).trim();
+        if (state.skillUninstalled && state.skillUninstalled[key]) {
+          delete state.skillUninstalled[key][sid];
+        }
         if (byId[sid]) {
           byId[sid].enabled = true;
           return;
@@ -3307,6 +3334,26 @@
     removeSkillBinding: function (expertId, skillId) {
       // 兼容旧 API：改为禁用（不删文件 / 不从已安装列表移除）
       return this.toggleSkillEnabled(expertId, skillId, false);
+    },
+    uninstallSkill: function (expertId, skillId) {
+      var key = String(expertId);
+      var sid = String(skillId || '').trim();
+      if (!sid) return Promise.reject(new Error('无效的技能'));
+      if (!state.skillUninstalled) state.skillUninstalled = {};
+      if (!state.skillUninstalled[key]) state.skillUninstalled[key] = {};
+      state.skillUninstalled[key][sid] = true;
+      var list = (state.skillBindings[key] || []).filter(function (b) {
+        var id = typeof b === 'string' ? b : (b && b.skillId);
+        return String(id || '') !== sid;
+      });
+      state.skillBindings[key] = list;
+      persist();
+      bumpCapabilityRev(key);
+      window.dispatchEvent(new CustomEvent('app-store-updated', { detail: { expertId: key } }));
+      if (!DEV_MOCK && window.SidecarApi && window.SidecarApi.putExpertSkills) {
+        return sidecarPutSkills(key, this.getSkillIds(key));
+      }
+      return Promise.resolve({ skills: this.getSkillBindings(key) });
     },
     toggleSkillEnabled: function (expertId, skillId, enabled) {
       var key = String(expertId);
@@ -3339,6 +3386,9 @@
       var sid = String((skill && (skill.id || skill.skillId)) || '').trim();
       var source = provenance || (skill && skill.provenance) || 'hub';
       if (!sid) return Promise.reject(new Error('无效的技能'));
+      if (state.skillUninstalled && state.skillUninstalled[key]) {
+        delete state.skillUninstalled[key][sid];
+      }
       if (list.some(function (s) { return s.skillId === sid; })) {
         return this.toggleSkillEnabled(key, sid, true);
       }
@@ -3506,13 +3556,10 @@
       if (list.some(function (s) { return s.name === name; })) {
         return Promise.reject(new Error('已存在同名 MCP 服务器'));
       }
-      var type = (payload.type === 'http') ? 'http' : 'stdio';
-      if (type === 'http' && !(payload.url || '').trim()) {
-        return Promise.reject(new Error('HTTP 类型须填写 URL'));
+      if (!(payload.url || '').trim()) {
+        return Promise.reject(new Error('请填写 URL'));
       }
-      if (type === 'stdio' && !(payload.command || '').trim()) {
-        return Promise.reject(new Error('stdio 类型须填写 Command'));
-      }
+      var transport = (payload.transport === 'sse') ? 'sse' : 'streamable_http';
       var env = {};
       var missingEnv = [];
       if (payload.envText) {
@@ -3531,14 +3578,69 @@
       }
       list.push(normalizeMcpServer({
         name: name,
-        type: type,
+        type: 'http',
+        transport: transport,
         url: payload.url || '',
-        command: payload.command || '',
-        args: payload.args || [],
+        command: '',
+        args: [],
         env: env,
         enabled: payload.enabled !== false,
         missingEnv: missingEnv,
         status: missingEnv.length ? 'missing_secret' : 'ok'
+      }));
+      setMcpServersInternal(key, list);
+      persist();
+      return Promise.resolve(this.getMcpServers(key));
+    },
+    updateMcpServerFromForm: function (expertId, originalName, payload) {
+      var key = String(expertId);
+      var list = this.getMcpServers(key).slice();
+      var oldName = String(originalName || '').trim();
+      var idx = list.findIndex(function (s) { return s.name === oldName; });
+      if (idx < 0) return Promise.reject(new Error('未找到要编辑的 MCP 服务器'));
+      var name = String((payload && payload.name) || '').trim();
+      if (!name) return Promise.reject(new Error('请填写服务器名称'));
+      if (!/^[a-z0-9][a-z0-9_-]{0,63}$/.test(name)) {
+        return Promise.reject(new Error('名称须匹配 ^[a-z0-9][a-z0-9_-]{0,63}$'));
+      }
+      if (list.some(function (s, i) { return i !== idx && s.name === name; })) {
+        return Promise.reject(new Error('已存在同名 MCP 服务器'));
+      }
+      if (!(payload.url || '').trim()) {
+        return Promise.reject(new Error('请填写 URL'));
+      }
+      var transport = (payload.transport === 'sse') ? 'sse' : 'streamable_http';
+      var env = {};
+      var missingEnv = [];
+      if (payload.envText) {
+        String(payload.envText).split(/\n+/).forEach(function (line) {
+          var m = line.match(/^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)\s*$/);
+          if (!m) return;
+          env[m[1]] = m[2];
+          if (!m[2]) missingEnv.push(m[1]);
+        });
+      }
+      if (payload.secretKey && !(payload.secretValue || '').trim()) {
+        if (missingEnv.indexOf(payload.secretKey) < 0) missingEnv.push(payload.secretKey);
+        env[payload.secretKey] = '';
+      } else if (payload.secretKey && payload.secretValue) {
+        env[payload.secretKey] = payload.secretValue;
+        missingEnv = missingEnv.filter(function (k) { return k !== payload.secretKey; });
+      }
+      var prev = list[idx];
+      list[idx] = normalizeMcpServer(Object.assign({}, prev, {
+        name: name,
+        type: 'http',
+        transport: transport,
+        url: payload.url || '',
+        command: '',
+        args: [],
+        env: env,
+        enabled: payload.enabled !== false,
+        missingEnv: missingEnv,
+        status: missingEnv.length ? 'missing_secret' : (payload.enabled === false ? 'disabled' : 'ok'),
+        errorSummary: missingEnv.length ? (prev.errorSummary || '') : '',
+        secretsFilled: !missingEnv.length
       }));
       setMcpServersInternal(key, list);
       persist();
