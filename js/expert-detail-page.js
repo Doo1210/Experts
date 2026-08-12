@@ -34,6 +34,13 @@
       var mcpSecretVisible = Vue.ref(false);
       var mcpSecretTarget = Vue.ref(null);
       var mcpSecretDraft = Vue.ref({});
+      var mcpHubDialogVisible = Vue.ref(false);
+      var mcpHubTab = Vue.ref('imported');
+      var mcpHubInstalling = Vue.ref(false);
+      var mcpHubInstallProgress = Vue.ref(0);
+      var mcpHubTableRef = Vue.ref(null);
+      var mcpHubSelectedById = Vue.ref({});
+      var mcpHubSelectionSyncing = false;
       var mcpForm = Vue.ref({
         name: '',
         type: 'stdio',
@@ -64,9 +71,12 @@
       var userMdContent = Vue.ref('');
       var personaOnboardDismissed = Vue.ref(false);
       var hubInstallDialogVisible = Vue.ref(false);
-      var hubInstallSearch = Vue.ref('');
+      var hubInstallTab = Vue.ref('mine');
       var hubInstalling = Vue.ref(false);
       var hubInstallProgress = Vue.ref(0);
+      var hubSkillTableRef = Vue.ref(null);
+      var hubSelectedById = Vue.ref({});
+      var hubSelectionSyncing = false;
 
       // ---- 任务 Tab 新增 ----
       var taskSearchQuery = Vue.ref('');
@@ -489,39 +499,94 @@
       }
 
       function openPlatformImportDialog() {
-        hubInstallSearch.value = '';
+        hubInstallTab.value = 'mine';
+        hubSelectedById.value = {};
         hubInstallDialogVisible.value = true;
       }
+      function hubSkillDisplayName(skill) {
+        return (skill && (skill.nameZh || skill.name)) || (skill && (skill.englishId || skill.id)) || '';
+      }
+      function hubSkillEnglishId(skill) {
+        return (skill && (skill.englishId || skill.name || skill.id)) || '';
+      }
       var hubSkillOptions = Vue.computed(function () {
-        var q = hubInstallSearch.value.trim().toLowerCase();
+        var tab = hubInstallTab.value || 'mine';
         var installed = {};
         skillBindings.value.forEach(function (s) { installed[s.skillId] = true; });
         return (window.SKILLS_HUB_CATALOG || []).filter(function (s) {
           if (installed[s.id]) return false;
-          if (!q) return true;
-          return (s.name || '').toLowerCase().indexOf(q) >= 0 ||
-            (s.description || '').toLowerCase().indexOf(q) >= 0 ||
-            (s.category || '').toLowerCase().indexOf(q) >= 0;
+          return (s.scope || 'mine') === tab;
         });
       });
-      function installHubSkill(skill) {
+      var hubSelectedCount = Vue.computed(function () {
+        return Object.keys(hubSelectedById.value).length;
+      });
+      function syncHubTableSelection() {
+        var table = hubSkillTableRef.value;
+        if (!table || typeof table.clearSelection !== 'function') return;
+        hubSelectionSyncing = true;
+        table.clearSelection();
+        hubSkillOptions.value.forEach(function (row) {
+          if (hubSelectedById.value[row.id]) table.toggleRowSelection(row, true);
+        });
+        Vue.nextTick(function () { hubSelectionSyncing = false; });
+      }
+      function onHubSkillSelectionChange(rows) {
+        if (hubSelectionSyncing) return;
+        var visible = {};
+        hubSkillOptions.value.forEach(function (s) { visible[s.id] = true; });
+        var next = Object.assign({}, hubSelectedById.value);
+        Object.keys(visible).forEach(function (id) { delete next[id]; });
+        (rows || []).forEach(function (row) {
+          if (row && row.id) next[row.id] = row;
+        });
+        hubSelectedById.value = next;
+      }
+      Vue.watch(hubSkillOptions, function () {
+        Vue.nextTick(syncHubTableSelection);
+      });
+      Vue.watch(hubInstallDialogVisible, function (visible) {
+        if (visible) Vue.nextTick(syncHubTableSelection);
+      });
+      function installSelectedHubSkills() {
+        var ids = Object.keys(hubSelectedById.value);
+        if (!ids.length) {
+          ElementPlus.ElMessage.warning('请先勾选要导入的技能');
+          return;
+        }
+        var skills = ids.map(function (id) { return hubSelectedById.value[id]; });
         hubInstalling.value = true;
         hubInstallProgress.value = 0;
         var timer = setInterval(function () {
-          hubInstallProgress.value += 20;
-          if (hubInstallProgress.value >= 100) {
-            clearInterval(timer);
-            hubInstalling.value = false;
-            store.installHubSkill(props.expertId, skill).then(function () {
-              skillBindings.value = store.getSkillBindings(props.expertId).slice();
-              hubInstallDialogVisible.value = false;
-              var count = runningSessionCount.value;
-              var msg = count > 0
-                ? '已从平台导入「' + (skill.name || skill.id) + '」，默认已启用。该专家当前有 ' + count + ' 个运行中会话，修改将在新会话生效。'
-                : '已从平台导入「' + (skill.name || skill.id) + '」，默认已启用。修改将在新会话生效。';
-              ElementPlus.ElMessage.success(msg);
+          hubInstallProgress.value = Math.min(100, hubInstallProgress.value + 20);
+          if (hubInstallProgress.value < 100) return;
+          clearInterval(timer);
+          var chain = Promise.resolve();
+          skills.forEach(function (skill) {
+            chain = chain.then(function () {
+              var displayName = hubSkillDisplayName(skill);
+              var payload = Object.assign({}, skill, {
+                name: displayName,
+                englishId: hubSkillEnglishId(skill)
+              });
+              return store.installHubSkill(props.expertId, payload);
             });
-          }
+          });
+          chain.then(function () {
+            hubInstalling.value = false;
+            skillBindings.value = store.getSkillBindings(props.expertId).slice();
+            hubSelectedById.value = {};
+            hubInstallDialogVisible.value = false;
+            var running = runningSessionCount.value;
+            var n = skills.length;
+            var msg = running > 0
+              ? '已从平台导入 ' + n + ' 个技能，默认已启用。该专家当前有 ' + running + ' 个运行中会话，修改将在新会话生效。'
+              : '已从平台导入 ' + n + ' 个技能，默认已启用。修改将在新会话生效。';
+            ElementPlus.ElMessage.success(msg);
+          }).catch(function () {
+            hubInstalling.value = false;
+            ElementPlus.ElMessage.error('导入失败，请重试');
+          });
         }, 400);
       }
 
@@ -677,6 +742,110 @@
       function openMcpForm() {
         resetMcpForm();
         mcpFormVisible.value = true;
+      }
+
+      function openMcpPlatformImportDialog() {
+        mcpHubTab.value = 'imported';
+        mcpHubSelectedById.value = {};
+        mcpHubDialogVisible.value = true;
+      }
+
+      function mcpHubDisplayName(item) {
+        return (item && (item.nameZh || item.name)) || (item && (item.englishId || item.id)) || '';
+      }
+
+      function mcpHubEnglishId(item) {
+        return (item && (item.englishId || item.name || item.id)) || '';
+      }
+
+      var mcpHubOptions = Vue.computed(function () {
+        var tab = mcpHubTab.value || 'imported';
+        var installed = {};
+        mcpServers.value.forEach(function (s) { installed[s.name] = true; });
+        return (window.MCP_HUB_CATALOG || []).filter(function (s) {
+          var eid = mcpHubEnglishId(s);
+          if (installed[eid]) return false;
+          return (s.scope || 'imported') === tab;
+        });
+      });
+
+      var mcpHubSelectedCount = Vue.computed(function () {
+        return Object.keys(mcpHubSelectedById.value).length;
+      });
+
+      function syncMcpHubTableSelection() {
+        var table = mcpHubTableRef.value;
+        if (!table || typeof table.clearSelection !== 'function') return;
+        mcpHubSelectionSyncing = true;
+        table.clearSelection();
+        mcpHubOptions.value.forEach(function (row) {
+          if (mcpHubSelectedById.value[row.id]) table.toggleRowSelection(row, true);
+        });
+        Vue.nextTick(function () { mcpHubSelectionSyncing = false; });
+      }
+
+      function onMcpHubSelectionChange(rows) {
+        if (mcpHubSelectionSyncing) return;
+        var visible = {};
+        mcpHubOptions.value.forEach(function (s) { visible[s.id] = true; });
+        var next = Object.assign({}, mcpHubSelectedById.value);
+        Object.keys(visible).forEach(function (id) { delete next[id]; });
+        (rows || []).forEach(function (row) {
+          if (row && row.id) next[row.id] = row;
+        });
+        mcpHubSelectedById.value = next;
+      }
+
+      Vue.watch(mcpHubOptions, function () {
+        Vue.nextTick(syncMcpHubTableSelection);
+      });
+      Vue.watch(mcpHubDialogVisible, function (visible) {
+        if (visible) Vue.nextTick(syncMcpHubTableSelection);
+      });
+
+      function installSelectedHubMcps() {
+        var ids = Object.keys(mcpHubSelectedById.value);
+        if (!ids.length) {
+          ElementPlus.ElMessage.warning('请先勾选要导入的 MCP');
+          return;
+        }
+        var items = ids.map(function (id) { return mcpHubSelectedById.value[id]; });
+        mcpHubInstalling.value = true;
+        mcpHubInstallProgress.value = 0;
+        var timer = setInterval(function () {
+          mcpHubInstallProgress.value = Math.min(100, mcpHubInstallProgress.value + 20);
+          if (mcpHubInstallProgress.value < 100) return;
+          clearInterval(timer);
+          var chain = Promise.resolve();
+          items.forEach(function (item) {
+            chain = chain.then(function () {
+              var env = item.env || {};
+              var envText = Object.keys(env).map(function (k) {
+                return k + '=' + (env[k] == null ? '' : env[k]);
+              }).join('\n');
+              return store.addMcpServer(props.expertId, {
+                name: mcpHubEnglishId(item),
+                type: item.type === 'http' ? 'http' : 'stdio',
+                url: item.url || '',
+                command: item.command || '',
+                args: item.args || [],
+                envText: envText,
+                enabled: true
+              });
+            });
+          });
+          chain.then(function () {
+            mcpHubInstalling.value = false;
+            refreshMcpServers();
+            mcpHubSelectedById.value = {};
+            mcpHubDialogVisible.value = false;
+            ElementPlus.ElMessage.success(mcpEffectToast('已从平台导入 ' + items.length + ' 台 MCP 服务'));
+          }).catch(function (err) {
+            mcpHubInstalling.value = false;
+            refreshMcpServers();
+            ElementPlus.ElMessage.error((err && err.message) || '导入失败，请重试');
+          });
+        }, 400);
       }
 
       function submitMcpForm() {
@@ -2469,6 +2638,18 @@
         mcpEnabledCount: mcpEnabledCount,
         mcpNeedsAttentionCount: mcpNeedsAttentionCount,
         openMcpForm: openMcpForm,
+        openMcpPlatformImportDialog: openMcpPlatformImportDialog,
+        mcpHubDialogVisible: mcpHubDialogVisible,
+        mcpHubTab: mcpHubTab,
+        mcpHubInstalling: mcpHubInstalling,
+        mcpHubInstallProgress: mcpHubInstallProgress,
+        mcpHubTableRef: mcpHubTableRef,
+        mcpHubOptions: mcpHubOptions,
+        mcpHubSelectedCount: mcpHubSelectedCount,
+        mcpHubDisplayName: mcpHubDisplayName,
+        mcpHubEnglishId: mcpHubEnglishId,
+        onMcpHubSelectionChange: onMcpHubSelectionChange,
+        installSelectedHubMcps: installSelectedHubMcps,
         submitMcpForm: submitMcpForm,
         toggleMcpEnabled: toggleMcpEnabled,
         openMcpSecretForm: openMcpSecretForm,
@@ -2524,12 +2705,17 @@
         getTaskCwdLabel: getTaskCwdLabel,
         goToWorkspaceFromTask: goToWorkspaceFromTask,
         hubInstallDialogVisible: hubInstallDialogVisible,
-        hubInstallSearch: hubInstallSearch,
+        hubInstallTab: hubInstallTab,
         hubInstalling: hubInstalling,
         hubInstallProgress: hubInstallProgress,
+        hubSkillTableRef: hubSkillTableRef,
         hubSkillOptions: hubSkillOptions,
+        hubSelectedCount: hubSelectedCount,
+        hubSkillDisplayName: hubSkillDisplayName,
+        hubSkillEnglishId: hubSkillEnglishId,
+        onHubSkillSelectionChange: onHubSkillSelectionChange,
         openPlatformImportDialog: openPlatformImportDialog,
-        installHubSkill: installHubSkill,
+        installSelectedHubSkills: installSelectedHubSkills,
         skillLocalImportInput: skillLocalImportInput,
         localSkillUploading: localSkillUploading,
         triggerLocalSkillUpload: triggerLocalSkillUpload,
@@ -2987,12 +3173,13 @@
                       <span class="detail-action-bar-label">已启用 {{ mcpEnabledCount }} 台<span v-if="mcpNeedsAttentionCount"> · 其中 {{ mcpNeedsAttentionCount }} 台需处理</span></span>\
                     </div>\
                     <div class="detail-action-right">\
-                      <el-button type="primary" size="small" :loading="mcpSaving" @click="openMcpForm">+ 添加</el-button>\
+                      <el-button type="primary" size="small" @click="openMcpPlatformImportDialog">从平台导入</el-button>\
+                      <el-button size="small" :loading="mcpSaving" @click="openMcpForm">+ 添加</el-button>\
                     </div>\
                   </div>\
                   <div v-if="mcpServers.length === 0" class="profile-empty-state">\
                     <p class="profile-empty-title">尚未接入外部 MCP 服务</p>\
-                    <p class="profile-empty-desc">MCP 用于连接 GitHub、数据库、文件系统等外部工具。点击「添加」配置一台服务。</p>\
+                    <p class="profile-empty-desc">MCP 用于连接 GitHub、数据库、文件系统等外部工具。可从平台导入，或点击「添加」手动配置。</p>\
                   </div>\
                   <div v-else class="detail-table-wrap">\
                     <el-table :data="mcpServers" stripe class="toolset-table">\
@@ -3384,7 +3571,7 @@
               </div>\
               <div class="dialog-header-text">\
                 <div class="dialog-header-title">从平台导入技能</div>\
-                <div class="dialog-header-sub">搜索并导入平台资源库中的技能到当前专家</div>\
+                <div class="dialog-header-sub">从我发布的、我添加的或内置技能库导入到当前专家</div>\
               </div>\
             </div>\
           </template>\
@@ -3394,34 +3581,94 @@
               <el-progress :percentage="hubInstallProgress" :stroke-width="10" />\
             </div>\
             <template v-else>\
-              <div class="capability-picker-head">\
-                <el-input v-model="hubInstallSearch" placeholder="搜索平台技能..." clearable class="member-picker-search">\
-                  <template #prefix>\
-                    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>\
-                  </template>\
-                </el-input>\
-                <span class="member-picker-count">可选 {{ hubSkillOptions.length }} 项</span>\
+              <div class="hub-skill-tabs" role="tablist">\
+                <button type="button" class="hub-skill-tab" :class="{ \'is-active\': hubInstallTab === \'mine\' }" role="tab" :aria-selected="hubInstallTab === \'mine\'" @click="hubInstallTab = \'mine\'">我发布的</button>\
+                <button type="button" class="hub-skill-tab" :class="{ \'is-active\': hubInstallTab === \'added\' }" role="tab" :aria-selected="hubInstallTab === \'added\'" @click="hubInstallTab = \'added\'">我添加的</button>\
+                <button type="button" class="hub-skill-tab" :class="{ \'is-active\': hubInstallTab === \'builtin\' }" role="tab" :aria-selected="hubInstallTab === \'builtin\'" @click="hubInstallTab = \'builtin\'">内置</button>\
               </div>\
-              <el-table :data="hubSkillOptions" stripe max-height="360" class="toolset-table capability-picker-table" empty-text="暂无可导入的平台技能">\
-                <el-table-column label="技能" min-width="160">\
+              <el-table\
+                ref="hubSkillTableRef"\
+                :data="hubSkillOptions"\
+                row-key="id"\
+                stripe\
+                max-height="520"\
+                class="toolset-table capability-picker-table hub-skill-table"\
+                empty-text="暂无可导入的平台技能"\
+                @selection-change="onHubSkillSelectionChange"\
+              >\
+                <el-table-column type="selection" width="48" align="center" />\
+                <el-table-column label="技能" min-width="280">\
                   <template #default="{ row }">\
-                    <div class="toolset-name-cell">{{ row.name }}</div>\
-                    <div class="toolset-id-cell">{{ row.id }}</div>\
-                  </template>\
-                </el-table-column>\
-                <el-table-column prop="description" label="说明" min-width="200" show-overflow-tooltip />\
-                <el-table-column label="操作" width="90" align="center">\
-                  <template #default="{ row }">\
-                    <el-button link type="primary" size="small" @click="installHubSkill(row)">导入</el-button>\
+                    <div class="hub-skill-cell">\
+                      <span class="hub-skill-icon" aria-hidden="true">{{ row.icon || \'📦\' }}</span>\
+                      <span class="hub-skill-title">{{ hubSkillDisplayName(row) }}<span class="hub-skill-eid">({{ hubSkillEnglishId(row) }})</span></span>\
+                    </div>\
                   </template>\
                 </el-table-column>\
               </el-table>\
             </template>\
           </div>\
           <template #footer>\
-            <div class="dialog-footer-custom dialog-footer-wizard">\
+            <div class="dialog-footer-custom dialog-footer-wizard hub-dialog-footer">\
+              <span class="hub-selected-count">已选择 <strong>{{ hubSelectedCount }}</strong> 个技能</span>\
               <div class="dialog-footer-actions">\
-                <el-button class="wizard-btn wizard-btn-cancel" @click="hubInstallDialogVisible = false">关闭</el-button>\
+                <el-button class="wizard-btn wizard-btn-cancel" :disabled="hubInstalling" @click="hubInstallDialogVisible = false">取消</el-button>\
+                <el-button type="primary" class="wizard-btn wizard-btn-submit wizard-btn-submit-expert" :loading="hubInstalling" :disabled="hubSelectedCount === 0" @click="installSelectedHubSkills">导入</el-button>\
+              </div>\
+            </div>\
+          </template>\
+        </el-dialog>\
+        <!-- 从平台导入 MCP -->\
+        <el-dialog v-model="mcpHubDialogVisible" width="640px" append-to-body class="form-dialog capability-picker-dialog ed-dialog ed-dialog-hub ed-dialog-mcp-hub">\
+          <template #header>\
+            <div class="dialog-header-custom dialog-header-mcp">\
+              <div class="dialog-header-icon dialog-header-icon-mcp">\
+                <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/><path d="M7 8h2M11 8h6M7 12h10"/></svg>\
+              </div>\
+              <div class="dialog-header-text">\
+                <div class="dialog-header-title">从平台导入 MCP</div>\
+                <div class="dialog-header-sub">从我导入的或我创建的 MCP 库导入到当前专家</div>\
+              </div>\
+            </div>\
+          </template>\
+          <div class="form-dialog-body ed-dialog-body">\
+            <div v-if="mcpHubInstalling" class="hub-install-progress">\
+              <div class="hub-install-progress-text">正在导入 MCP… {{ mcpHubInstallProgress }}%</div>\
+              <el-progress :percentage="mcpHubInstallProgress" :stroke-width="10" />\
+            </div>\
+            <template v-else>\
+              <div class="hub-skill-tabs" role="tablist">\
+                <button type="button" class="hub-skill-tab" :class="{ \'is-active\': mcpHubTab === \'imported\' }" role="tab" :aria-selected="mcpHubTab === \'imported\'" @click="mcpHubTab = \'imported\'">我导入的</button>\
+                <button type="button" class="hub-skill-tab" :class="{ \'is-active\': mcpHubTab === \'created\' }" role="tab" :aria-selected="mcpHubTab === \'created\'" @click="mcpHubTab = \'created\'">我创建的</button>\
+              </div>\
+              <el-table\
+                ref="mcpHubTableRef"\
+                :data="mcpHubOptions"\
+                row-key="id"\
+                stripe\
+                max-height="520"\
+                class="toolset-table capability-picker-table hub-skill-table"\
+                empty-text="暂无可导入的平台 MCP"\
+                @selection-change="onMcpHubSelectionChange"\
+              >\
+                <el-table-column type="selection" width="48" align="center" />\
+                <el-table-column label="MCP" min-width="280">\
+                  <template #default="{ row }">\
+                    <div class="hub-skill-cell">\
+                      <span class="hub-skill-icon" aria-hidden="true">{{ row.icon || \'🔌\' }}</span>\
+                      <span class="hub-skill-title">{{ mcpHubDisplayName(row) }}<span class="hub-skill-eid">({{ mcpHubEnglishId(row) }})</span></span>\
+                    </div>\
+                  </template>\
+                </el-table-column>\
+              </el-table>\
+            </template>\
+          </div>\
+          <template #footer>\
+            <div class="dialog-footer-custom dialog-footer-wizard hub-dialog-footer">\
+              <span class="hub-selected-count">已选择 <strong>{{ mcpHubSelectedCount }}</strong> 个 MCP</span>\
+              <div class="dialog-footer-actions">\
+                <el-button class="wizard-btn wizard-btn-cancel" :disabled="mcpHubInstalling" @click="mcpHubDialogVisible = false">取消</el-button>\
+                <el-button type="primary" class="wizard-btn wizard-btn-submit wizard-btn-submit-expert" :loading="mcpHubInstalling" :disabled="mcpHubSelectedCount === 0" @click="installSelectedHubMcps">导入</el-button>\
               </div>\
             </div>\
           </template>\

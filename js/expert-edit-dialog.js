@@ -2,6 +2,27 @@
  * 专家编辑弹窗 — 共享组件与表单逻辑
  */
 (function () {
+  function snapshotModelConfig(mc) {
+    var c = mc || {};
+    return {
+      providerSlug: c.providerSlug || '',
+      providerName: c.providerName || '',
+      baseUrl: c.baseUrl || '',
+      apiKey: c.apiKey || '',
+      model: c.model || ''
+    };
+  }
+
+  function modelConfigEqual(a, b) {
+    var x = snapshotModelConfig(a);
+    var y = snapshotModelConfig(b);
+    return x.providerSlug === y.providerSlug &&
+      x.providerName === y.providerName &&
+      x.baseUrl === y.baseUrl &&
+      x.apiKey === y.apiKey &&
+      x.model === y.model;
+  }
+
   window.createExpertEditForm = function (store, options) {
     options = options || {};
     var showEditDialog = Vue.ref(false);
@@ -9,17 +30,25 @@
     var editAvatarInput = Vue.ref(null);
     var editExpertiseTagInput = Vue.ref('');
     var editingExpert = Vue.ref(null);
+    var editModelInputMode = Vue.ref('platform');
     var editSelectedModelId = Vue.ref('');
-    var editOriginalModelId = Vue.ref('');
-    var editModelCurrent = Vue.ref(null);
+    var editManualModelConfig = Vue.ref(
+      window.emptyManualModelConfig
+        ? window.emptyManualModelConfig()
+        : { baseUrl: '', apiKey: '', model: '', providerName: '' }
+    );
+    var editOriginalModelConfig = Vue.ref(null);
 
     function resetEditForm() {
       editForm.value = { name: '', description: '', avatar: '', expertise: [] };
       editExpertiseTagInput.value = '';
       editingExpert.value = null;
+      editModelInputMode.value = 'platform';
       editSelectedModelId.value = '';
-      editOriginalModelId.value = '';
-      editModelCurrent.value = null;
+      editManualModelConfig.value = window.emptyManualModelConfig
+        ? window.emptyManualModelConfig()
+        : { baseUrl: '', apiKey: '', model: '', providerName: '' };
+      editOriginalModelConfig.value = null;
     }
 
     function openEdit(expert) {
@@ -34,15 +63,25 @@
       editExpertiseTagInput.value = '';
       var mc = expert.modelConfig || null;
       var currentModel = (mc && mc.model) || expert.model || '';
-      editModelCurrent.value = mc ? {
+      editManualModelConfig.value = {
+        baseUrl: (mc && mc.baseUrl) || '',
+        apiKey: (mc && mc.apiKey) || '',
         model: currentModel,
-        providerName: mc.providerName || '',
-        baseUrl: mc.baseUrl || ''
-      } : (currentModel ? { model: currentModel, providerName: '', baseUrl: '' } : null);
+        providerName: (mc && mc.providerName) || ''
+      };
+      var mode = window.inferModelInputMode
+        ? window.inferModelInputMode(mc, currentModel)
+        : 'platform';
+      editModelInputMode.value = mode;
       var catalogHit = window.findModelInCatalog ? window.findModelInCatalog(currentModel) : null;
-      var modelId = catalogHit ? catalogHit.id : currentModel;
-      editSelectedModelId.value = modelId;
-      editOriginalModelId.value = modelId;
+      editSelectedModelId.value = catalogHit ? catalogHit.id : '';
+      editOriginalModelConfig.value = snapshotModelConfig(mc || (currentModel ? {
+        model: currentModel,
+        providerName: '',
+        baseUrl: '',
+        apiKey: '',
+        providerSlug: expert.provider || ''
+      } : null));
       showEditDialog.value = true;
     }
 
@@ -88,6 +127,37 @@
       }
     }
 
+    function buildUpdatedModelConfig() {
+      if (editModelInputMode.value === 'manual') {
+        return window.manualFormToModelConfig
+          ? window.manualFormToModelConfig(editManualModelConfig.value, store)
+          : {
+              baseUrl: editManualModelConfig.value.baseUrl || '',
+              apiKey: editManualModelConfig.value.apiKey || '',
+              model: editManualModelConfig.value.model || '',
+              providerName: editManualModelConfig.value.providerName || '',
+              providerSlug: 'custom'
+            };
+      }
+      var selected = window.findModelInCatalog
+        ? window.findModelInCatalog(editSelectedModelId.value)
+        : null;
+      if (!selected) return null;
+      var cfg = window.modelCatalogToConfig
+        ? window.modelCatalogToConfig(selected)
+        : {
+            baseUrl: selected.baseUrl || '',
+            apiKey: '',
+            model: selected.name || selected.id,
+            providerName: selected.providerName || '',
+            providerSlug: selected.providerSlug || 'custom'
+          };
+      if (cfg && store && store.resolveProviderSlug) {
+        cfg.providerSlug = store.resolveProviderSlug(cfg.providerName, cfg.baseUrl);
+      }
+      return cfg;
+    }
+
     function submitEdit() {
       var expert = editingExpert.value || (options.getExpert && options.getExpert());
       if (!expert) return;
@@ -95,49 +165,42 @@
         ElementPlus.ElMessage.warning('请填写专家名称和介绍');
         return;
       }
-      if (!String(editSelectedModelId.value || '').trim()) {
-        ElementPlus.ElMessage.warning('请选择默认模型');
-        return;
-      }
-      var modelChanged = String(editSelectedModelId.value) !== String(editOriginalModelId.value);
-      var updatedModelConfig = expert.modelConfig || null;
-      if (modelChanged) {
-        var selected = window.findModelInCatalog
+      if (editModelInputMode.value === 'manual') {
+        var manualErr = window.validateManualModelConfig
+          ? window.validateManualModelConfig(editManualModelConfig.value)
+          : null;
+        if (manualErr) {
+          ElementPlus.ElMessage.warning(manualErr);
+          return;
+        }
+      } else {
+        if (!String(editSelectedModelId.value || '').trim()) {
+          ElementPlus.ElMessage.warning('请选择默认模型');
+          return;
+        }
+        var catalogModel = window.findModelInCatalog
           ? window.findModelInCatalog(editSelectedModelId.value)
           : null;
-        if (!selected && editSelectedModelId.value) {
-          selected = {
-            id: editSelectedModelId.value,
-            name: editSelectedModelId.value,
-            providerName: (updatedModelConfig && updatedModelConfig.providerName) || '',
-            providerSlug: (updatedModelConfig && updatedModelConfig.providerSlug) || 'custom',
-            baseUrl: (updatedModelConfig && updatedModelConfig.baseUrl) || ''
-          };
-        }
-        updatedModelConfig = window.modelCatalogToConfig
-          ? window.modelCatalogToConfig(selected)
-          : {
-              baseUrl: (selected && selected.baseUrl) || '',
-              apiKey: '',
-              model: (selected && (selected.name || selected.id)) || editSelectedModelId.value,
-              providerName: (selected && selected.providerName) || ''
-            };
-        if (updatedModelConfig && store && store.resolveProviderSlug) {
-          updatedModelConfig.providerSlug = store.resolveProviderSlug(
-            updatedModelConfig.providerName,
-            updatedModelConfig.baseUrl
-          );
-        } else if (updatedModelConfig && !updatedModelConfig.providerSlug) {
-          updatedModelConfig.providerSlug = (selected && selected.providerSlug) || 'custom';
+        if (!catalogModel) {
+          ElementPlus.ElMessage.warning('所选模型无效，请重新选择');
+          return;
         }
       }
+
+      var updatedModelConfig = buildUpdatedModelConfig();
+      if (!updatedModelConfig) {
+        ElementPlus.ElMessage.warning('请完善默认模型配置');
+        return;
+      }
+      var modelChanged = !modelConfigEqual(updatedModelConfig, editOriginalModelConfig.value);
+
       var updated = Object.assign({}, expert, {
         name: editForm.value.name.trim(),
         description: editForm.value.description.trim(),
         avatar: editForm.value.avatar || expert.avatar,
         expertise: editForm.value.expertise.slice(0, 10)
       });
-      if (modelChanged && updatedModelConfig) {
+      if (modelChanged) {
         updated.modelConfig = updatedModelConfig;
         updated.model = updatedModelConfig.model;
         updated.provider = updatedModelConfig.providerSlug;
@@ -160,8 +223,9 @@
       editForm: editForm,
       editAvatarInput: editAvatarInput,
       editExpertiseTagInput: editExpertiseTagInput,
+      editModelInputMode: editModelInputMode,
       editSelectedModelId: editSelectedModelId,
-      editModelCurrent: editModelCurrent,
+      editManualModelConfig: editManualModelConfig,
       resetEditForm: resetEditForm,
       openEdit: openEdit,
       openEditDialog: function () {
@@ -186,10 +250,22 @@
       headerTitle: { type: String, default: '编辑专家' },
       headerSubtitle: { type: String, default: '修改专家名称、介绍、头像与擅长领域' },
       tagColors: { type: Array, default: function () { return window.TAG_COLORS || []; } },
+      modelInputMode: { type: String, default: 'platform' },
       selectedModelId: { type: String, default: '' },
-      modelCurrent: { type: Object, default: null }
+      manualModelConfig: { type: Object, required: true }
     },
-    emits: ['update:visible', 'update:tagInput', 'update:selectedModelId', 'submit', 'closed', 'avatar-change', 'add-tag', 'remove-tag', 'tag-keydown'],
+    emits: [
+      'update:visible',
+      'update:tagInput',
+      'update:modelInputMode',
+      'update:selectedModelId',
+      'submit',
+      'closed',
+      'avatar-change',
+      'add-tag',
+      'remove-tag',
+      'tag-keydown'
+    ],
     setup: function (props, ctx) {
       var editAvatarInput = Vue.ref(null);
 
@@ -221,6 +297,10 @@
         ctx.emit('add-tag');
       }
 
+      function onModelInputMode(val) {
+        ctx.emit('update:modelInputMode', val || 'platform');
+      }
+
       function onSelectedModelId(val) {
         ctx.emit('update:selectedModelId', val || '');
       }
@@ -234,6 +314,7 @@
         removeTag: removeTag,
         onTagKeydown: onTagKeydown,
         addTag: addTag,
+        onModelInputMode: onModelInputMode,
         onSelectedModelId: onSelectedModelId
       };
     },
@@ -312,16 +393,16 @@
             </div>\
             <p class="form-dialog-hint expertise-tag-hint">可添加多个标签，如「SPC」「良率分析」「工艺优化」</p>\
           </div>\
-                    <div class="edit-model-section">\
-            <model-select\
-              :model-value="selectedModelId"\
-              title="模型选择"\
-              placeholder="搜索或选择默认模型"\
+          <div class="edit-model-section">\
+            <model-config-section\
+              :mode="modelInputMode"\
+              :selected-model-id="selectedModelId"\
+              :manual-config="manualModelConfig"\
               required\
-              @update:model-value="onSelectedModelId" />\
-            <p class="form-dialog-hint">作为专家的默认模型，对话任务未选择其他模型时使用此模型</p>\
+              @update:mode="onModelInputMode"\
+              @update:selected-model-id="onSelectedModelId" />\
           </div>\
-                </div>\
+        </div>\
         <template #footer>\
           <div class="dialog-footer-custom">\
             <el-button @click="close">取消</el-button>\
@@ -342,8 +423,9 @@
         showEditDialog: props.edit.showEditDialog,
         editForm: props.edit.editForm,
         editExpertiseTagInput: props.edit.editExpertiseTagInput,
+        editModelInputMode: props.edit.editModelInputMode,
         editSelectedModelId: props.edit.editSelectedModelId,
-        editModelCurrent: props.edit.editModelCurrent,
+        editManualModelConfig: props.edit.editManualModelConfig,
         resetEditForm: props.edit.resetEditForm,
         submitEdit: props.edit.submitEdit,
         handleEditAvatarChange: props.edit.handleEditAvatarChange,
@@ -361,8 +443,9 @@
         v-model:tag-input="editExpertiseTagInput"\
         :header-title="headerTitle"\
         :tag-colors="tagColors"\
+        v-model:model-input-mode="editModelInputMode"\
         v-model:selected-model-id="editSelectedModelId"\
-        :model-current="editModelCurrent"\
+        :manual-model-config="editManualModelConfig"\
         @submit="submitEdit"\
         @closed="resetEditForm"\
         @avatar-change="handleEditAvatarChange"\

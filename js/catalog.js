@@ -84,6 +84,41 @@ window.DEFAULT_MCP_SERVERS = [
 ];
 
 /**
+ * 平台 MCP 库（Mock）—「从平台导入」弹窗
+ * scope: imported=我导入的 | created=我创建的
+ * 列表展示：icon + nameZh(englishId)；导入时以 englishId 作为服务器 name
+ */
+window.MCP_HUB_CATALOG = [
+  // —— 我导入的 ——
+  { id: 'hub-mcp-github', englishId: 'github-api', nameZh: 'GitHub API', icon: '🐙', scope: 'imported', type: 'http', url: 'https://api.githubcopilot.com/mcp/', command: '', args: [], env: { GITHUB_TOKEN: '' }, missingEnv: ['GITHUB_TOKEN'] },
+  { id: 'hub-mcp-filesystem', englishId: 'filesystem', nameZh: '文件系统', icon: '📁', scope: 'imported', type: 'stdio', command: 'npx', args: ['-y', '@modelcontextprotocol/server-filesystem', '/data/workspace'], url: '', env: {} },
+  { id: 'hub-mcp-postgres', englishId: 'postgres', nameZh: 'PostgreSQL', icon: '🗄️', scope: 'imported', type: 'stdio', command: 'npx', args: ['-y', '@modelcontextprotocol/server-postgres', 'postgresql://localhost/fab'], url: '', env: {} },
+  { id: 'hub-mcp-brave-search', englishId: 'brave-search', nameZh: 'Brave 搜索', icon: '🔎', scope: 'imported', type: 'stdio', command: 'npx', args: ['-y', '@modelcontextprotocol/server-brave-search'], url: '', env: { BRAVE_API_KEY: '' }, missingEnv: ['BRAVE_API_KEY'] },
+  { id: 'hub-mcp-slack', englishId: 'slack', nameZh: 'Slack', icon: '💬', scope: 'imported', type: 'stdio', command: 'npx', args: ['-y', '@modelcontextprotocol/server-slack'], url: '', env: { SLACK_BOT_TOKEN: '' }, missingEnv: ['SLACK_BOT_TOKEN'] },
+  { id: 'hub-mcp-memory', englishId: 'memory-kv', nameZh: '键值记忆', icon: '🧠', scope: 'imported', type: 'stdio', command: 'npx', args: ['-y', '@modelcontextprotocol/server-memory'], url: '', env: {} },
+  { id: 'hub-mcp-puppeteer', englishId: 'puppeteer', nameZh: '浏览器自动化', icon: '🌐', scope: 'imported', type: 'stdio', command: 'npx', args: ['-y', '@modelcontextprotocol/server-puppeteer'], url: '', env: {} },
+  { id: 'hub-mcp-sqlite', englishId: 'sqlite', nameZh: 'SQLite', icon: '💾', scope: 'imported', type: 'stdio', command: 'npx', args: ['-y', '@modelcontextprotocol/server-sqlite', '/data/app.db'], url: '', env: {} },
+  { id: 'hub-mcp-fetch', englishId: 'fetch', nameZh: 'HTTP 抓取', icon: '📡', scope: 'imported', type: 'stdio', command: 'npx', args: ['-y', '@modelcontextprotocol/server-fetch'], url: '', env: {} },
+  { id: 'hub-mcp-git', englishId: 'git', nameZh: 'Git 仓库', icon: '🌿', scope: 'imported', type: 'stdio', command: 'uvx', args: ['mcp-server-git', '--repository', '/data/repo'], url: '', env: {} },
+  { id: 'hub-mcp-notion', englishId: 'notion', nameZh: 'Notion', icon: '📓', scope: 'imported', type: 'http', url: 'https://mcp.notion.com/v1', command: '', args: [], env: { NOTION_TOKEN: '' }, missingEnv: ['NOTION_TOKEN'] },
+  { id: 'hub-mcp-sentry', englishId: 'sentry', nameZh: 'Sentry', icon: '🐛', scope: 'imported', type: 'http', url: 'https://mcp.sentry.dev/sse', command: '', args: [], env: { SENTRY_AUTH_TOKEN: '' }, missingEnv: ['SENTRY_AUTH_TOKEN'] },
+
+  // —— 我创建的 ——
+  { id: 'hub-mcp-mes', englishId: 'mes-bridge', nameZh: 'MES 桥接', icon: '🏭', scope: 'created', type: 'http', url: 'https://mes.fab-a.internal/mcp', command: '', args: [], env: { MES_API_KEY: '' }, missingEnv: ['MES_API_KEY'] },
+  { id: 'hub-mcp-spc', englishId: 'spc-qms', nameZh: 'SPC 质控', icon: '📊', scope: 'created', type: 'http', url: 'https://spc.qms.internal/mcp', command: '', args: [], env: {} },
+  { id: 'hub-mcp-cmms', englishId: 'cmms', nameZh: '设备维保', icon: '🔧', scope: 'created', type: 'http', url: 'https://cmms.fab-a.internal/mcp', command: '', args: [], env: { CMMS_TOKEN: '' }, missingEnv: ['CMMS_TOKEN'] },
+  { id: 'hub-mcp-scada', englishId: 'scada-bridge', nameZh: 'SCADA 桥接', icon: '📡', scope: 'created', type: 'stdio', command: 'node', args: ['/opt/mcp/scada-bridge/index.js'], url: '', env: {} },
+  { id: 'hub-mcp-wms', englishId: 'wms-bridge', nameZh: 'WMS 仓储', icon: '📦', scope: 'created', type: 'http', url: 'https://wms.corp.internal/mcp', command: '', args: [], env: {} },
+  { id: 'hub-mcp-erp', englishId: 'erp-gateway', nameZh: 'ERP 网关', icon: '🏢', scope: 'created', type: 'http', url: 'https://erp.corp.internal/mcp', command: '', args: [], env: { ERP_CLIENT_SECRET: '' }, missingEnv: ['ERP_CLIENT_SECRET'] },
+  { id: 'hub-mcp-ehs', englishId: 'ehs-portal', nameZh: 'EHS 门户', icon: '🛡️', scope: 'created', type: 'http', url: 'https://ehs.fab-a.internal/mcp', command: '', args: [], env: {} },
+  { id: 'hub-mcp-agv', englishId: 'agv-fleet', nameZh: 'AGV 车队', icon: '🤖', scope: 'created', type: 'http', url: 'https://agv.fab-a.internal/mcp', command: '', args: [], env: {} },
+  { id: 'hub-mcp-mlflow', englishId: 'mlflow', nameZh: 'MLflow 实验', icon: '🧪', scope: 'created', type: 'http', url: 'https://mlflow.ai-lab.internal/mcp', command: '', args: [], env: {} },
+  { id: 'hub-mcp-energy', englishId: 'ems', nameZh: '能耗管理', icon: '⚡', scope: 'created', type: 'http', url: 'https://ems.fab-a.internal/mcp', command: '', args: [], env: {} },
+  { id: 'hub-mcp-mdm', englishId: 'mdm', nameZh: '主数据', icon: '🗂️', scope: 'created', type: 'http', url: 'https://mdm.corp.internal/mcp', command: '', args: [], env: {} },
+  { id: 'hub-mcp-chem', englishId: 'chem-inventory', nameZh: '危化品台账', icon: '⚗️', scope: 'created', type: 'stdio', command: 'node', args: ['/opt/mcp/chem-inventory/index.js', '--db', '/data/ehs/chem.db'], url: '', env: {} }
+];
+
+/**
  * DEV_MOCK 专家详情「MCP」Tab 演示数据（按专家在 EXPERTS_DATA 中的下标）。
  * 覆盖 PRD 四种状态：正常 / 未配置密钥 / 连接失败 / 已禁用。
  */
@@ -715,15 +750,53 @@ window.PROVIDER_DEFAULTS_DETAIL = {
 };
 
 /** Hub 技能目录（Mock）— 安装后默认启用，用量从 0 起算 */
+/**
+ * 平台技能库（Mock）—「从平台导入」弹窗
+ * scope: mine=我发布的 | added=我添加的 | builtin=内置
+ * 列表展示：icon + nameZh(englishId)
+ */
 window.SKILLS_HUB_CATALOG = [
-  { id: 'hub-lean-manufacturing', name: 'lean-manufacturing', category: 'manufacturing', description: '价值流图分析、七大浪费识别与改善方案', provenance: 'hub' },
-  { id: 'hub-six-sigma', name: 'six-sigma', category: 'quality', description: 'DMAIC 流程、假设检验与过程能力分析', provenance: 'hub' },
-  { id: 'hub-digital-twin', name: 'digital-twin', category: 'digital', description: '产线仿真建模与节拍优化', provenance: 'hub' },
-  { id: 'hub-predictive-quality', name: 'predictive-quality', category: 'ml', description: '基于工艺参数的良率预测与异常预警', provenance: 'hub' },
-  { id: 'hub-lean-logistics', name: 'lean-logistics', category: 'supply-chain', description: '厂内物流路径优化与线边库存设计', provenance: 'hub' },
-  { id: 'hub-energy-optimization', name: 'energy-optimization', category: 'energy', description: '能耗基线建模与节能策略推荐', provenance: 'hub' },
-  { id: 'hub-safety-risk', name: 'safety-risk', category: 'compliance', description: 'JHA 分析与 LEC 风险评估', provenance: 'hub' },
-  { id: 'hub-mes-connector', name: 'mes-connector', category: 'digital', description: '对接主流 MES 系统拉取工单与报工数据', provenance: 'hub' }
+  // —— 我发布的 ——
+  { id: 'hub-mes-connector', englishId: 'mes-connector', nameZh: 'MES 连接器', icon: '🔌', scope: 'mine', category: 'digital', description: '对接主流 MES 系统拉取工单与报工数据', provenance: 'hub' },
+  { id: 'hub-spc-dashboard', englishId: 'spc-dashboard', nameZh: 'SPC 看板', icon: '📊', scope: 'mine', category: 'quality', description: '控制图与过程能力一站式看板', provenance: 'hub' },
+  { id: 'hub-workorder-assist', englishId: 'workorder-assist', nameZh: '工单助手', icon: '📋', scope: 'mine', category: 'manufacturing', description: '工单解析、派工建议与异常催办', provenance: 'hub' },
+  { id: 'hub-shift-handover', englishId: 'shift-handover', nameZh: '交接班纪要', icon: '📝', scope: 'mine', category: 'manufacturing', description: '班次异常汇总与交接要点生成', provenance: 'hub' },
+  { id: 'hub-tooling-life', englishId: 'tooling-life', nameZh: '刀具寿命预测', icon: '🛠️', scope: 'mine', category: 'equipment', description: '基于切削参数与磨损曲线的换刀建议', provenance: 'hub' },
+  { id: 'hub-andon-router', englishId: 'andon-router', nameZh: '安灯路由', icon: '🚨', scope: 'mine', category: 'manufacturing', description: '安灯呼叫分级与责任人自动分派', provenance: 'hub' },
+  { id: 'hub-recipe-diff', englishId: 'recipe-diff', nameZh: '配方差异比对', icon: '🧪', scope: 'mine', category: 'process', description: '工艺配方版本差异高亮与风险提示', provenance: 'hub' },
+  { id: 'hub-oee-brief', englishId: 'oee-brief', nameZh: 'OEE 简报', icon: '📉', scope: 'mine', category: 'manufacturing', description: '产线 OEE 归因与改善优先级排序', provenance: 'hub' },
+  { id: 'hub-fixture-checker', englishId: 'fixture-checker', nameZh: '夹具点检', icon: '✅', scope: 'mine', category: 'equipment', description: '夹具点检清单生成与异常闭环', provenance: 'hub' },
+  { id: 'hub-lot-trace', englishId: 'lot-trace', nameZh: '批次追溯', icon: '🔍', scope: 'mine', category: 'quality', description: '批次正向/反向追溯与影响范围评估', provenance: 'hub' },
+  { id: 'hub-changeover-plan', englishId: 'changeover-plan', nameZh: '换型计划', icon: '🔄', scope: 'mine', category: 'manufacturing', description: '换型步骤编排与最短路径建议', provenance: 'hub' },
+  { id: 'hub-alarm-digest', englishId: 'alarm-digest', nameZh: '告警摘要', icon: '🔔', scope: 'mine', category: 'equipment', description: '设备告警聚合、去重与根因初筛', provenance: 'hub' },
+
+  // —— 我添加的 ——
+  { id: 'hub-lean-logistics', englishId: 'lean-logistics', nameZh: '精益物流', icon: '🚛', scope: 'added', category: 'supply-chain', description: '厂内物流路径优化与线边库存设计', provenance: 'hub' },
+  { id: 'hub-energy-optimization', englishId: 'energy-optimization', nameZh: '能耗优化', icon: '⚡', scope: 'added', category: 'energy', description: '能耗基线建模与节能策略推荐', provenance: 'hub' },
+  { id: 'hub-safety-risk', englishId: 'safety-risk', nameZh: '安全风险', icon: '🛡️', scope: 'added', category: 'compliance', description: 'JHA 分析与 LEC 风险评估', provenance: 'hub' },
+  { id: 'hub-kanban-sync', englishId: 'kanban-sync', nameZh: '看板同步', icon: '📌', scope: 'added', category: 'supply-chain', description: '拉动看板水位监控与补货触发', provenance: 'hub' },
+  { id: 'hub-supplier-score', englishId: 'supplier-score', nameZh: '供应商评分', icon: '🏷️', scope: 'added', category: 'supply-chain', description: '交期、质量与成本综合评分', provenance: 'hub' },
+  { id: 'hub-carbon-audit', englishId: 'carbon-audit', nameZh: '碳足迹核算', icon: '🌿', scope: 'added', category: 'energy', description: '工序级碳排放核算与热点识别', provenance: 'hub' },
+  { id: 'hub-sop-writer', englishId: 'sop-writer', nameZh: 'SOP 撰写', icon: '📘', scope: 'added', category: 'compliance', description: '作业指导书结构化起草与评审', provenance: 'hub' },
+  { id: 'hub-wms-bridge', englishId: 'wms-bridge', nameZh: 'WMS 桥接', icon: '📦', scope: 'added', category: 'digital', description: '仓库出入库与库位数据桥接', provenance: 'hub' },
+  { id: 'hub-defect-taxonomy', englishId: 'defect-taxonomy', nameZh: '缺陷分类法', icon: '🧩', scope: 'added', category: 'quality', description: '缺陷编码体系维护与归类建议', provenance: 'hub' },
+  { id: 'hub-line-balance', englishId: 'line-balance', nameZh: '产线平衡', icon: '⚖️', scope: 'added', category: 'manufacturing', description: '工位节拍分析与瓶颈再分配', provenance: 'hub' },
+  { id: 'hub-spare-parts', englishId: 'spare-parts', nameZh: '备件建议', icon: '🧰', scope: 'added', category: 'equipment', description: '备件安全库存与采购优先级', provenance: 'hub' },
+  { id: 'hub-audit-checklist', englishId: 'audit-checklist', nameZh: '审核清单', icon: '📑', scope: 'added', category: 'compliance', description: '内审检查项生成与证据归档', provenance: 'hub' },
+
+  // —— 内置 ——
+  { id: 'hub-lean-manufacturing', englishId: 'lean-manufacturing', nameZh: '精益制造', icon: '🏭', scope: 'builtin', category: 'manufacturing', description: '价值流图分析、七大浪费识别与改善方案', provenance: 'hub' },
+  { id: 'hub-six-sigma', englishId: 'six-sigma', nameZh: '六西格玛', icon: '📐', scope: 'builtin', category: 'quality', description: 'DMAIC 流程、假设检验与过程能力分析', provenance: 'hub' },
+  { id: 'hub-digital-twin', englishId: 'digital-twin', nameZh: '数字孪生', icon: '🧬', scope: 'builtin', category: 'digital', description: '产线仿真建模与节拍优化', provenance: 'hub' },
+  { id: 'hub-predictive-quality', englishId: 'predictive-quality', nameZh: '预测质量', icon: '📈', scope: 'builtin', category: 'ml', description: '基于工艺参数的良率预测与异常预警', provenance: 'hub' },
+  { id: 'hub-root-cause', englishId: 'root-cause', nameZh: '根因分析', icon: '🌳', scope: 'builtin', category: 'quality', description: '5Why / 鱼骨图结构化根因推导', provenance: 'hub' },
+  { id: 'hub-capacity-plan', englishId: 'capacity-plan', nameZh: '产能规划', icon: '📅', scope: 'builtin', category: 'manufacturing', description: '产能负荷测算与瓶颈产能扩展建议', provenance: 'hub' },
+  { id: 'hub-vision-inspect', englishId: 'vision-inspect', nameZh: '视觉质检', icon: '👁️', scope: 'builtin', category: 'ml', description: '外观缺陷检测与误检率评估', provenance: 'hub' },
+  { id: 'hub-process-fmea', englishId: 'process-fmea', nameZh: '过程 FMEA', icon: '⚠️', scope: 'builtin', category: 'quality', description: '过程失效模式分析与 RPN 排序', provenance: 'hub' },
+  { id: 'hub-schedule-optimize', englishId: 'schedule-optimize', nameZh: '排程优化', icon: '🗓️', scope: 'builtin', category: 'manufacturing', description: '多约束排程与交期承诺评估', provenance: 'hub' },
+  { id: 'hub-knowledge-rag', englishId: 'knowledge-rag', nameZh: '工艺知识检索', icon: '📚', scope: 'builtin', category: 'digital', description: '工艺文档检索与引用回答', provenance: 'hub' },
+  { id: 'hub-anomaly-detect', englishId: 'anomaly-detect', nameZh: '异常检测', icon: '📡', scope: 'builtin', category: 'ml', description: '时序传感器异常检测与告警降噪', provenance: 'hub' },
+  { id: 'hub-cost-breakdown', englishId: 'cost-breakdown', nameZh: '成本分解', icon: '💰', scope: 'builtin', category: 'manufacturing', description: '单位成本拆解与降本机会识别', provenance: 'hub' }
 ];
 
 /** Mock 运行中会话数：基于 expertId 稳定哈希返回 0-3 */

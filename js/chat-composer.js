@@ -13,6 +13,7 @@
       formatFileSizeFn: { type: Function, default: function (b) { return b + ' B'; } },
       modelList: { type: Array, default: function () { return []; } },
       modelOverride: { type: String, default: '' },
+      modelDisplayName: { type: String, default: '' },
       sessionCwd: { type: String, default: '' },
       tokenEstimate: { type: Number, default: 0 },
       workspaceFiles: { type: Array, default: function () { return []; } }
@@ -29,7 +30,8 @@
         pathQuery: '',
         pathSelectedIndex: 0,
         pathAnchorPos: -1,
-        modelPickerVisible: false
+        modelPickerVisible: false,
+        modelPickerTab: 'platform'
       };
     },
     computed: {
@@ -54,20 +56,30 @@
       resolvedModelList: function () {
         var list = this.modelList && this.modelList.length
           ? this.modelList
-          : (window.MODELS_CATALOG || []);
-        return list.map(function (m) {
-          return {
-            id: m.id || m.name,
-            name: m.name || m.id,
-            visibility: m.visibility || 'public',
-            capabilities: m.capabilities || (m.reasoning ? ['文本生成', '工具调用'] : ['文本生成']),
-            contextLabel: m.contextLabel || '—',
-            reasoning: !!m.reasoning
-          };
-        });
+          : (window.MODELS_CATALOG || []).map(function (m) {
+            return {
+              id: m.id || m.name,
+              name: m.name || m.id,
+              source: 'platform',
+              visibility: m.visibility || 'public',
+              capabilities: m.capabilities || (m.reasoning ? ['文本生成', '工具调用'] : ['文本生成']),
+              contextLabel: m.contextLabel || '—',
+              reasoning: !!m.reasoning,
+              config: null
+            };
+          });
+        return list;
+      },
+      platformModelList: function () {
+        return this.resolvedModelList.filter(function (m) { return m.source !== 'manual'; });
+      },
+      manualModelList: function () {
+        return this.resolvedModelList.filter(function (m) { return m.source === 'manual'; });
       },
       displayModel: function () {
-        return this.modelOverride || 'gpt-4o';
+        if (this.modelDisplayName) return this.modelDisplayName;
+        if (this.modelOverride) return this.modelOverride;
+        return 'gpt-4o';
       },
       cwdDisplay: function () {
         return this.sessionCwd || '工作空间';
@@ -321,22 +333,17 @@
                 </span>\
               </template>\
               <div class="chat-model-picker">\
-                <div class="chat-model-picker-head">\
-                  <span class="chat-model-picker-title">模型选择</span>\
-                  <span class="model-select-gear" aria-hidden="true">\
-                    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8">\
-                      <circle cx="12" cy="12" r="3"/>\
-                      <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/>\
-                    </svg>\
-                  </span>\
+                <div class="chat-model-picker-tabs" role="tablist">\
+                  <button type="button" class="chat-model-picker-tab" :class="{ \'is-active\': modelPickerTab === \'platform\' }" role="tab" :aria-selected="modelPickerTab === \'platform\'" @click="modelPickerTab = \'platform\'">平台模型</button>\
+                  <button type="button" class="chat-model-picker-tab" :class="{ \'is-active\': modelPickerTab === \'manual\' }" role="tab" :aria-selected="modelPickerTab === \'manual\'" @click="modelPickerTab = \'manual\'">手动填写的模型</button>\
                 </div>\
-                <div class="chat-model-picker-list">\
+                <div v-show="modelPickerTab === \'platform\'" class="chat-model-picker-list">\
                   <button\
-                    v-for="m in resolvedModelList"\
+                    v-for="m in platformModelList"\
                     :key="m.id"\
                     type="button"\
                     class="model-option-row chat-model-option"\
-                    :class="{ \'is-active\': m.id === displayModel }"\
+                    :class="{ \'is-active\': m.id === modelOverride }"\
                     @click="onSelectModel(m.id)">\
                     <span class="model-option-name">{{ m.name }}</span>\
                     <span class="model-option-tags">\
@@ -345,7 +352,23 @@
                     </span>\
                     <span class="model-option-ctx">{{ m.contextLabel }}</span>\
                   </button>\
-                  <div v-if="resolvedModelList.length === 0" class="chat-model-picker-empty">无匹配模型</div>\
+                  <div v-if="platformModelList.length === 0" class="chat-model-picker-empty">无匹配模型</div>\
+                </div>\
+                <div v-show="modelPickerTab === \'manual\'" class="chat-model-picker-list">\
+                  <button\
+                    v-for="m in manualModelList"\
+                    :key="m.id"\
+                    type="button"\
+                    class="model-option-row chat-model-option chat-model-option--manual"\
+                    :class="{ \'is-active\': m.id === modelOverride }"\
+                    @click="onSelectModel(m.id)">\
+                    <span class="model-option-name">{{ m.name }}</span>\
+                    <span class="model-option-tags">\
+                      <span class="model-option-tag model-option-tag--manual">手动</span>\
+                    </span>\
+                    <span class="model-option-ctx" :title="m.subTitle">{{ m.subTitle }}</span>\
+                  </button>\
+                  <div v-if="manualModelList.length === 0" class="chat-model-picker-empty">暂无手动添加的模型<br/>可在新建/编辑专家时手动填写</div>\
                 </div>\
               </div>\
             </el-popover>\

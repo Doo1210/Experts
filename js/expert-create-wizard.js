@@ -59,13 +59,11 @@
         slugEdited: false,
         description: '',
         expertise: [],
+        modelInputMode: 'platform',
         selectedModelId: '',
-        modelConfig: {
-          baseUrl: '',
-          apiKey: '',
-          model: '',
-          providerName: ''
-        }
+        modelConfig: window.emptyManualModelConfig
+          ? window.emptyManualModelConfig()
+          : { baseUrl: '', apiKey: '', model: '', providerName: '' }
       };
     }
 
@@ -242,16 +240,26 @@
         return false;
       }
       if (f.source === 'blank') {
-        if (!String(f.selectedModelId || '').trim()) {
-          ElementPlus.ElMessage.warning('请选择默认模型');
-          return false;
-        }
-        var catalogModel = window.findModelInCatalog
-          ? window.findModelInCatalog(f.selectedModelId)
-          : null;
-        if (!catalogModel) {
-          ElementPlus.ElMessage.warning('所选模型无效，请重新选择');
-          return false;
+        if (f.modelInputMode === 'manual') {
+          var manualErr = window.validateManualModelConfig
+            ? window.validateManualModelConfig(f.modelConfig)
+            : null;
+          if (manualErr) {
+            ElementPlus.ElMessage.warning(manualErr);
+            return false;
+          }
+        } else {
+          if (!String(f.selectedModelId || '').trim()) {
+            ElementPlus.ElMessage.warning('请选择默认模型');
+            return false;
+          }
+          var catalogModel = window.findModelInCatalog
+            ? window.findModelInCatalog(f.selectedModelId)
+            : null;
+          if (!catalogModel) {
+            ElementPlus.ElMessage.warning('所选模型无效，请重新选择');
+            return false;
+          }
         }
       }
       if (f.source === 'clone' && !f.cloneFrom) {
@@ -267,17 +275,28 @@
       var f = createForm.value;
       var modelConfig = null;
       if (f.source === 'blank') {
-        var selected = window.findModelInCatalog
-          ? window.findModelInCatalog(f.selectedModelId)
-          : null;
-        modelConfig = window.modelCatalogToConfig
-          ? window.modelCatalogToConfig(selected)
-          : {
-              baseUrl: (selected && selected.baseUrl) || '',
-              apiKey: '',
-              model: (selected && (selected.name || selected.id)) || f.selectedModelId,
-              providerName: (selected && selected.providerName) || ''
-            };
+        if (f.modelInputMode === 'manual') {
+          modelConfig = window.manualFormToModelConfig
+            ? window.manualFormToModelConfig(f.modelConfig, store)
+            : {
+                baseUrl: (f.modelConfig && f.modelConfig.baseUrl) || '',
+                apiKey: (f.modelConfig && f.modelConfig.apiKey) || '',
+                model: (f.modelConfig && f.modelConfig.model) || '',
+                providerName: (f.modelConfig && f.modelConfig.providerName) || ''
+              };
+        } else {
+          var selected = window.findModelInCatalog
+            ? window.findModelInCatalog(f.selectedModelId)
+            : null;
+          modelConfig = window.modelCatalogToConfig
+            ? window.modelCatalogToConfig(selected)
+            : {
+                baseUrl: (selected && selected.baseUrl) || '',
+                apiKey: '',
+                model: (selected && (selected.name || selected.id)) || f.selectedModelId,
+                providerName: (selected && selected.providerName) || ''
+              };
+        }
       }
       var expert = store.createExpert({
         slug: f.slug,
@@ -313,21 +332,7 @@
       isCloneMode: isCloneMode,
       modelFormDisabled: modelFormDisabled,
       onSelectedModelChange: function (model) {
-        if (!model) {
-          createForm.value.selectedModelId = '';
-          createForm.value.modelConfig = { baseUrl: '', apiKey: '', model: '', providerName: '' };
-          return;
-        }
-        createForm.value.selectedModelId = model.id;
-        var cfg = window.modelCatalogToConfig
-          ? window.modelCatalogToConfig(model)
-          : { baseUrl: model.baseUrl || '', apiKey: '', model: model.name || model.id, providerName: model.providerName || '' };
-        createForm.value.modelConfig = {
-          baseUrl: cfg.baseUrl || '',
-          apiKey: cfg.apiKey || '',
-          model: cfg.model || '',
-          providerName: cfg.providerName || ''
-        };
+        createForm.value.selectedModelId = model ? model.id : '';
       },
       onNameInput: onNameInput,
       onSlugInput: onSlugInput,
@@ -472,18 +477,16 @@
       '      </el-popover>',
       '    </div>',
       '    <div class="create-model-row">',
-      '      <div class="create-model-fields" :class="{ \'create-model-fields-disabled\': modelFormDisabled }">',
-      '        <model-select',
-      '          v-model="createForm.selectedModelId"',
-      '          :disabled="modelFormDisabled"',
-      '          :required="!isCloneMode"',
-      '          title="模型选择"',
-      '          placeholder="搜索或选择默认模型"',
-      '          @change="onSelectedModelChange"',
-      '        />',
-      '      </div>',
-      '      <p v-if="isCloneMode" class="form-dialog-hint">默认模型沿用自源 profile</p>',
-      '      <p v-else class="form-dialog-hint">作为专家的默认模型，对话任务未选择其他模型时使用此模型</p>',
+      '      <model-config-section',
+      '        v-model:mode="createForm.modelInputMode"',
+      '        v-model:selected-model-id="createForm.selectedModelId"',
+      '        :manual-config="createForm.modelConfig"',
+      '        :disabled="modelFormDisabled"',
+      '        :required="!isCloneMode"',
+      '        :show-mode-switch="!isCloneMode"',
+      '        :hint="isCloneMode ? \'默认模型沿用自源 profile\' : \'作为专家的默认模型，对话任务未选择其他模型时使用此模型\'"',
+      '        @platform-change="onSelectedModelChange"',
+      '      />',
       '    </div>',
       '  </div>',
       '  <template #footer>',

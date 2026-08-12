@@ -1302,16 +1302,34 @@ body {
   border-radius: 10px !important;
   box-shadow: 0 8px 24px rgba(15, 23, 42, 0.12) !important;
 }
-.chat-model-picker-head {
+.chat-model-picker-tabs {
   display: flex;
-  align-items: center;
-  gap: 6px;
+  gap: 4px;
+  padding: 2px;
   margin-bottom: 10px;
+  background: #f0f3f8;
+  border-radius: 8px;
 }
-.chat-model-picker-title {
-  font-size: 13px;
-  font-weight: 600;
+.chat-model-picker-tab {
+  flex: 1;
+  border: none;
+  background: transparent;
+  color: #606266;
+  font-size: 12px;
+  line-height: 1;
+  padding: 7px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+.chat-model-picker-tab:hover {
   color: #303133;
+}
+.chat-model-picker-tab.is-active {
+  background: #fff;
+  color: #303133;
+  font-weight: 600;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08);
 }
 .chat-model-picker-search {
   margin-bottom: 8px;
@@ -1345,6 +1363,19 @@ body {
   text-align: center;
   font-size: 12px;
   color: #909399;
+  line-height: 1.6;
+}
+.chat-model-option--manual .model-option-ctx {
+  max-width: 240px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #909399;
+}
+.model-option-tag--manual {
+  background: #fdf6ec;
+  color: #e6a23c;
+  border-color: #f5dab1;
 }
 .task-remote-error {
   margin: 0 12px 10px;
@@ -8613,6 +8644,71 @@ body {
   pointer-events: none;
 }
 
+/* === 默认模型：平台选择 / 手动填写 === */
+.model-config-section {
+  width: 100%;
+}
+.model-config-section.is-disabled {
+  opacity: 0.6;
+  pointer-events: none;
+}
+.model-config-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+.model-config-section-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: #303133;
+}
+.model-config-mode-switch {
+  display: inline-flex;
+  padding: 2px;
+  border-radius: 8px;
+  background: #f0f3f8;
+  gap: 2px;
+}
+.model-config-mode-btn {
+  border: none;
+  background: transparent;
+  color: #606266;
+  font-size: 12px;
+  line-height: 1;
+  padding: 6px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+.model-config-mode-btn:hover:not(:disabled) {
+  color: #303133;
+}
+.model-config-mode-btn.is-active {
+  background: #fff;
+  color: #303133;
+  font-weight: 600;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08);
+}
+.model-config-mode-btn:disabled {
+  cursor: not-allowed;
+}
+.model-config-manual-form .el-form-item {
+  margin-bottom: 14px;
+}
+.model-config-manual-form .el-form-item:last-child {
+  margin-bottom: 0;
+}
+.model-config-field-label {
+  font-size: 13px;
+  color: #606266;
+}
+.model-config-hint {
+  margin: 12px 0 0;
+}
+
 /* === 模型选择下拉 === */
 .model-select-wrap {
   width: 100%;
@@ -8912,6 +9008,89 @@ body {
   font-size: 13px;
   color: var(--text-secondary, #606266);
   margin-bottom: 8px;
+}
+.hub-skill-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 2px;
+  margin-bottom: 12px;
+  background: #f0f3f8;
+  border-radius: 8px;
+}
+.hub-skill-tab {
+  flex: 1;
+  border: none;
+  background: transparent;
+  color: #606266;
+  font-size: 13px;
+  line-height: 1;
+  padding: 8px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, box-shadow 0.15s;
+}
+.hub-skill-tab:hover { color: #303133; }
+.hub-skill-tab.is-active {
+  background: #fff;
+  color: #303133;
+  font-weight: 600;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08);
+}
+.hub-skill-cell {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.hub-skill-icon {
+  flex: 0 0 auto;
+  width: 32px;
+  height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  background: #f5f7fb;
+  border: 1px solid var(--border, #e5e7eb);
+  font-size: 16px;
+  line-height: 1;
+}
+.hub-skill-title {
+  min-width: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary, #303133);
+  line-height: 1.4;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.hub-skill-eid {
+  margin-left: 2px;
+  font-weight: 500;
+  color: var(--text-secondary, #909399);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+}
+.hub-skill-table .el-table__cell {
+  padding-top: 10px;
+  padding-bottom: 10px;
+}
+.hub-skill-table .el-table__body-wrapper {
+  overflow-y: auto;
+}
+.hub-dialog-footer {
+  justify-content: space-between;
+  gap: 12px;
+}
+.hub-selected-count {
+  font-size: 13px;
+  color: var(--text-secondary, #606266);
+  line-height: 1.4;
+}
+.hub-selected-count strong {
+  color: var(--primary, #4080ff);
+  font-weight: 700;
 }
 
 /* === 专家详情页弹窗美化 === */

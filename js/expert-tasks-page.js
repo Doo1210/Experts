@@ -91,6 +91,8 @@
         };
       });
       var sessionModelOverride = Vue.ref('');
+      var sessionModelConfigOverride = Vue.ref(null);
+      var sessionModelDisplayName = Vue.ref('');
       var tokenEstimate = Vue.computed(function () {
         var t = inputText.value || '';
         var n = Math.ceil(t.length / 4);
@@ -141,8 +143,57 @@
           };
         });
       });
+      // 模型选择列表：平台模型 + 各专家手动填写过的模型（去重汇总）
+      function manualModelId(baseUrl, model) {
+        return 'manual::' + String(baseUrl || '').trim() + '::' + String(model || '').trim();
+      }
       var modelList = Vue.computed(function () {
-        return (window.MODELS_CATALOG || []).slice();
+        var list = [];
+        (window.MODELS_CATALOG || []).forEach(function (m) {
+          list.push({
+            id: m.id || m.name,
+            name: m.name || m.id,
+            source: 'platform',
+            visibility: m.visibility || 'public',
+            capabilities: m.capabilities || (m.reasoning ? ['文本生成', '工具调用'] : ['文本生成']),
+            contextLabel: m.contextLabel || '—',
+            reasoning: !!m.reasoning,
+            config: null
+          });
+        });
+        var seen = {};
+        (store.getExperts ? store.getExperts() : []).forEach(function (ex) {
+          var mc = ex && ex.modelConfig;
+          if (!mc) return;
+          var mode = window.inferModelInputMode
+            ? window.inferModelInputMode(mc, mc.model)
+            : 'platform';
+          if (mode !== 'manual') return;
+          var baseUrl = String(mc.baseUrl || '').trim();
+          var model = String(mc.model || '').trim();
+          if (!baseUrl || !model) return;
+          var id = manualModelId(baseUrl, model);
+          if (seen[id]) return;
+          seen[id] = true;
+          list.push({
+            id: id,
+            name: model,
+            source: 'manual',
+            visibility: 'manual',
+            capabilities: [],
+            contextLabel: (mc.providerName || '').trim() || '手动',
+            reasoning: false,
+            config: {
+              providerSlug: mc.providerSlug || 'custom',
+              providerName: mc.providerName || '',
+              baseUrl: baseUrl,
+              apiKey: mc.apiKey || '',
+              model: model
+            },
+            subTitle: (mc.providerName || '').trim() + ' · ' + baseUrl
+          });
+        });
+        return list;
       });
       var showExpertPreviewDialog = Vue.ref(false);
       var previewStats = Vue.ref({ tasks: 0, projects: 0, skills: 0, tools: 0 });
@@ -825,7 +876,11 @@
         showLocalMessages();
         refreshTasks();
         if (store.sendTaskMessageRemote) {
-          store.sendTaskMessageRemote(props.expertId, taskId, text || '').then(function (resp) {
+          var sendOpts = {};
+          if (sessionModelConfigOverride.value) {
+            sendOpts.modelConfig = sessionModelConfigOverride.value;
+          }
+          store.sendTaskMessageRemote(props.expertId, taskId, text || '', sendOpts).then(function (resp) {
             if (!resp) {
               if (!store.isDevMock || !store.isDevMock()) {
                 remoteError.value = sidecarErrorMessage('消息发送失败');
@@ -1006,9 +1061,20 @@
 
       function handleSelectModel(modelId) {
         if (!modelId) return;
+        var found = null;
+        var list = modelList.value || [];
+        for (var i = 0; i < list.length; i++) {
+          if (list[i].id === modelId) { found = list[i]; break; }
+        }
         sessionModelOverride.value = modelId;
-        sessionModel.value = modelId;
-        ElementPlus.ElMessage.success('模型已切换为 ' + modelId + '，下一回合生效');
+        sessionModel.value = found ? found.name : modelId;
+        sessionModelDisplayName.value = found ? found.name : modelId;
+        if (found && found.source === 'manual' && found.config) {
+          sessionModelConfigOverride.value = Object.assign({}, found.config);
+        } else {
+          sessionModelConfigOverride.value = null;
+        }
+        ElementPlus.ElMessage.success('模型已切换为 ' + (found ? found.name : modelId) + '，下一回合生效');
       }
 
       function handleSelectCwd(cwd) {
@@ -1122,6 +1188,8 @@
         expertStatusLabel: expertStatusLabel,
         activeHitl: activeHitl,
         sessionModelOverride: sessionModelOverride,
+        sessionModelConfigOverride: sessionModelConfigOverride,
+        sessionModelDisplayName: sessionModelDisplayName,
         sessionCwd: sessionCwd,
         tokenEstimate: tokenEstimate,
         modelList: modelList,
@@ -1262,6 +1330,7 @@
             :remote-error="remoteError"\
             :format-file-size-fn="formatFileSize"\
             :model-override="sessionModelOverride"\
+            :model-display-name="sessionModelDisplayName"\
             :model-list="modelList"\
             :session-cwd="sessionCwd"\
             :token-estimate="tokenEstimate"\

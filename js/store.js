@@ -3344,7 +3344,7 @@
       }
       var entry = catalogEntryToInstalled({
         id: sid,
-        name: (skill && skill.name) || sid,
+        name: (skill && (skill.nameZh || skill.name)) || sid,
         description: (skill && skill.description) || '',
         category: (skill && skill.category) || '',
         provenance: source

@@ -781,6 +781,7 @@
   app.component('back-link', window.BackLink);
   app.component('app-sidebar', window.AppSidebar);
   app.component('model-select', window.ModelSelect);
+  app.component('model-config-section', window.ModelConfigSection);
   app.component('expert-edit-dialog', window.ExpertEditDialog);
   app.component('expert-edit-page-dialog', window.ExpertEditPageDialog);
   app.component('expert-create-page-dialog', window.ExpertCreatePageDialog);
