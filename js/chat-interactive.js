@@ -1,7 +1,7 @@
 /**
  * 对话交互块组件集合
- * 包含：SubagentCard（委派事件容器） / ClarifyCard / ApprovalCard
- * 依赖：window.ChatBlocks.ActivityItem
+ * 包含：SubagentCard / ClarifyCard / ApprovalCard / ExpertTurnFlow
+ * 依赖：window.ChatBlocks.ActivityItem / ProcessTrace
  * 加载顺序：必须在 chat-blocks.js 之后
  */
 (function () {
@@ -317,10 +317,57 @@
       </div>'
   };
 
+  /**
+   * 专家回合内容流：过程折叠轨 + 回复 / HITL / 错误行
+   * segments 来自 ChatBlocks.segmentExpertTurn
+   */
+  var ExpertTurnFlow = {
+    props: {
+      segments: { type: Array, default: function () { return []; } },
+      renderMarkdown: { type: Function, default: null }
+    },
+    components: {
+      ProcessTrace: (window.ChatBlocks || {}).ProcessTrace,
+      ActivityItem: ActivityItem,
+      ReplyBlock: ReplyBlock,
+      StatusLine: (window.ChatBlocks || {}).StatusLine,
+      ErrorRow: (window.ChatBlocks || {}).ErrorRow,
+      SubagentCard: SubagentCard,
+      HitlCard: HitlCard
+    },
+    methods: {
+      actionStatus: (window.ChatBlocks || {}).actionItemStatus || function () { return 'success'; }
+    },
+    template: '\
+      <div class="expert-turn-flow">\
+      <template v-for="seg in segments" :key="seg.id">\
+        <process-trace\
+          v-if="seg.kind === \'process\'"\
+          :live="!!seg.live"\
+          :duration="seg.duration"\
+          :current-label="seg.currentLabel || \'\'">\
+          <template v-for="item in seg.items" :key="item.id">\
+            <activity-item v-if="item.type === \'thought\'" kind="thought" :status="item.live ? \'thinking\' : \'success\'" :content="item.content" :duration="item.duration" :live="!!item.live" :open="!!item.live" />\
+            <activity-item v-else-if="item.type === \'action\'" kind="tool" :status="actionStatus(item)" :title="item.toolName" :summary="item.summary" :result="item.result" :params="item.params" :content="item.content" :duration="item.duration" :live="!!item.live" />\
+            <subagent-card v-else-if="item.type === \'subagent\'" :subagent-name="item.subagentName" :goal="item.goal" :status="item.subagentStatus || \'success\'" :duration="item.subagentDuration" :summary="item.subagentSummary" :events="item.subagentEvents" :render-markdown="renderMarkdown" />\
+            <status-line v-else-if="item.type === \'status\'" :kind="item.statusKind" :content="item.content" />\
+          </template>\
+        </process-trace>\
+        <template v-else-if="seg.item">\
+          <hitl-card v-if="seg.item.type === \'clarify\' && seg.item.answer != null" variant="clarify" :data="seg.item" mode="resolved" />\
+          <hitl-card v-else-if="seg.item.type === \'approval\' && seg.item.choice != null" variant="approval" :data="seg.item" mode="resolved" />\
+          <error-row v-else-if="seg.item.type === \'error\'" :content="seg.item.content" />\
+          <reply-block v-else-if="seg.item.type !== \'clarify\' && seg.item.type !== \'approval\'" :content="seg.item.content" :render-markdown="renderMarkdown" :attachments="seg.item.attachments" :live="!!seg.item.live" />\
+        </template>\
+      </template>\
+      </div>'
+  };
+
   window.ChatInteractive = {
     SubagentCard: SubagentCard,
     HitlCard: HitlCard,
     ClarifyCard: ClarifyCard,
-    ApprovalCard: ApprovalCard
+    ApprovalCard: ApprovalCard,
+    ExpertTurnFlow: ExpertTurnFlow
   };
 })();

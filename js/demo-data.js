@@ -2,7 +2,7 @@
  * 演示数据 — 专家对话任务剧本（按专家 id 索引）。
  * 修改剧本后请同步递增 DEMO_DATA_VERSION，触发一次性重新同步。
  */
-window.DEMO_DATA_VERSION = 6;
+window.DEMO_DATA_VERSION = 10;
 
 window.DEMO_DIALOGUE_TASK_BUNDLES = {
       '1': [
@@ -416,16 +416,25 @@ window.DEMO_DIALOGUE_TASK_BUNDLES = {
           daysAgo: 0, hour: 10, minute: 0,
           messages: [
             { role: 'user', content: '请演示所有对话内容块类型', offsetMin: 0 },
-            { role: 'expert', type: 'thought', content: '收到，我将依次展示思考过程、工具调用、状态变更、子智能体委派、澄清提问、操作审批等全部内容块。', offsetMin: 1 },
+            { role: 'expert', type: 'thought', content: '收到，我将依次展示思考过程、多次工具调用、状态变更、子智能体委派、澄清提问、操作审批。多次过程明细应收进同一条折叠轨，避免把回复顶下去。', duration: 8.4, offsetMin: 1 },
+            { role: 'expert', type: 'action', toolName: 'search_files', params: { query: '工位8 产能', glob: '**/*.{md,json}' }, summary: '定位到 6 个相关文件', duration: 0.9, content: '[search_files] 执行完成 (0.9s)', offsetMin: 1 },
+            { role: 'expert', type: 'action', toolName: 'skill_view', params: { skill: 'mes-query' }, summary: '技能清单接口返回 410 Gone', duration: 0.4, isError: true, content: '[skill_view] 执行失败 (0.4s)', offsetMin: 1 },
+            { role: 'expert', type: 'action', toolName: 'terminal', params: { command: 'ls workspace/station-8' }, summary: '列出工位8目录 12 个文件', duration: 0.6, content: '[terminal] 执行完成 (0.6s)', offsetMin: 2 },
+            { role: 'expert', type: 'action', toolName: 'read_file', params: { path: 'workspace/station-8/README.md' }, summary: '读取工位说明 1.8k 字', duration: 0.3, content: '[read_file] 执行完成 (0.3s)', offsetMin: 2 },
+            { role: 'expert', type: 'action', toolName: 'search_files', params: { query: 'MES endpoint' }, summary: '未找到可用 MCP 配置', duration: 0.5, content: '[search_files] 执行完成 (0.5s)', offsetMin: 2 },
+            { role: 'expert', type: 'action', toolName: 'terminal', params: { command: 'cat config/mcp.yaml' }, summary: '确认 Bing 中文搜索端点已失效', duration: 0.4, content: '[terminal] 执行完成 (0.4s)', offsetMin: 2 },
+            { role: 'expert', type: 'action', toolName: 'web_search', params: { q: '工位8 视觉检测节拍' }, summary: '检索到 5 条公开资料', duration: 1.6, content: '[web_search] 执行完成 (1.6s)', offsetMin: 3 },
+            { role: 'expert', type: 'action', toolName: 'read_file', params: { path: 'workspace/station-8/cycle-time.csv' }, summary: '读取近 14 天节拍数据', duration: 0.5, content: '[read_file] 执行完成 (0.5s)', offsetMin: 3 },
+            { role: 'expert', type: 'action', toolName: 'terminal', params: { command: 'python scripts/summarize_cycle.py' }, summary: '汇总平均节拍 45.2s', duration: 1.1, content: '[terminal] 执行完成 (1.1s)', offsetMin: 3 },
             { role: 'expert', type: 'action', toolName: 'MES 数据查询', params: { query: '工位8产能', source: 'MES 实时库' }, summary: '检索到 3 条记录并完成聚合', duration: 1.8, content: '[MES 数据查询] 执行完成 (1.8s)', offsetMin: 3 },
-            { role: 'expert', type: 'chat', content: '以上是**正常工具调用流程**：包含思考过程、状态行、工具卡片（含参数/摘要/时长）。\n\n下面演示错误流程。', offsetMin: 4 },
+            { role: 'expert', type: 'chat', content: '以上是**正常工具调用流程**：思考与多次工具调用已收进「处理完成」折叠轨，默认只占一行；点开可查看每一步明细。\n\n下面演示错误流程。', offsetMin: 4 },
             { role: 'user', content: '继续演示错误流程', offsetMin: 6 },
-            { role: 'expert', type: 'thought', content: '模拟工具调用失败的场景，展示错误态工具卡片与错误行。', offsetMin: 7 },
+            { role: 'expert', type: 'thought', content: '模拟工具调用失败的场景，展示错误态工具卡片与错误行。', duration: 0.8, offsetMin: 7 },
             { role: 'expert', type: 'action', toolName: 'MES 数据查询', params: { query: '历史归档数据', source: '归档库' }, summary: '连接数据源超时（30s）', duration: 30.0, isError: true, content: '[MES 数据查询] 执行失败 (30.0s)', offsetMin: 9 },
             { role: 'expert', type: 'error', content: '工具执行失败：连接数据源超时，已重试 2 次。', offsetMin: 10 },
             { role: 'expert', type: 'chat', content: '以上是**错误流程**：工具卡片显示红色错误态（⚠ 执行失败），下方紧跟错误行。\n\n下面演示子智能体委派。', offsetMin: 11 },
             { role: 'user', content: '继续演示子智能体委派', offsetMin: 13 },
-            { role: 'expert', type: 'thought', content: '将复杂子任务委派给子智能体处理，子智能体内部也会产生思考、工具调用和回复。', offsetMin: 14 },
+            { role: 'expert', type: 'thought', content: '将复杂子任务委派给子智能体处理，子智能体内部也会产生思考、工具调用和回复。', duration: 0.6, offsetMin: 14 },
             { role: 'expert', type: 'subagent', subagentName: 'research-sub-agent', goal: '收集工位8近30天产能数据并分析趋势', subagentStatus: 'success', subagentDuration: 45, subagentSummary: '发现 3 个异常时段，主要集中在凌晨班次；产能日均提升 3.2%。', subagentEvents: [
               { id: 'sa-1', type: 'thought', content: '定位数据源并提取关键信息。', duration: 0.8 },
               { id: 'sa-2', type: 'action', toolName: 'web_search', params: { q: '工位8产能趋势' }, summary: '检索到 5 条相关结果', duration: 2.3, content: '[web_search] 执行完成 (2.3s)' },
@@ -433,14 +442,75 @@ window.DEMO_DIALOGUE_TASK_BUNDLES = {
             ], offsetMin: 16 },
             { role: 'expert', type: 'chat', content: '以上是**子智能体流程**：子智能体卡片内嵌套了思考、工具调用和回复。\n\n下面演示人机交互（HITL）流程。', offsetMin: 17 },
             { role: 'user', content: '继续演示 HITL 交互', offsetMin: 19 },
-            { role: 'expert', type: 'thought', content: '需要用户澄清分析维度，并在执行危险操作前请求审批。', offsetMin: 20 },
-            { role: 'expert', type: 'clarify', requestId: 'demo-clarify-1', question: '请确认您希望分析的维度：', choices: ['按时间趋势', '按地域分布', '按产品类别'], answer: '按时间趋势', offsetMin: 21 },
-            { role: 'expert', type: 'action', toolName: '数据查询', params: { dimension: '按时间趋势' }, summary: '按时间趋势完成分析', duration: 1.5, content: '[数据查询] 执行完成 (1.5s)', offsetMin: 22 },
-            { role: 'expert', type: 'approval', requestId: 'demo-approval-1', command: 'export_report --format=xlsx', description: '将分析结果导出为 Excel 并写入工作空间', allowPermanent: true, choice: 'allow', offsetMin: 23 },
-            { role: 'expert', type: 'chat', content: '已完成全部内容块演示。\n\n**阶段0**：思考过程 / 工具卡片 / 用户消息 / 专家回复\n**阶段1**：状态行 / 错误行 / 子智能体卡片 / 澄清卡片 / 审批卡片\n\n点击各卡片可展开查看详情。', offsetMin: 24 }
+            { role: 'expert', type: 'thought', content: '先核对现有资料。分析维度不唯一，需要用户确认后再继续。', duration: 0.6, offsetMin: 20 },
+            { role: 'expert', type: 'action', toolName: 'search_files', params: { query: '工位8 分析维度' }, summary: '定位到 3 个相关文件', duration: 0.6, content: '[search_files] 执行完成 (0.6s)', offsetMin: 20 },
+            { role: 'expert', type: 'action', toolName: 'read_file', params: { path: 'workspace/station-8/README.md' }, summary: '读取工位说明 1.8k 字', duration: 0.4, content: '[read_file] 执行完成 (0.4s)', offsetMin: 21 },
+            { role: 'expert', type: 'chat', content: '资料能对上，但可以从时间、地域或产品类别切入。请先选一个分析维度。', offsetMin: 22 },
+            { role: 'expert', type: 'clarify', requestId: 'demo-clarify-1', question: '请确认您希望分析的维度：', choices: ['按时间趋势', '按地域分布', '按产品类别'], answer: '按时间趋势', offsetMin: 23 },
+            { role: 'expert', type: 'thought', content: '维度已确认，按时间趋势查询后准备导出。', duration: 0.5, offsetMin: 24 },
+            { role: 'expert', type: 'action', toolName: '数据查询', params: { dimension: '按时间趋势' }, summary: '按时间趋势完成分析', duration: 1.5, content: '[数据查询] 执行完成 (1.5s)', offsetMin: 25 },
+            { role: 'expert', type: 'chat', content: '已按时间趋势完成分析，共 3 条记录。接下来会导出 Excel 到工作空间，需确认后执行。', offsetMin: 26 },
+            { role: 'expert', type: 'approval', requestId: 'demo-approval-1', command: 'export_report --format=xlsx', description: '将分析结果导出为 Excel 并写入工作空间', allowPermanent: true, choice: 'allow', offsetMin: 27 },
+            { role: 'expert', type: 'chat', content: '已完成全部内容块演示。\n\n**过程轨**：连续思考 / 工具 / 子智能体收进「处理完成」，回复始终露在外面。\n**HITL**：澄清、审批出现前也会先有思考、工具和说明。\n\n点击「处理完成」可展开过程明细。', offsetMin: 28 },
+            { role: 'user', content: '继续演示分阶段输出', offsetMin: 30 },
+            { role: 'expert', type: 'thought', content: '先核对工位8现有资料，确认节拍事实后再下结论。', duration: 0.8, offsetMin: 31 },
+            { role: 'expert', type: 'action', toolName: 'search_files', params: { query: '工位8 节拍' }, summary: '定位到 3 个相关文件', duration: 0.6, content: '[search_files] 执行完成 (0.6s)', offsetMin: 31 },
+            { role: 'expert', type: 'action', toolName: 'read_file', params: { path: 'workspace/station-8/README.md' }, summary: '读取工位说明 1.8k 字', duration: 0.4, content: '[read_file] 执行完成 (0.4s)', offsetMin: 32 },
+            { role: 'expert', type: 'chat', content: '先同步已核对到的事实：工位8当前节拍 45s，主要检螺丝漏拧和标签偏位。下一步会拉近 14 天运行数据，再给出相机选型建议。', offsetMin: 33 },
+            { role: 'expert', type: 'thought', content: '事实已对齐，开始聚合运行数据并形成最终建议。', duration: 0.6, offsetMin: 34 },
+            { role: 'expert', type: 'action', toolName: 'terminal', params: { command: 'python scripts/summarize_cycle.py' }, summary: '汇总平均节拍 45.2s', duration: 1.1, content: '[terminal] 执行完成 (1.1s)', offsetMin: 35 },
+            { role: 'expert', type: 'action', toolName: 'MES 数据查询', params: { query: '工位8产能', source: 'MES 实时库' }, summary: '检索到 3 条记录并完成聚合', duration: 1.4, content: '[MES 数据查询] 执行完成 (1.4s)', offsetMin: 35 },
+            { role: 'expert', type: 'chat', content: '综合结论：200 万像素方案检测耗时约 8s，占用节拍 18%，建议采用；500 万方案约 14s，存在超时风险。\n\n以上是**分阶段输出**：处理 → 中途说明 → 再处理 → 最终结果。', offsetMin: 36 },
+            { role: 'user', content: '继续演示过程内多轮思考', offsetMin: 38 },
+            { role: 'expert', type: 'thought', content: '先看工位8有哪些现成资料，再决定下一步查什么。', duration: 0.6, offsetMin: 39 },
+            { role: 'expert', type: 'action', toolName: 'search_files', params: { query: '工位8 节拍' }, summary: '定位到 3 个相关文件', duration: 0.6, content: '[search_files] 执行完成 (0.6s)', offsetMin: 39 },
+            { role: 'expert', type: 'thought', content: '文件清单不够，需要读现场说明并跑节拍汇总。', duration: 0.5, offsetMin: 40 },
+            { role: 'expert', type: 'action', toolName: 'read_file', params: { path: 'workspace/station-8/README.md' }, summary: '读取工位说明 1.8k 字', duration: 0.4, content: '[read_file] 执行完成 (0.4s)', offsetMin: 40 },
+            { role: 'expert', type: 'action', toolName: 'terminal', params: { command: 'python scripts/summarize_cycle.py' }, summary: '汇总平均节拍 45.2s', duration: 1.0, content: '[terminal] 执行完成 (1.0s)', offsetMin: 41 },
+            { role: 'expert', type: 'thought', content: '脚本结果还缺 MES 对照，补一次查询后即可下结论。', duration: 0.5, offsetMin: 42 },
+            { role: 'expert', type: 'action', toolName: 'MES 数据查询', params: { query: '工位8产能', source: 'MES 实时库' }, summary: '检索到 3 条记录并完成聚合', duration: 1.3, content: '[MES 数据查询] 执行完成 (1.3s)', offsetMin: 42 },
+            { role: 'expert', type: 'chat', content: '已完成多轮核对：资料、脚本与 MES 结果一致，节拍按 45.2s 计即可。\n\n以上是**过程内多轮**：思考 → 工具 → 再思考 → 再工具，全部收在同一条「处理完成」里。\n\n模拟触发词（按先后命中）：\n- **分步 / 分段 / 中途 / 先说** → 处理 → 中途输出 → 再处理 → 最终回复\n- **反复 / 交替 / 再想 / 多轮** → 思考 → 工具 → 再思考 → 再工具 → 回复\n- **思考 / 推理** → 仅思考后回复\n- **查询 / 检索 / 工具** → 多次工具调用后回复\n- **子智能体 / 委派** → 子智能体流程\n- **错误 / 失败** → 工具失败\n- **澄清** → 处理 → 说明 → 澄清卡片\n- **审批 / 确认** → 处理 → 说明 → 审批卡片', offsetMin: 43 }
           ],
           artifacts: [
             { title: '内容块演示报告', content: '本任务演示了阶段0与阶段1的全部对话内容块类型，包括工具参数、执行时长、错误状态、子智能体嵌套事件、HITL 交互闭环。', type: 'report' }
+          ]
+        },
+        {
+          title: '分阶段分析工位8节拍',
+          status: 'pending',
+          daysAgo: 0, hour: 11, minute: 20,
+          messages: [
+            { role: 'user', content: '请分步评估工位8视觉检测方案，先核对现状再给结论。', offsetMin: 0 },
+            { role: 'expert', type: 'thought', content: '先核对工位8现有资料与节拍约束，确认事实后再做选型结论。', duration: 0.9, offsetMin: 1 },
+            { role: 'expert', type: 'action', toolName: 'search_files', params: { query: '工位8 节拍 相机' }, summary: '定位到 3 个相关文件', duration: 0.6, content: '[search_files] 执行完成 (0.6s)', offsetMin: 1 },
+            { role: 'expert', type: 'action', toolName: 'read_file', params: { path: 'workspace/station-8/README.md' }, summary: '读取工位说明 1.8k 字', duration: 0.4, content: '[read_file] 执行完成 (0.4s)', offsetMin: 2 },
+            { role: 'expert', type: 'chat', content: '先同步已核对到的事实：\n\n- 当前节拍 **45s**\n- 检测对象：螺丝漏拧、标签偏位\n- 视野约 120×80mm\n\n资料齐了，接下来会拉近 14 天运行数据，再比较 200 万 / 500 万像素方案。', offsetMin: 3 },
+            { role: 'expert', type: 'thought', content: '事实已对齐，开始聚合运行数据并给出选型建议。', duration: 0.6, offsetMin: 4 },
+            { role: 'expert', type: 'action', toolName: 'terminal', params: { command: 'python scripts/summarize_cycle.py' }, summary: '汇总平均节拍 45.2s', duration: 1.1, content: '[terminal] 执行完成 (1.1s)', offsetMin: 5 },
+            { role: 'expert', type: 'action', toolName: 'MES 数据查询', params: { query: '工位8产能', source: 'MES 实时库' }, summary: '检索到 3 条记录并完成聚合', duration: 1.4, content: '[MES 数据查询] 执行完成 (1.4s)', offsetMin: 5 },
+            { role: 'expert', type: 'chat', content: '综合结论：\n\n- **200 万像素**：检测约 8s，占用节拍 18%，建议采用\n- **500 万像素**：检测约 14s，高峰存在超时风险\n\n建议先按 200 万方案做 25 片首件验证，确认漏检率后再扩线。', offsetMin: 6 }
+          ],
+          artifacts: [
+            { title: '工位8相机选型备忘', content: '200万方案占用节拍 18%；500万方案约 14s，存在超时风险。建议先做 25 片首件验证。', type: 'report' }
+          ]
+        },
+        {
+          title: '多轮核对工位8节拍数据',
+          status: 'pending',
+          daysAgo: 0, hour: 12, minute: 10,
+          messages: [
+            { role: 'user', content: '请反复核对工位8节拍数据，资料不够就再查。', offsetMin: 0 },
+            { role: 'expert', type: 'thought', content: '先看工位8有哪些现成资料，再决定下一步查什么。', duration: 0.6, offsetMin: 1 },
+            { role: 'expert', type: 'action', toolName: 'search_files', params: { query: '工位8 节拍' }, summary: '定位到 3 个相关文件', duration: 0.6, content: '[search_files] 执行完成 (0.6s)', offsetMin: 1 },
+            { role: 'expert', type: 'thought', content: '文件清单不够，需要读现场说明并跑节拍汇总。', duration: 0.5, offsetMin: 2 },
+            { role: 'expert', type: 'action', toolName: 'read_file', params: { path: 'workspace/station-8/README.md' }, summary: '读取工位说明 1.8k 字', duration: 0.4, content: '[read_file] 执行完成 (0.4s)', offsetMin: 2 },
+            { role: 'expert', type: 'action', toolName: 'terminal', params: { command: 'python scripts/summarize_cycle.py' }, summary: '汇总平均节拍 45.2s', duration: 1.0, content: '[terminal] 执行完成 (1.0s)', offsetMin: 3 },
+            { role: 'expert', type: 'thought', content: '脚本结果还缺 MES 对照，补一次查询后即可下结论。', duration: 0.5, offsetMin: 4 },
+            { role: 'expert', type: 'action', toolName: 'MES 数据查询', params: { query: '工位8产能', source: 'MES 实时库' }, summary: '检索到 3 条记录并完成聚合', duration: 1.3, content: '[MES 数据查询] 执行完成 (1.3s)', offsetMin: 4 },
+            { role: 'expert', type: 'chat', content: '已完成多轮核对：现场说明、节拍脚本与 MES 记录一致，工位8按 **45.2s** 计即可。', offsetMin: 5 }
+          ],
+          artifacts: [
+            { title: '工位8节拍核对纪要', content: '资料、脚本与 MES 一致，工位8平均节拍 45.2s。', type: 'data' }
           ]
         },
         {

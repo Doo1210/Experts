@@ -405,9 +405,13 @@
         if (messages[j].type && messages[j].type !== 'chat') break;
       }
       if (inject) {
+        var q = String(m.content || '').slice(0, 18) || '相关记录';
         out.push(
-          { role: 'expert', type: 'thought', content: 'Thought: 明确问题边界，梳理所需数据来源与分析路径。' },
-          { role: 'expert', type: 'action', toolName: cap.tool, params: { source: '内部知识库' }, summary: '检索到 3 条相关记录并完成聚合', duration: 1.8 }
+          { role: 'expert', type: 'thought', content: 'Thought: 明确问题边界，梳理所需数据来源与分析路径。', duration: 1.2 },
+          { role: 'expert', type: 'action', toolName: 'search_files', params: { query: q }, summary: '定位到 4 个相关文件', duration: 0.7, content: '[search_files] 执行完成 (0.7s)' },
+          { role: 'expert', type: 'action', toolName: 'read_file', params: { path: 'docs/context.md' }, summary: '读取上下文 2.1k 字', duration: 0.4, content: '[read_file] 执行完成 (0.4s)' },
+          { role: 'expert', type: 'action', toolName: cap.tool, params: { source: '内部知识库', query: q }, summary: '检索到 3 条相关记录并完成聚合', duration: 1.8, content: '[' + cap.tool + '] 执行完成 (1.8s)' },
+          { role: 'expert', type: 'action', toolName: 'terminal', params: { command: 'ls workspace' }, summary: '列出工作目录 12 个文件', duration: 0.6, content: '[terminal] 执行完成 (0.6s)' }
         );
       }
     }
@@ -4882,14 +4886,27 @@
       return a;
     },
 
+    /**
+     * 模拟剧本触发词（按顺序命中，先匹配先生效）
+     */
+    mockScriptTriggers: [
+      { kind: 'phased', pattern: /分步|分段|中途|先说|边做边说|分阶段|穿插/, label: '分步 / 分段 / 中途 / 先说', desc: '处理 → 中途输出 → 再处理 → 最终回复' },
+      { kind: 'loop', pattern: /反复|交替|再想|多轮|边想边调|继续查/, label: '反复 / 交替 / 再想 / 多轮', desc: '思考 → 工具 → 再思考 → 再工具 → 回复' },
+      { kind: 'error', pattern: /错误|失败|报错|异常/, label: '错误 / 失败 / 报错', desc: '工具失败' },
+      { kind: 'thought', pattern: /思考|think|推理|思路/, label: '思考 / 推理', desc: '仅思考后回复' },
+      { kind: 'tool', pattern: /调用工具|工具|查询|检索|tool/, label: '查询 / 检索 / 工具', desc: '多次工具调用后回复' },
+      { kind: 'subagent', pattern: /子智能体|复杂|委派|subagent/i, label: '子智能体 / 委派', desc: '子智能体流程' },
+      { kind: 'clarify', pattern: /澄清|clarify/, label: '澄清', desc: '处理 → 说明 → 澄清卡片' },
+      { kind: 'approval', pattern: /审批|确认|approval/, label: '审批 / 确认', desc: '处理 → 说明 → 审批卡片' }
+    ],
+
     resolveMockScript: function (text) {
       var t = String(text || '');
-      if (/错误|失败|报错|异常/.test(t)) return 'error';
-      if (/思考|think|推理|思路/.test(t)) return 'thought';
-      if (/调用工具|工具|查询|检索|tool/.test(t)) return 'tool';
-      if (/子智能体|复杂|委派|subagent/i.test(t)) return 'subagent';
-      if (/澄清|clarify/.test(t)) return 'clarify';
-      if (/审批|确认|approval/.test(t)) return 'approval';
+      var list = this.mockScriptTriggers || [];
+      var i;
+      for (i = 0; i < list.length; i++) {
+        if (list[i].pattern && list[i].pattern.test(t)) return list[i].kind;
+      }
       return 'normal';
     },
 
@@ -4909,6 +4926,116 @@
       function push(step) {
         steps.push(step);
         onStep && onStep(step, steps.length - 1);
+      }
+
+      if (kind === 'phased') {
+        push({ type: 'thought.start', title: '思考中' });
+        later(function () {
+          push({ type: 'text.delta', text: '先核对已有资料，确认事实后再做结论。' });
+          push({ type: 'thought.commit', duration: 0.7 });
+        }, 500);
+        later(function () {
+          push({ type: 'tool.start', toolName: 'search_files', params: { query: shortT } });
+        }, 900);
+        later(function () {
+          push({ type: 'tool.commit', toolName: 'search_files', params: { query: shortT }, summary: '定位到 3 个相关文件', duration: 0.6, isError: false });
+        }, 1400);
+        later(function () {
+          push({ type: 'tool.start', toolName: 'read_file', params: { path: 'workspace/notes.md' } });
+        }, 1800);
+        later(function () {
+          push({ type: 'tool.commit', toolName: 'read_file', params: { path: 'workspace/notes.md' }, summary: '读取现场记录 1.2k 字', duration: 0.4, isError: false });
+        }, 2300);
+        later(function () {
+          push({ type: 'reply.start' });
+          push({ type: 'text.delta', text: '先同步已核对到的事实：相关文件 3 份，现场记录完整。下一步会拉运行数据再给出结论。' });
+        }, 2800);
+        later(function () {
+          push({ type: 'reply.commit', interim: true, content: '先同步已核对到的事实：相关文件 3 份，现场记录完整。下一步会拉运行数据再给出结论。' });
+        }, 3600);
+        later(function () {
+          push({ type: 'thought.start', title: '思考中' });
+        }, 4100);
+        later(function () {
+          push({ type: 'text.delta', text: '事实已对齐，开始聚合运行数据并形成建议。' });
+          push({ type: 'thought.commit', duration: 0.6 });
+        }, 4600);
+        later(function () {
+          push({ type: 'tool.start', toolName: 'terminal', params: { command: 'python scripts/summarize.py' } });
+        }, 5100);
+        later(function () {
+          push({ type: 'tool.commit', toolName: 'terminal', params: { command: 'python scripts/summarize.py' }, summary: '汇总近 14 天指标', duration: 1.1, isError: false });
+        }, 5800);
+        later(function () {
+          push({ type: 'tool.start', toolName: tool, params: { query: shortT, source: '内部知识库' } });
+        }, 6300);
+        later(function () {
+          push({ type: 'tool.commit', toolName: tool, params: { query: shortT, source: '内部知识库' }, summary: '检索到 3 条相关记录并完成聚合', duration: 1.4, isError: false });
+        }, 7000);
+        later(function () {
+          push({ type: 'reply.start' });
+          push({ type: 'text.delta', text: '综合结论：当前瓶颈已定位，建议先按核对到的 3 条记录做小范围验证，再扩到全线。\n\n（模拟回复 · 分阶段输出：先处理 → 中途说明 → 再处理 → 最终结果）' });
+        }, 7600);
+        later(function () {
+          push({ type: 'reply.commit', content: '综合结论：当前瓶颈已定位，建议先按核对到的 3 条记录做小范围验证，再扩到全线。\n\n（模拟回复 · 分阶段输出：先处理 → 中途说明 → 再处理 → 最终结果）' });
+          push({ type: 'done', script: 'phased' });
+        }, 8400);
+        return { kind: kind, scheduled: steps.length };
+      }
+
+      if (kind === 'loop') {
+        push({ type: 'thought.start', title: '思考中' });
+        later(function () {
+          push({ type: 'text.delta', text: '先看有哪些资料，再决定下一步查什么。' });
+          push({ type: 'thought.commit', duration: 0.6 });
+        }, 500);
+        later(function () {
+          push({ type: 'tool.start', toolName: 'search_files', params: { query: shortT } });
+        }, 900);
+        later(function () {
+          push({ type: 'tool.commit', toolName: 'search_files', params: { query: shortT }, summary: '定位到 3 个相关文件', duration: 0.6, isError: false });
+        }, 1400);
+        later(function () {
+          push({ type: 'thought.start', title: '思考中' });
+        }, 1900);
+        later(function () {
+          push({ type: 'text.delta', text: '文件清单不够，需要读现场说明并跑汇总脚本。' });
+          push({ type: 'thought.commit', duration: 0.5 });
+        }, 2400);
+        later(function () {
+          push({ type: 'tool.start', toolName: 'read_file', params: { path: 'workspace/notes.md' } });
+        }, 2800);
+        later(function () {
+          push({ type: 'tool.commit', toolName: 'read_file', params: { path: 'workspace/notes.md' }, summary: '读取现场记录 1.2k 字', duration: 0.4, isError: false });
+        }, 3300);
+        later(function () {
+          push({ type: 'tool.start', toolName: 'terminal', params: { command: 'python scripts/summarize.py' } });
+        }, 3700);
+        later(function () {
+          push({ type: 'tool.commit', toolName: 'terminal', params: { command: 'python scripts/summarize.py' }, summary: '汇总近 14 天指标', duration: 1.0, isError: false });
+        }, 4400);
+        later(function () {
+          push({ type: 'thought.start', title: '思考中' });
+        }, 4900);
+        later(function () {
+          push({ type: 'text.delta', text: '脚本结果还缺业务库对照，补一次查询后即可下结论。' });
+          push({ type: 'thought.commit', duration: 0.5 });
+        }, 5400);
+        later(function () {
+          push({ type: 'tool.start', toolName: tool, params: { query: shortT, source: '内部知识库' } });
+        }, 5800);
+        later(function () {
+          push({ type: 'tool.commit', toolName: tool, params: { query: shortT, source: '内部知识库' }, summary: '检索到 3 条相关记录并完成聚合', duration: 1.3, isError: false });
+        }, 6500);
+        later(function () {
+          push({ type: 'reply.start' });
+          push({ type: 'text.delta', text: '已完成多轮核对。资料、脚本与业务库结果一致，可以按这 3 条记录推进。\n\n（模拟回复 · 过程内多轮：思考 → 工具 → 再思考 → 再工具）' });
+        }, 7100);
+        later(function () {
+          push({ type: 'reply.commit', content: '已完成多轮核对。资料、脚本与业务库结果一致，可以按这 3 条记录推进。\n\n（模拟回复 · 过程内多轮：思考 → 工具 → 再思考 → 再工具）' });
+          push({ type: 'done', script: 'loop' });
+        }, 7900);
+        return { kind: kind, scheduled: steps.length };
       }
 
       if (kind === 'thought') {
@@ -4937,26 +5064,53 @@
       if (kind === 'tool') {
         push({ type: 'thought.start', title: '思考中' });
         later(function () {
-          push({ type: 'text.delta', text: '需要调用 ' + tool + ' 检索相关数据。' });
-          push({ type: 'thought.commit', duration: 0.6 });
-        }, 600);
+          push({ type: 'text.delta', text: '需要检索文件、核对配置，再调用 ' + tool + ' 聚合数据。' });
+          push({ type: 'thought.commit', duration: 0.8 });
+        }, 500);
         later(function () {
-          push({ type: 'tool.start', toolName: tool, params: { query: shortT, source: '内部知识库' } });
-        }, 1200);
+          push({ type: 'tool.start', toolName: 'search_files', params: { query: shortT } });
+        }, 900);
         later(function () {
-          push({ type: 'tool.running', toolName: tool, progress: '检索中…' });
-        }, 1800);
+          push({ type: 'tool.running', toolName: 'search_files', progress: '检索工作空间…' });
+        }, 1300);
         later(function () {
-          push({ type: 'tool.commit', toolName: tool, params: { query: shortT, source: '内部知识库' }, summary: '检索到 3 条相关记录并完成聚合', duration: 1.8, isError: false });
+          push({ type: 'tool.commit', toolName: 'search_files', params: { query: shortT }, summary: '定位到 4 个相关文件', duration: 0.7, isError: false });
+        }, 1700);
+        later(function () {
+          push({ type: 'tool.start', toolName: 'skill_view', params: { skill: 'mes-query' } });
+        }, 2000);
+        later(function () {
+          push({ type: 'tool.commit', toolName: 'skill_view', params: { skill: 'mes-query' }, summary: '技能清单接口返回 410 Gone', duration: 0.4, isError: true });
         }, 2400);
         later(function () {
-          push({ type: 'reply.start' });
-          push({ type: 'text.delta', text: '已调用工具完成数据检索，共 3 条记录。' });
-        }, 3000);
+          push({ type: 'tool.start', toolName: 'read_file', params: { path: 'docs/context.md' } });
+        }, 2800);
         later(function () {
-          push({ type: 'reply.commit', content: '已调用工具完成数据检索，共 3 条记录。' });
-          push({ type: 'done', script: 'tool' });
+          push({ type: 'tool.commit', toolName: 'read_file', params: { path: 'docs/context.md' }, summary: '读取上下文 2.1k 字', duration: 0.4, isError: false });
+        }, 3200);
+        later(function () {
+          push({ type: 'tool.start', toolName: 'terminal', params: { command: 'ls workspace' } });
         }, 3600);
+        later(function () {
+          push({ type: 'tool.commit', toolName: 'terminal', params: { command: 'ls workspace' }, summary: '列出工作目录 12 个文件', duration: 0.6, isError: false });
+        }, 4100);
+        later(function () {
+          push({ type: 'tool.start', toolName: tool, params: { query: shortT, source: '内部知识库' } });
+        }, 4500);
+        later(function () {
+          push({ type: 'tool.running', toolName: tool, progress: '检索中…' });
+        }, 5000);
+        later(function () {
+          push({ type: 'tool.commit', toolName: tool, params: { query: shortT, source: '内部知识库' }, summary: '检索到 3 条相关记录并完成聚合', duration: 1.8, isError: false });
+        }, 5600);
+        later(function () {
+          push({ type: 'reply.start' });
+          push({ type: 'text.delta', text: '已完成检索与核对。技能清单接口暂不可用，已改用本地文件与 ' + tool + '，共聚合 3 条记录。' });
+        }, 6100);
+        later(function () {
+          push({ type: 'reply.commit', content: '已完成检索与核对。技能清单接口暂不可用，已改用本地文件与 ' + tool + '，共聚合 3 条记录。' });
+          push({ type: 'done', script: 'tool' });
+        }, 6800);
         return { kind: kind, scheduled: steps.length };
       }
 
@@ -5012,35 +5166,99 @@
       }
 
       if (kind === 'clarify') {
-        push({ type: 'clarify.commit', requestId: 'clarify-' + Date.now(), question: '请确认您希望分析的维度：', choices: ['按时间趋势', '按地域分布', '按产品类别'] });
+        push({ type: 'thought.start', title: '思考中' });
+        later(function () {
+          push({ type: 'text.delta', text: '先核对现有资料。分析维度不唯一，需要用户确认后再查。' });
+          push({ type: 'thought.commit', duration: 0.6 });
+        }, 500);
+        later(function () {
+          push({ type: 'tool.start', toolName: 'search_files', params: { query: shortT } });
+        }, 900);
+        later(function () {
+          push({ type: 'tool.commit', toolName: 'search_files', params: { query: shortT }, summary: '定位到 3 个相关文件', duration: 0.6, isError: false });
+        }, 1400);
+        later(function () {
+          push({ type: 'tool.start', toolName: 'read_file', params: { path: 'workspace/notes.md' } });
+        }, 1800);
+        later(function () {
+          push({ type: 'tool.commit', toolName: 'read_file', params: { path: 'workspace/notes.md' }, summary: '读取现场记录 1.2k 字', duration: 0.4, isError: false });
+        }, 2300);
+        later(function () {
+          push({ type: 'reply.start' });
+          push({ type: 'text.delta', text: '资料能对上，但可以从时间、地域或产品类别切入。请先选一个分析维度。' });
+        }, 2800);
+        later(function () {
+          push({ type: 'reply.commit', interim: true, content: '资料能对上，但可以从时间、地域或产品类别切入。请先选一个分析维度。' });
+        }, 3600);
+        later(function () {
+          push({ type: 'clarify.commit', requestId: 'clarify-' + Date.now(), question: '请确认您希望分析的维度：', choices: ['按时间趋势', '按地域分布', '按产品类别'] });
+        }, 4000);
         later(function () {
           push({ type: 'done', script: 'clarify' });
-        }, 800);
+        }, 4400);
         return { kind: kind, scheduled: steps.length };
       }
 
       if (kind === 'approval') {
-        push({ type: 'approval.commit', requestId: 'approval-' + Date.now(), command: tool, description: '将调用 ' + tool + ' 检索并返回结果，是否继续？', allowPermanent: true });
+        push({ type: 'thought.start', title: '思考中' });
+        later(function () {
+          push({ type: 'text.delta', text: '先检索并聚合结果；写入工作空间前需要审批。' });
+          push({ type: 'thought.commit', duration: 0.6 });
+        }, 500);
+        later(function () {
+          push({ type: 'tool.start', toolName: 'search_files', params: { query: shortT } });
+        }, 900);
+        later(function () {
+          push({ type: 'tool.commit', toolName: 'search_files', params: { query: shortT }, summary: '定位到 3 个相关文件', duration: 0.6, isError: false });
+        }, 1400);
+        later(function () {
+          push({ type: 'tool.start', toolName: tool, params: { query: shortT, source: '内部知识库' } });
+        }, 1800);
+        later(function () {
+          push({ type: 'tool.commit', toolName: tool, params: { query: shortT, source: '内部知识库' }, summary: '检索到 3 条相关记录并完成聚合', duration: 1.2, isError: false });
+        }, 2500);
+        later(function () {
+          push({ type: 'reply.start' });
+          push({ type: 'text.delta', text: '已聚合 3 条记录。接下来会导出 Excel 到工作空间，需你确认后执行。' });
+        }, 3000);
+        later(function () {
+          push({ type: 'reply.commit', interim: true, content: '已聚合 3 条记录。接下来会导出 Excel 到工作空间，需你确认后执行。' });
+        }, 3800);
+        later(function () {
+          push({ type: 'approval.commit', requestId: 'approval-' + Date.now(), command: 'export_report --format=xlsx', description: '将分析结果导出为 Excel 并写入工作空间', allowPermanent: true });
+        }, 4200);
         later(function () {
           push({ type: 'done', script: 'approval' });
-        }, 800);
+        }, 4600);
         return { kind: kind, scheduled: steps.length };
       }
 
       // normal
       push({ type: 'thought.start', title: '思考中' });
       later(function () {
-        push({ type: 'text.delta', text: '理解用户输入并组织回复。' });
-        push({ type: 'thought.commit', duration: 0.4 });
-      }, 600);
+        push({ type: 'text.delta', text: '理解用户输入，先核对资料再组织回复。' });
+        push({ type: 'thought.commit', duration: 0.6 });
+      }, 500);
+      later(function () {
+        push({ type: 'tool.start', toolName: 'search_files', params: { query: shortT } });
+      }, 900);
+      later(function () {
+        push({ type: 'tool.commit', toolName: 'search_files', params: { query: shortT }, summary: '定位到 3 个相关文件', duration: 0.6, isError: false });
+      }, 1400);
+      later(function () {
+        push({ type: 'tool.start', toolName: tool, params: { query: shortT, source: '内部知识库' } });
+      }, 1800);
+      later(function () {
+        push({ type: 'tool.commit', toolName: tool, params: { query: shortT, source: '内部知识库' }, summary: '检索到 3 条相关记录并完成聚合', duration: 1.2, isError: false });
+      }, 2500);
       later(function () {
         push({ type: 'reply.start' });
         push({ type: 'text.delta', text: '基于您描述的情况，我建议先从数据验证入手。\n\n（模拟回复 · 对接引擎后将替换为真实推理结果）' });
-      }, 1200);
+      }, 3000);
       later(function () {
         push({ type: 'reply.commit', content: '基于您描述的情况，我建议先从数据验证入手。\n\n（模拟回复 · 对接引擎后将替换为真实推理结果）\n\n针对：「' + t.slice(0, 50) + (t.length > 50 ? '…' : '') + '」' });
         push({ type: 'done', script: 'normal' });
-      }, 1800);
+      }, 3600);
       return { kind: kind, scheduled: steps.length };
     },
 

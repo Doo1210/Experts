@@ -15,6 +15,7 @@
       ChatWorkspace: window.ChatWorkspace,
       ChatComposer: window.ChatComposer,
       ActivityItem: ChatBlocks.ActivityItem,
+      ProcessTrace: ChatBlocks.ProcessTrace,
       ReplyBlock: ChatBlocks.ReplyBlock,
       UserMessage: ChatBlocks.UserMessage,
       StatusLine: ChatBlocks.StatusLine,
@@ -22,7 +23,8 @@
       SubagentCard: ChatInteractive.SubagentCard,
       HitlCard: ChatInteractive.HitlCard,
       ClarifyCard: ChatInteractive.ClarifyCard,
-      ApprovalCard: ChatInteractive.ApprovalCard
+      ApprovalCard: ChatInteractive.ApprovalCard,
+      ExpertTurnFlow: ChatInteractive.ExpertTurnFlow
     },
     props: ['expertId', 'taskId'],
     emits: ['nav'],
@@ -723,6 +725,35 @@
         return groups[groups.length - 1].kind === 'expert-turn';
       });
 
+      function liveExtras() {
+        if (!streaming.value) return null;
+        return {
+          thought: liveThought.value,
+          steps: liveSteps.value,
+          reply: liveReply.value,
+          pending: !liveReply.value
+        };
+      }
+
+      function hasLiveProcessContent(extras) {
+        return !!(extras && (extras.thought || extras.reply || (extras.steps && extras.steps.length)));
+      }
+
+      function turnSegmentsFor(group, groupIndex) {
+        var extras = {};
+        if (streaming.value && liveAppendsToLastExpertTurn.value && groupIndex === chatGroups.value.length - 1) {
+          extras = liveExtras() || { pending: true };
+        }
+        return ChatBlocks.segmentExpertTurn(group.items, extras);
+      }
+
+      var liveOnlySegments = Vue.computed(function () {
+        if (!streaming.value || liveAppendsToLastExpertTurn.value) return [];
+        var extras = liveExtras();
+        if (!hasLiveProcessContent(extras)) return [];
+        return ChatBlocks.segmentExpertTurn([], extras);
+      });
+
       var filteredTasks = Vue.computed(function () {
         return tasks.value;
       });
@@ -1010,12 +1041,16 @@
               store.addMessage(taskId, {
                 role: 'expert', type: 'chat', expertId: expert.value.id, content: replyContent
               });
-              store.mockTaskArtifact(expert.value, taskId, text);
-              store.updateTask(taskId, { status: 'pending' });
               liveReply.value = '';
               currentTextTarget = null;
-              streaming.value = false;
               loadMessages();
+              if (step.interim) {
+                Vue.nextTick(function () { scrollChatToBottom(); });
+                return;
+              }
+              store.mockTaskArtifact(expert.value, taskId, text);
+              store.updateTask(taskId, { status: 'pending' });
+              streaming.value = false;
               refreshTasks();
             } else if (step.type === 'done') {
               liveThought.value = '';
@@ -1177,6 +1212,8 @@
         remoteError: remoteError,
         currentTaskId: currentTaskId, messages: messages, showExpertIntro: showExpertIntro, chatGroups: chatGroups,
         liveAppendsToLastExpertTurn: liveAppendsToLastExpertTurn,
+        turnSegmentsFor: turnSegmentsFor,
+        liveOnlySegments: liveOnlySegments,
         expertTags: expertTags,
         tagColors: catalog.TAG_COLORS,
         showExpertPreviewDialog: showExpertPreviewDialog, previewStats: previewStats,
@@ -1262,42 +1299,22 @@
                       <img class="msg-avatar" :src="expert.avatar" :alt="expert.name" />\
                       <span class="msg-sender">{{ expert.name }}</span>\
                     </div>\
-                    <template v-for="item in group.items" :key="item.id">\
-                      <activity-item v-if="item.type === \'thought\'" kind="thought" :status="item.live ? \'thinking\' : \'success\'" :content="item.content" :duration="item.duration" :live="!!item.live" />\
-                      <activity-item v-else-if="item.type === \'action\'" kind="tool" :status="item.isError ? \'error\' : (item.progress != null && item.progress !== \'\' ? \'running\' : \'success\')" :title="item.toolName" :summary="item.summary" :result="item.result" :params="item.params" :content="item.content" :duration="item.duration" :live="!!item.live" />\
-                      <subagent-card v-else-if="item.type === \'subagent\'" :subagent-name="item.subagentName" :goal="item.goal" :status="item.subagentStatus || \'success\'" :duration="item.subagentDuration" :summary="item.subagentSummary" :events="item.subagentEvents" :render-markdown="renderMarkdown" />\
-                      <hitl-card v-else-if="item.type === \'clarify\' && item.answer != null" variant="clarify" :data="item" mode="resolved" />\
-                      <hitl-card v-else-if="item.type === \'approval\' && item.choice != null" variant="approval" :data="item" mode="resolved" />\
-                      <status-line v-else-if="shouldShowConversationStatus(item)" :kind="item.statusKind" :content="item.content" />\
-                      <error-row v-else-if="item.type === \'error\'" :content="item.content" />\
-                      <reply-block v-else :content="item.content" :render-markdown="renderMarkdown" :attachments="item.attachments" />\
-                    </template>\
-                    <template v-if="streaming && liveAppendsToLastExpertTurn && groupIndex === chatGroups.length - 1">\
-                      <activity-item v-if="liveThought" kind="thought" status="thinking" :content="liveThought" :live="true" :open="true" />\
-                      <template v-for="step in liveSteps" :key="step.id">\
-                        <activity-item kind="tool" status="running" :title="step.toolName" :summary="step.content" :live="true" />\
-                      </template>\
-                      <reply-block v-if="liveReply" :content="liveReply" :render-markdown="renderMarkdown" :live="true" />\
-                    </template>\
+                    <expert-turn-flow :segments="turnSegmentsFor(group, groupIndex)" :render-markdown="renderMarkdown" />\
                   </div>\
                 </div>\
                 <user-message v-else :message="group.message" />\
               </template>\
               <div v-if="streaming && !liveAppendsToLastExpertTurn" class="stream-live-block">\
-                <div v-if="liveThought || liveReply || liveSteps.length" class="msg-row expert">\
+                <div v-if="liveOnlySegments.length" class="msg-row expert">\
                   <div class="msg-col">\
                     <div class="msg-header">\
                       <img class="msg-avatar" :src="expert.avatar" :alt="expert.name" />\
                       <span class="msg-sender">{{ expert.name }}</span>\
                     </div>\
-                    <activity-item v-if="liveThought" kind="thought" status="thinking" :content="liveThought" :live="true" :open="true" />\
-                    <template v-for="step in liveSteps" :key="step.id">\
-                      <activity-item kind="tool" status="running" :title="step.toolName" :summary="step.content" :live="true" />\
-                    </template>\
-                    <reply-block v-if="liveReply" :content="liveReply" :render-markdown="renderMarkdown" :live="true" />\
+                    <expert-turn-flow :segments="liveOnlySegments" :render-markdown="renderMarkdown" />\
                   </div>\
                 </div>\
-                <div v-if="!liveThought && !liveReply && !liveSteps.length" class="stream-waiting">\
+                <div v-if="!liveOnlySegments.length" class="stream-waiting">\
                   <span class="chat-send-spinner"></span>\
                   <span>{{ expert.name }} 正在处理…</span>\
                 </div>\

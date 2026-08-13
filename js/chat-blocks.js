@@ -1,6 +1,6 @@
 /**
  * 对话内容块组件集合
- * 包含：ActivityItem（思考 / 工具 / 子智能体 三合一）/ UserMessage / ReplyBlock / StatusLine / ErrorRow
+ * 包含：ProcessTrace / ActivityItem（思考 / 工具 / 子智能体 三合一）/ UserMessage / ReplyBlock / StatusLine / ErrorRow
  * 加载顺序：chat-blocks.js → chat-interactive.js
  */
 (function () {
@@ -11,6 +11,168 @@
     var text = String(content || '');
     if (/^正在(调用|准备工具调用|生成工具调用)/.test(text)) return '';
     return text;
+  }
+
+  function isToolStatusLine(text) {
+    return /^\[[^\]]+\]\s*执行(完成|失败)/.test(String(text || '').trim());
+  }
+
+  function isProcessItem(item) {
+    if (!item) return false;
+    var t = item.type;
+    return t === 'thought' || t === 'action' || t === 'subagent' || t === 'status';
+  }
+
+  function itemDurationSeconds(item) {
+    if (!item) return 0;
+    var n = Number(item.duration);
+    if (isFinite(n) && n > 0) return n;
+    n = Number(item.subagentDuration);
+    if (isFinite(n) && n > 0) return n;
+    return 0;
+  }
+
+  function computeProcessDuration(items) {
+    var sum = 0;
+    var hasDur = false;
+    (items || []).forEach(function (it) {
+      var n = itemDurationSeconds(it);
+      if (n > 0) {
+        hasDur = true;
+        sum += n;
+      }
+    });
+    if (hasDur) return sum;
+    var minTs = Infinity;
+    var maxTs = -Infinity;
+    var hasTs = false;
+    (items || []).forEach(function (it) {
+      var ts = Date.parse(it && it.createdAt);
+      if (!isFinite(ts)) return;
+      hasTs = true;
+      if (ts < minTs) minTs = ts;
+      if (ts > maxTs) maxTs = ts;
+    });
+    if (hasTs && maxTs > minTs) {
+      var wall = (maxTs - minTs) / 1000;
+      if (wall >= 0.5) return wall;
+    }
+    return null;
+  }
+
+  function formatDurationLabel(seconds) {
+    var n = Number(seconds);
+    if (!isFinite(n) || n < 0) return '';
+    if (n < 1) return '';
+    if (n < 60) {
+      if (n < 10 && Math.abs(n - Math.round(n)) > 0.05) return n.toFixed(1) + ' 秒';
+      return Math.round(n) + ' 秒';
+    }
+    var m = Math.floor(n / 60);
+    var s = Math.round(n % 60);
+    if (s === 60) {
+      m += 1;
+      s = 0;
+    }
+    return s ? (m + ' 分 ' + s + ' 秒') : (m + ' 分钟');
+  }
+
+  function actionItemStatus(item) {
+    if (!item) return 'success';
+    if (item.isError) return 'error';
+    if (item.live) return 'running';
+    if (item.progress != null && item.progress !== '') return 'running';
+    return 'success';
+  }
+
+  function processCurrentLabel(items) {
+    var i;
+    var it;
+    for (i = (items || []).length - 1; i >= 0; i--) {
+      it = items[i];
+      if (!it) continue;
+      if (it.type === 'thought') return it.live ? '思考中' : '';
+      if (it.type === 'action') return it.toolName ? ('调用 ' + it.toolName) : '调用工具';
+      if (it.type === 'subagent') return it.subagentName ? ('委派 ' + it.subagentName) : '委派子智能体';
+    }
+    return '';
+  }
+
+  function decorateProcessSegment(seg, live) {
+    var items = seg.items || [];
+    var errorCount = 0;
+    items.forEach(function (it) {
+      if (it && (it.isError || it.subagentStatus === 'error')) errorCount += 1;
+    });
+    seg.live = !!live;
+    seg.errorCount = errorCount;
+    seg.duration = live ? null : computeProcessDuration(items);
+    seg.currentLabel = live ? processCurrentLabel(items) : '';
+    return seg;
+  }
+
+  /**
+   * 将专家回合拆成「过程段 + 可见内容段」
+   * 连续的思考 / 工具 / 子智能体 / 进度提示收进一个过程段；回复、HITL、错误行保持在外。
+   * liveExtras: { thought, steps, reply, pending }
+   * pending: 仍在处理且尚未出现正式回复时，最后一段过程保持 live（展开）
+   */
+  function segmentExpertTurn(items, liveExtras) {
+    liveExtras = liveExtras || {};
+    var segs = [];
+    var buf = [];
+
+    function flushProcess(live) {
+      if (!buf.length) return;
+      var first = buf[0];
+      segs.push(decorateProcessSegment({
+        kind: 'process',
+        id: 'process-' + (first && first.id ? first.id : segs.length),
+        items: buf
+      }, live));
+      buf = [];
+    }
+
+    (items || []).forEach(function (item) {
+      if (isProcessItem(item)) {
+        buf.push(item);
+        return;
+      }
+      flushProcess(false);
+      segs.push({
+        kind: 'content',
+        id: item.id || ('content-' + segs.length),
+        item: item
+      });
+    });
+
+    var liveItems = [];
+    var replyText = liveExtras.reply || '';
+    var awaitingOutput = !!liveExtras.pending && !replyText;
+    if (liveExtras.thought) {
+      liveItems.push({
+        id: 'live-thought',
+        type: 'thought',
+        content: liveExtras.thought,
+        live: !replyText
+      });
+    }
+    (liveExtras.steps || []).forEach(function (step) {
+      liveItems.push(Object.assign({}, step, {
+        live: !replyText && step.live !== false
+      }));
+    });
+    if (liveItems.length) buf = buf.concat(liveItems);
+    flushProcess(awaitingOutput);
+
+    if (replyText) {
+      segs.push({
+        kind: 'content',
+        id: 'live-reply',
+        item: { id: 'live-reply', type: 'chat', content: replyText, live: true }
+      });
+    }
+    return segs;
   }
 
   /**
@@ -54,6 +216,11 @@
     },
     methods: {
       onToggle: function (e) {
+        if (!this.hasExpandableContent) {
+          if (e.target && e.target.open) e.target.open = false;
+          this.isOpen = false;
+          return;
+        }
         this.isOpen = !!e.target.open;
       }
     },
@@ -64,10 +231,15 @@
       },
       // 是否有可展开内容
       hasExpandableContent: function () {
-        if (this.kind === 'thought') return !!this.content;
-        if (this.kind === 'subagent') return !!(this.goal || this.summary || this.result || this.content || (this.params && Object.keys(this.params).length));
-        // tool：兼容旧字段 content（旧 mock 工具调用只有 content 没有 summary）
-        return !!(this.summary || this.result || this.content || (this.params && Object.keys(this.params).length));
+        if (this.kind === 'thought') return !!String(this.content || '').trim();
+        if (this.kind === 'subagent') {
+          return !!(this.goal || this.summary || this.result || this.content
+            || (this.params && Object.keys(this.params).length));
+        }
+        // 工具：仅在有真实返回内容时展开；参数和「执行完成」状态行不算
+        if (String(this.result || '').trim()) return true;
+        var content = String(this.content || '').trim();
+        return !!(content && !isToolStatusLine(content));
       },
       // 中文前缀
       prefixText: function () {
@@ -100,13 +272,13 @@
         if (this.status === 'success') return '✓';
         return '';
       },
-      // 耗时：仅 thought 显示「用时 N 秒」，其他场景不显示
+      // 耗时：仅 thought 显示「N 秒」，其他场景不显示
       durationLabel: function () {
         if (this.kind !== 'thought') return '';
         if (this.status === 'thinking') return '';
         var n = Number(this.duration);
         if (!isFinite(n)) return '';
-        return '用时 ' + n.toFixed(1) + ' 秒';
+        return n.toFixed(1) + ' 秒';
       },
       // 是否显示主标题（工具名 / 子智能体名）
       shouldShowTitle: function () {
@@ -134,7 +306,7 @@
         if (this.result) return this.result;
         if (this.summary) return this.summary;
         // 旧 mock 的 content 形如 '[数据查询] 执行完成 (1.8s)'，标题行已体现，跳过
-        if (this.content && !/^\[[^\]]+\]\s*执行(完成|失败)/.test(this.content)) {
+        if (this.content && !isToolStatusLine(this.content)) {
           return this.content;
         }
         return '';
@@ -145,14 +317,14 @@
       }
     },
     template: '\
-      <details class="activity-item" :class="[\'kind-\' + kind, \'status-\' + status, { \'is-live\': isThinkingLive, \'is-open\': isOpen }]" :open="isOpen ? \'\' : null" @toggle="onToggle">\
+      <details class="activity-item" :class="[\'kind-\' + kind, \'status-\' + status, { \'is-live\': isThinkingLive, \'is-open\': isOpen, \'is-expandable\': hasExpandableContent }]" :open="isOpen ? \'\' : null" @toggle="onToggle">\
         <summary class="activity-summary">\
-          <span v-if="hasExpandableContent" class="activity-chevron">{{ isOpen ? "▾" : "▸" }}</span>\
           <span class="activity-kind-mark">{{ kindMark }}</span>\
           <span class="activity-prefix">{{ prefixText }}</span>\
           <span v-if="shouldShowTitle" class="activity-title">{{ title }}</span>\
           <span v-if="durationLabel" class="activity-duration">{{ durationLabel }}</span>\
           <span v-if="shouldShowStatus" class="activity-status" :class="\'is-\' + status">{{ statusMark }}</span>\
+          <span v-if="hasExpandableContent" class="fold-chevron"></span>\
         </summary>\
         <div v-if="hasExpandableContent" class="activity-detail" :class="{ \'is-subagent\': kind === \'subagent\' }">\
           <div v-if="kind === \'subagent\' && goal" class="activity-goal">{{ goalText }}</div>\
@@ -169,6 +341,98 @@
           </details>\
           <div v-if="kind === \'subagent\'" class="subagent-events"><slot /></div>\
           <slot v-else />\
+        </div>\
+      </details>'
+  };
+
+  /**
+   * 处理过程折叠轨：把一轮中连续的思考 / 工具 / 子智能体收进一行
+   * 处理中强制展开；出现正式回复后收起。回复气泡始终在外侧。
+   */
+  var ProcessTrace = {
+    props: {
+      live: { type: Boolean, default: false },
+      duration: { type: Number, default: null },
+      currentLabel: { type: String, default: '' }
+    },
+    data: function () {
+      return {
+        isOpen: !!this.live,
+        elapsedSec: 0,
+        frozenDuration: null,
+        tickTimer: null
+      };
+    },
+    mounted: function () {
+      this.syncOpen(this.live);
+      if (this.live) this.startTick();
+    },
+    beforeUnmount: function () {
+      this.stopTick();
+    },
+    watch: {
+      live: function (val) {
+        this.syncOpen(val);
+        if (val) {
+          this.startTick();
+          return;
+        }
+        this.frozenDuration = this.elapsedSec || this.frozenDuration;
+        this.stopTick();
+      }
+    },
+    methods: {
+      syncOpen: function (live) {
+        this.isOpen = !!live;
+      },
+      onToggle: function (e) {
+        var details = e.target;
+        if (this.live) {
+          this.isOpen = true;
+          if (details && details.open === false) details.open = true;
+          return;
+        }
+        this.isOpen = !!details.open;
+      },
+      startTick: function () {
+        var self = this;
+        this.stopTick();
+        this.elapsedSec = 0;
+        this.tickTimer = setInterval(function () {
+          self.elapsedSec += 1;
+        }, 1000);
+      },
+      stopTick: function () {
+        if (this.tickTimer) {
+          clearInterval(this.tickTimer);
+          this.tickTimer = null;
+        }
+      }
+    },
+    computed: {
+      durationLabel: function () {
+        var n = this.duration;
+        if (n == null && this.live) n = this.elapsedSec;
+        if (n == null) n = this.frozenDuration;
+        return formatDurationLabel(n);
+      },
+      statusMark: function () {
+        if (this.live) return '…';
+        return '✓';
+      }
+    },
+    template: '\
+      <details class="process-trace" :class="{ \'is-live\': live, \'is-open\': isOpen }" :open="isOpen" @toggle="onToggle">\
+        <summary class="process-trace-summary">\
+          <span v-if="live" class="process-trace-spinner"></span>\
+          <span class="process-trace-label">{{ live ? "处理中" : "处理完成" }}</span>\
+          <span v-if="live && currentLabel" class="process-trace-hint">{{ currentLabel }}</span>\
+          <span v-if="durationLabel" class="process-trace-duration">{{ durationLabel }}</span>\
+          <span class="process-trace-status" :class="live ? \'is-running\' : \'is-success\'">{{ statusMark }}</span>\
+          <span class="fold-chevron"></span>\
+        </summary>\
+        <div class="process-trace-body">\
+          <slot />\
         </div>\
       </details>'
   };
@@ -271,10 +535,13 @@
 
   window.ChatBlocks = {
     ActivityItem: ActivityItem,
+    ProcessTrace: ProcessTrace,
     ReplyBlock: ReplyBlock,
     UserMessage: UserMessage,
     StatusLine: StatusLine,
     ErrorRow: ErrorRow,
-    statusContent: statusContent
+    statusContent: statusContent,
+    actionItemStatus: actionItemStatus,
+    segmentExpertTurn: segmentExpertTurn
   };
 })();

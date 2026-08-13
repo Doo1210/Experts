@@ -3699,6 +3699,9 @@ body {
   cursor: pointer;
   user-select: none;
 }
+.activity-item:not(.is-expandable) > summary {
+  cursor: default;
+}
 .activity-item summary::-webkit-details-marker { display: none; }
 
 .activity-summary {
@@ -3739,12 +3742,34 @@ body {
 .activity-status.is-thinking { color: var(--text-muted); }
 .activity-status.is-success { color: #67c23a; }
 .activity-status.is-error   { color: #f56c6c; }
-.activity-chevron {
-  color: var(--text-muted);
-  font-size: 10px;
-  margin-right: 2px;
-  align-self: center;
+
+/* 右侧折叠箭头：收起朝右、展开朝下 */
+.fold-chevron {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 10px;
+  height: 10px;
   flex-shrink: 0;
+  color: var(--text-muted);
+  margin-left: 4px;
+  align-self: center;
+}
+.fold-chevron::before,
+.activity-params-toggle::after {
+  content: '';
+  display: block;
+  width: 5px;
+  height: 5px;
+  box-sizing: border-box;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  transform: translateX(-1px) rotate(-45deg);
+}
+.activity-item.is-open > summary .fold-chevron::before,
+.process-trace.is-open > summary .fold-chevron::before,
+.activity-params-details[open] > summary.activity-params-toggle::after {
+  transform: translateY(-1.5px) rotate(45deg);
 }
 
 /* 思考专用：更弱化 */
@@ -3803,11 +3828,6 @@ body {
   user-select: none;
 }
 .activity-params-toggle::-webkit-details-marker { display: none; }
-.activity-params-toggle::before {
-  content: '▸';
-  font-size: 9px;
-}
-.activity-params-details[open] .activity-params-toggle::before { content: '▾'; }
 .activity-params {
   display: flex;
   flex-direction: column;
@@ -3831,6 +3851,81 @@ body {
   color: var(--text-secondary);
   word-break: break-word;
 }
+
+/* 处理过程折叠轨：一行摘要，展开后才露出思考/工具明细 */
+.expert-turn-flow { display: contents; }
+.process-trace {
+  font-size: 12px;
+  line-height: 1.7;
+  color: var(--text-secondary);
+}
+.process-trace > summary {
+  list-style: none;
+  cursor: pointer;
+  user-select: none;
+}
+.process-trace > summary::-webkit-details-marker { display: none; }
+.process-trace-summary {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 2px 0;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.7;
+}
+.process-trace-summary:hover { color: var(--text-secondary); }
+.process-trace.is-live > summary { cursor: default; }
+.process-trace-spinner {
+  width: 10px;
+  height: 10px;
+  border: 1.5px solid var(--border);
+  border-top-color: var(--primary, #c8960c);
+  border-radius: 50%;
+  animation: chat-send-spin 0.7s linear infinite;
+  flex-shrink: 0;
+}
+.process-trace-label {
+  font-weight: 500;
+  color: var(--text-muted);
+}
+.process-trace.is-live .process-trace-label { color: var(--primary, #c8960c); }
+.process-trace-hint {
+  color: var(--text-secondary);
+  font-weight: 500;
+  max-width: 42%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.process-trace-duration {
+  color: var(--text-muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+.process-trace-meta {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+.process-trace-meta::before { content: '· '; }
+.process-trace.is-error .process-trace-meta { color: #f56c6c; }
+.process-trace-status {
+  font-weight: 600;
+  margin-left: 2px;
+}
+.process-trace-status.is-running { color: var(--text-muted); }
+.process-trace-status.is-success { color: #67c23a; }
+.process-trace-status.is-error { color: #f56c6c; }
+.process-trace-body {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin: 2px 0 4px 7px;
+  padding: 2px 0 4px 12px;
+  border-left: 1px solid var(--border);
+}
+.process-trace-body .activity-item { font-size: 12px; }
 
 .stream-live-block { margin-top: 4px; }
 .stream-waiting {
