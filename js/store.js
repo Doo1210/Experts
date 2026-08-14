@@ -4893,7 +4893,7 @@
       { kind: 'phased', pattern: /分步|分段|中途|先说|边做边说|分阶段|穿插/, label: '分步 / 分段 / 中途 / 先说', desc: '处理 → 中途输出 → 再处理 → 最终回复' },
       { kind: 'loop', pattern: /反复|交替|再想|多轮|边想边调|继续查/, label: '反复 / 交替 / 再想 / 多轮', desc: '思考 → 工具 → 再思考 → 再工具 → 回复' },
       { kind: 'error', pattern: /错误|失败|报错|异常/, label: '错误 / 失败 / 报错', desc: '工具失败' },
-      { kind: 'thought', pattern: /思考|think|推理|思路/, label: '思考 / 推理', desc: '仅思考后回复' },
+      { kind: 'thought', pattern: /思考|think|推理|思路/, label: '思考 / 推理', desc: '较长思考后回复' },
       { kind: 'tool', pattern: /调用工具|工具|查询|检索|tool/, label: '查询 / 检索 / 工具', desc: '多次工具调用后回复' },
       { kind: 'subagent', pattern: /子智能体|复杂|委派|subagent/i, label: '子智能体 / 委派', desc: '子智能体流程' },
       { kind: 'clarify', pattern: /澄清|clarify/, label: '澄清', desc: '处理 → 说明 → 澄清卡片' },
@@ -5041,23 +5041,29 @@
       if (kind === 'thought') {
         push({ type: 'thought.start', title: '思考中' });
         later(function () {
-          push({ type: 'text.delta', text: '理解用户需求：' + t.slice(0, 24) + '。\n' });
-        }, 600);
+          push({ type: 'text.delta', text: '先把问题摊开看。用户这次说的是「' + t.slice(0, 36) + '」，核心不是立刻给结论，而是先把约束、已知事实和未知缺口对齐。\n\n' });
+        }, 700);
         later(function () {
-          push({ type: 'text.delta', text: '拆解为 3 个子目标：①检索 ②聚合 ③生成结论。\n' });
-        }, 1200);
+          push({ type: 'text.delta', text: '已知侧：现场节拍、检测对象和现有资料大概率能对上；未知侧是数据口径是否一致、异常时段会不会把均值拉偏、以及方案是否吃得下节拍余量。\n\n' });
+        }, 2200);
         later(function () {
-          push({ type: 'text.delta', text: '预估总耗时 ~4 秒，准备进入执行阶段。' });
-        }, 1800);
+          push({ type: 'text.delta', text: '我按三步来：①用现有文件确认事实，不把口头描述当成唯一依据；②把时间、产线和产品类别拆开，避免混在一个平均数里；③先形成可执行的判断标准，再决定要不要查库或跑脚本。\n\n' });
+        }, 4000);
         later(function () {
-          push({ type: 'thought.commit', duration: 1.8 });
+          push({ type: 'text.delta', text: '风险点也提前记下：资料可能过期、检索词过宽会带进无关文件、工具失败时不能停在报错本身。若后续要动工作空间，导出前再单独走确认。\n\n' });
+        }, 5800);
+        later(function () {
+          push({ type: 'text.delta', text: '这一轮先把推理路径说清楚，不急着调工具。下一步如果需要证据，再按「定位文件 → 读关键段落 → 必要时查业务库」往下走。' });
+        }, 7600);
+        later(function () {
+          push({ type: 'thought.commit', duration: 8.4 });
           push({ type: 'reply.start' });
-          push({ type: 'text.delta', text: '已完成思考，准备开始执行。' });
-        }, 2400);
+          push({ type: 'text.delta', text: '思路已经理清：先对齐事实和口径，再决定要不要查数据。需要的话我下一步再检索资料或调用工具。' });
+        }, 8400);
         later(function () {
-          push({ type: 'reply.commit', content: '已完成思考，准备开始执行。' });
+          push({ type: 'reply.commit', content: '思路已经理清：先对齐事实和口径，再决定要不要查数据。需要的话我下一步再检索资料或调用工具。' });
           push({ type: 'done', script: 'thought' });
-        }, 3000);
+        }, 9200);
         return { kind: kind, scheduled: steps.length };
       }
 

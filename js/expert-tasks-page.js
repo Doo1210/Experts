@@ -47,6 +47,7 @@
       var streamEs = null;
       var streaming = Vue.ref(false);
       var liveThought = Vue.ref('');
+      var liveThinking = Vue.ref(false);
       var liveReply = Vue.ref('');
       var liveSteps = Vue.ref([]);
       // === 阶段2 输入区相关状态（占位，后续 task 实现） ===
@@ -507,6 +508,7 @@
       function clearStreamPreview() {
         streaming.value = false;
         liveThought.value = '';
+        liveThinking.value = false;
         liveReply.value = '';
         liveSteps.value = [];
         stopMessagePoll();
@@ -554,14 +556,17 @@
           turnId,
           {
             onReasoningDelta: function (payload) {
+              liveThinking.value = true;
               liveThought.value += payload.text || '';
               scrollChatToBottom();
             },
             onMessageDelta: function (payload) {
+              liveThinking.value = false;
               liveReply.value += payload.text || '';
               scrollChatToBottom();
             },
             onToolGenerating: function (payload) {
+              liveThinking.value = false;
               var name = payload.name || 'tool';
               upsertLiveStep(name, {
                 type: 'action',
@@ -729,6 +734,7 @@
         if (!streaming.value) return null;
         return {
           thought: liveThought.value,
+          thinking: !!liveThinking.value,
           steps: liveSteps.value,
           reply: liveReply.value,
           pending: !liveReply.value
@@ -736,7 +742,7 @@
       }
 
       function hasLiveProcessContent(extras) {
-        return !!(extras && (extras.thought || extras.reply || (extras.steps && extras.steps.length)));
+        return !!(extras && (extras.thought || extras.thinking || extras.reply || (extras.steps && extras.steps.length)));
       }
 
       function turnSegmentsFor(group, groupIndex) {
@@ -942,6 +948,7 @@
           store.playMockScript(expert.value, taskId, text, function (step) {
             if (step.type === 'thought.start') {
               liveThought.value = '';
+              liveThinking.value = true;
               liveSteps.value = [];
               streaming.value = true;
               currentTextTarget = 'thought';
@@ -953,6 +960,7 @@
               var tContent = liveThought.value;
               var tDuration = step.duration || 0;
               liveThought.value = '';
+              liveThinking.value = false;
               currentTextTarget = null;
               store.addMessage(taskId, {
                 role: 'expert', type: 'thought', expertId: expert.value.id,
@@ -1054,6 +1062,7 @@
               refreshTasks();
             } else if (step.type === 'done') {
               liveThought.value = '';
+              liveThinking.value = false;
               liveReply.value = '';
               liveSteps.value = [];
               currentTextTarget = null;
@@ -1304,8 +1313,8 @@
                 </div>\
                 <user-message v-else :message="group.message" />\
               </template>\
-              <div v-if="streaming && !liveAppendsToLastExpertTurn" class="stream-live-block">\
-                <div v-if="liveOnlySegments.length" class="msg-row expert">\
+              <div v-if="streaming && !liveAppendsToLastExpertTurn && liveOnlySegments.length" class="stream-live-block">\
+                <div class="msg-row expert">\
                   <div class="msg-col">\
                     <div class="msg-header">\
                       <img class="msg-avatar" :src="expert.avatar" :alt="expert.name" />\
@@ -1313,10 +1322,6 @@
                     </div>\
                     <expert-turn-flow :segments="liveOnlySegments" :render-markdown="renderMarkdown" />\
                   </div>\
-                </div>\
-                <div v-if="!liveOnlySegments.length" class="stream-waiting">\
-                  <span class="chat-send-spinner"></span>\
-                  <span>{{ expert.name }} 正在处理…</span>\
                 </div>\
               </div>\
             </template>\

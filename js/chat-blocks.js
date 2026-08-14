@@ -85,19 +85,6 @@
     return 'success';
   }
 
-  function processCurrentLabel(items) {
-    var i;
-    var it;
-    for (i = (items || []).length - 1; i >= 0; i--) {
-      it = items[i];
-      if (!it) continue;
-      if (it.type === 'thought') return it.live ? '思考中' : '';
-      if (it.type === 'action') return it.toolName ? ('调用 ' + it.toolName) : '调用工具';
-      if (it.type === 'subagent') return it.subagentName ? ('委派 ' + it.subagentName) : '委派子智能体';
-    }
-    return '';
-  }
-
   function decorateProcessSegment(seg, live) {
     var items = seg.items || [];
     var errorCount = 0;
@@ -107,7 +94,6 @@
     seg.live = !!live;
     seg.errorCount = errorCount;
     seg.duration = live ? null : computeProcessDuration(items);
-    seg.currentLabel = live ? processCurrentLabel(items) : '';
     return seg;
   }
 
@@ -149,11 +135,11 @@
     var liveItems = [];
     var replyText = liveExtras.reply || '';
     var awaitingOutput = !!liveExtras.pending && !replyText;
-    if (liveExtras.thought) {
+    if (liveExtras.thought || liveExtras.thinking) {
       liveItems.push({
         id: 'live-thought',
         type: 'thought',
-        content: liveExtras.thought,
+        content: liveExtras.thought || '',
         live: !replyText
       });
     }
@@ -207,14 +193,45 @@
       open: { type: Boolean, default: false }
     },
     data: function () {
-      return { isOpen: !!this.open };
+      return {
+        isOpen: !!this.open,
+        elapsedSec: 0,
+        tickTimer: null
+      };
+    },
+    mounted: function () {
+      if (this.isThinkingLive) this.startTick();
+    },
+    beforeUnmount: function () {
+      this.stopTick();
     },
     watch: {
       open: function (val) {
-        if (this.isOpen !== val) this.isOpen = val;
+        if (val && !this.isOpen) this.isOpen = true;
+      },
+      isThinkingLive: function (val) {
+        if (val) this.startTick();
+        else this.stopTick();
       }
     },
     methods: {
+      startTick: function () {
+        var self = this;
+        this.stopTick();
+        this.elapsedSec = 0;
+        this.tickTimer = setInterval(function () {
+          self.elapsedSec += 1;
+        }, 1000);
+      },
+      stopTick: function () {
+        if (this.tickTimer) {
+          clearInterval(this.tickTimer);
+          this.tickTimer = null;
+        }
+      },
+      onSummaryClick: function (e) {
+        if (!this.hasExpandableContent) e.preventDefault();
+      },
       onToggle: function (e) {
         if (!this.hasExpandableContent) {
           if (e.target && e.target.open) e.target.open = false;
@@ -231,12 +248,15 @@
       },
       // 是否有可展开内容
       hasExpandableContent: function () {
-        if (this.kind === 'thought') return !!String(this.content || '').trim();
+        if (this.kind === 'thought') {
+          return this.live || this.status === 'thinking' || !!String(this.content || '').trim();
+        }
         if (this.kind === 'subagent') {
           return !!(this.goal || this.summary || this.result || this.content
             || (this.params && Object.keys(this.params).length));
         }
-        // 工具：仅在有真实返回内容时展开；参数和「执行完成」状态行不算
+        // 工具进行中、以及仅有参数/状态行时不展开
+        if (this.live || this.status === 'running' || this.status === 'thinking') return false;
         if (String(this.result || '').trim()) return true;
         var content = String(this.content || '').trim();
         return !!(content && !isToolStatusLine(content));
@@ -275,7 +295,7 @@
       // 耗时：仅 thought 显示「N 秒」，其他场景不显示
       durationLabel: function () {
         if (this.kind !== 'thought') return '';
-        if (this.status === 'thinking') return '';
+        if (this.isThinkingLive) return Math.max(0, Math.round(this.elapsedSec)) + ' 秒';
         var n = Number(this.duration);
         if (!isFinite(n)) return '';
         return n.toFixed(1) + ' 秒';
@@ -318,7 +338,7 @@
     },
     template: '\
       <details class="activity-item" :class="[\'kind-\' + kind, \'status-\' + status, { \'is-live\': isThinkingLive, \'is-open\': isOpen, \'is-expandable\': hasExpandableContent }]" :open="isOpen ? \'\' : null" @toggle="onToggle">\
-        <summary class="activity-summary">\
+        <summary class="activity-summary" @click="onSummaryClick">\
           <span class="activity-kind-mark">{{ kindMark }}</span>\
           <span class="activity-prefix">{{ prefixText }}</span>\
           <span v-if="shouldShowTitle" class="activity-title">{{ title }}</span>\
@@ -352,8 +372,7 @@
   var ProcessTrace = {
     props: {
       live: { type: Boolean, default: false },
-      duration: { type: Number, default: null },
-      currentLabel: { type: String, default: '' }
+      duration: { type: Number, default: null }
     },
     data: function () {
       return {
@@ -426,7 +445,6 @@
         <summary class="process-trace-summary">\
           <span v-if="live" class="process-trace-spinner"></span>\
           <span class="process-trace-label">{{ live ? "处理中" : "处理完成" }}</span>\
-          <span v-if="live && currentLabel" class="process-trace-hint">{{ currentLabel }}</span>\
           <span v-if="durationLabel" class="process-trace-duration">{{ durationLabel }}</span>\
           <span class="process-trace-status" :class="live ? \'is-running\' : \'is-success\'">{{ statusMark }}</span>\
           <span class="fold-chevron"></span>\

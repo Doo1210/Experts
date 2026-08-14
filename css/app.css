@@ -3891,14 +3891,6 @@ body {
   color: var(--text-muted);
 }
 .process-trace.is-live .process-trace-label { color: var(--primary, #c8960c); }
-.process-trace-hint {
-  color: var(--text-secondary);
-  font-weight: 500;
-  max-width: 42%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
 .process-trace-duration {
   color: var(--text-muted);
   font-size: 11px;
@@ -3928,10 +3920,6 @@ body {
 .process-trace-body .activity-item { font-size: 12px; }
 
 .stream-live-block { margin-top: 4px; }
-.stream-waiting {
-  display: flex; align-items: center; gap: 10px; padding: 12px 4px;
-  color: var(--text-muted); font-size: 13px;
-}
 .stream-cursor {
   display: inline-block; margin-left: 2px; color: var(--primary, #c8960c);
   animation: stream-cursor-blink 1s step-end infinite;

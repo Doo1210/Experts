@@ -344,10 +344,9 @@
         <process-trace\
           v-if="seg.kind === \'process\'"\
           :live="!!seg.live"\
-          :duration="seg.duration"\
-          :current-label="seg.currentLabel || \'\'">\
+          :duration="seg.duration">\
           <template v-for="item in seg.items" :key="item.id">\
-            <activity-item v-if="item.type === \'thought\'" kind="thought" :status="item.live ? \'thinking\' : \'success\'" :content="item.content" :duration="item.duration" :live="!!item.live" :open="!!item.live" />\
+            <activity-item v-if="item.type === \'thought\'" kind="thought" :status="item.live ? \'thinking\' : \'success\'" :content="item.content" :duration="item.duration" :live="!!item.live" :open="false" />\
             <activity-item v-else-if="item.type === \'action\'" kind="tool" :status="actionStatus(item)" :title="item.toolName" :summary="item.summary" :result="item.result" :params="item.params" :content="item.content" :duration="item.duration" :live="!!item.live" />\
             <subagent-card v-else-if="item.type === \'subagent\'" :subagent-name="item.subagentName" :goal="item.goal" :status="item.subagentStatus || \'success\'" :duration="item.subagentDuration" :summary="item.subagentSummary" :events="item.subagentEvents" :render-markdown="renderMarkdown" />\
             <status-line v-else-if="item.type === \'status\'" :kind="item.statusKind" :content="item.content" />\
