@@ -223,11 +223,20 @@
         if (missingEnv.indexOf(k) < 0) missingEnv.push(k);
       }
     });
-    var status = s.status;
-    if (!enabled) status = 'disabled';
-    else if (missingEnv.length) status = 'missing_secret';
-    else if (status === 'connection_failed' || status === 'error') status = 'connection_failed';
-    else status = 'ok';
+    var rawStatus = s.status;
+    var status = 'unverified';
+    if (rawStatus === 'ok' || rawStatus === 'available') status = 'available';
+    if (rawStatus === 'missing_secret' || rawStatus === 'connection_failed' || rawStatus === 'error' || rawStatus === 'unavailable') {
+      status = 'unavailable';
+    }
+    if (rawStatus === 'disabled') status = 'unverified';
+    if (missingEnv.length && rawStatus !== 'unverified') status = 'unavailable';
+    var toolCount = Number.isFinite(Number(s.toolCount)) ? Number(s.toolCount) : 0;
+    if (status === 'available' && toolCount === 0) {
+      var countSeed = 0;
+      for (var n = 0; n < name.length; n += 1) countSeed += name.charCodeAt(n);
+      toolCount = 3 + (countSeed % 8);
+    }
     return {
       id: name,
       name: name,
@@ -243,7 +252,10 @@
       status: status,
       missingEnv: missingEnv,
       errorSummary: s.errorSummary || '',
-      secretsFilled: !!s.secretsFilled
+      secretsFilled: !!s.secretsFilled,
+      toolCount: toolCount,
+      tools: Array.isArray(s.tools) ? s.tools.slice() : [],
+      testedAt: s.testedAt || ''
     };
   }
 
@@ -736,6 +748,7 @@
       category: '工艺制造',
       visibility: 'public',
       status: 'active',
+      origin: 'mine',
       updatedAt: nowIso()
     };
   }
@@ -1244,6 +1257,7 @@
       workspaceRoot: '~/.hermes/profiles/' + (seed.slug || seed.id) + '/workspace',
       visibility: 'public',
       status: 'active',
+      origin: 'template',
       updatedAt: seed.updatedAt || nowIso()
     };
   }
@@ -1311,6 +1325,10 @@
         e.workspaceRoot = '~/.hermes/profiles/' + (e.slug || e.id) + '/workspace';
         updated = true;
       }
+      if (seedById[String(e.id)] && e.origin !== 'template') {
+        e.origin = 'template';
+        updated = true;
+      }
     });
     seeds.forEach(function (seed) {
       var seedId = String(seed.id);
@@ -1321,6 +1339,11 @@
         state.experts.push(seedExpertToStateExpert(seed));
         updated = true;
       }
+    });
+    state.experts.forEach(function (e) {
+      if (e.origin) return;
+      e.origin = seedById[String(e.id)] ? 'template' : 'mine';
+      updated = true;
     });
     if (updated) persist();
   }
@@ -1345,6 +1368,7 @@
         workspaceRoot: '~/.hermes/profiles/' + (e.slug || e.id) + '/workspace',
         visibility: 'public',
         status: 'active',
+        origin: 'template',
         updatedAt: e.updatedAt || nowIso()
       };
     });
@@ -2908,6 +2932,9 @@
     getExpert: function (id) {
       return state.experts.find(function (e) { return e.id === String(id); }) || null;
     },
+    isTemplateExpert: function (expert) {
+      return !!(expert && expert.origin === 'template');
+    },
     saveExpert: function (expert) {
       var idx = state.experts.findIndex(function (e) { return e.id === expert.id; });
       expert.updatedAt = nowIso();
@@ -2954,6 +2981,7 @@
         workspaceRoot: payload.workspaceRoot || '~/.hermes/profiles/' + (payload.slug || 'expert') + '/workspace',
         visibility: payload.visibility || 'internal',
         status: 'active',
+        origin: payload.origin || 'mine',
         updatedAt: nowIso()
       };
       state.experts.unshift(expert);
@@ -3541,7 +3569,7 @@
     },
     getMcpNeedsAttentionCount: function (expertId) {
       return this.getMcpServers(expertId).filter(function (s) {
-        return s.enabled && (s.status === 'missing_secret' || s.status === 'connection_failed');
+        return s.enabled && s.status !== 'available';
       }).length;
     },
     setMcpServers: function (expertId, list) {
@@ -3580,6 +3608,7 @@
       } else if (payload.secretKey && payload.secretValue) {
         env[payload.secretKey] = payload.secretValue;
       }
+      var validation = payload.validation || {};
       list.push(normalizeMcpServer({
         name: name,
         type: 'http',
@@ -3590,7 +3619,11 @@
         env: env,
         enabled: payload.enabled !== false,
         missingEnv: missingEnv,
-        status: missingEnv.length ? 'missing_secret' : 'ok'
+        status: validation.status === 'available' ? 'available' : (missingEnv.length ? 'unavailable' : 'unverified'),
+        errorSummary: validation.errorSummary || (missingEnv.length ? '认证信息不完整' : ''),
+        toolCount: validation.toolCount || 0,
+        tools: validation.tools || [],
+        testedAt: validation.testedAt || ''
       }));
       setMcpServersInternal(key, list);
       persist();
@@ -3632,6 +3665,7 @@
         missingEnv = missingEnv.filter(function (k) { return k !== payload.secretKey; });
       }
       var prev = list[idx];
+      var validation = payload.validation || {};
       list[idx] = normalizeMcpServer(Object.assign({}, prev, {
         name: name,
         type: 'http',
@@ -3642,9 +3676,12 @@
         env: env,
         enabled: payload.enabled !== false,
         missingEnv: missingEnv,
-        status: missingEnv.length ? 'missing_secret' : (payload.enabled === false ? 'disabled' : 'ok'),
-        errorSummary: missingEnv.length ? (prev.errorSummary || '') : '',
-        secretsFilled: !missingEnv.length
+        status: validation.status === 'available' ? 'available' : (missingEnv.length ? 'unavailable' : 'unverified'),
+        errorSummary: validation.errorSummary || (missingEnv.length ? '认证信息不完整' : ''),
+        secretsFilled: !missingEnv.length,
+        toolCount: validation.toolCount || 0,
+        tools: validation.tools || [],
+        testedAt: validation.testedAt || ''
       }));
       setMcpServersInternal(key, list);
       persist();
@@ -3663,6 +3700,62 @@
     toggleMcpServerEnabled: function (expertId, name, enabled) {
       return this.updateMcpServer(expertId, name, { enabled: !!enabled });
     },
+    testMcpConnection: function (expertId, payload) {
+      var p = payload || {};
+      var name = String(p.name || '').trim();
+      var url = String(p.url || '').trim();
+      if (!name) return Promise.reject(new Error('请填写服务器名称'));
+      if (!/^[a-z0-9][a-z0-9_-]{0,63}$/.test(name)) {
+        return Promise.reject(new Error('名称仅支持小写字母、数字、下划线和连字符'));
+      }
+      if (!url) return Promise.reject(new Error('请填写 URL'));
+      if (!/^https?:\/\//i.test(url)) return Promise.reject(new Error('URL 须以 http:// 或 https:// 开头'));
+
+      var missing = [];
+      var env = p.env && typeof p.env === 'object' ? p.env : {};
+      Object.keys(env).forEach(function (key) {
+        if (env[key] === '' || env[key] === null || env[key] === undefined) missing.push(key);
+      });
+      String(p.envText || '').split(/\r?\n/).forEach(function (line) {
+        var text = line.trim();
+        if (!text || text.indexOf('=') < 0) return;
+        var pair = text.split('=');
+        if (!pair.slice(1).join('=').trim()) missing.push(pair[0].trim());
+      });
+      if (p.asSecret && !p.secretKey) missing.push('密钥名');
+      if (p.secretKey && !String(p.secretValue || '').trim()) missing.push(String(p.secretKey));
+
+      return new Promise(function (resolve) {
+        setTimeout(function () {
+          var failedByUrl = /(legacy|invalid|unreachable|fail)/i.test(url);
+          if (missing.length || failedByUrl) {
+            resolve({
+              status: 'unavailable',
+              errorSummary: missing.length ? '认证信息不完整，请检查 ' + missing[0] : '连接超时，请检查服务地址',
+              toolCount: 0,
+              tools: [],
+              testedAt: new Date().toISOString()
+            });
+            return;
+          }
+          var seed = 0;
+          for (var i = 0; i < name.length; i += 1) seed += name.charCodeAt(i);
+          var count = 3 + (seed % 8);
+          var verbs = ['search', 'get', 'list', 'create', 'update', 'query', 'export', 'status', 'analyze', 'sync'];
+          var tools = [];
+          for (var j = 0; j < count; j += 1) {
+            tools.push({ name: name.replace(/-/g, '_') + '_' + verbs[j], description: '由 ' + name + ' 提供的工具能力' });
+          }
+          resolve({
+            status: 'available',
+            errorSummary: '',
+            toolCount: count,
+            tools: tools,
+            testedAt: new Date().toISOString()
+          });
+        }, 800);
+      });
+    },
     fillMcpSecrets: function (expertId, name, secrets) {
       var key = String(expertId);
       var list = this.getMcpServers(key).map(function (s) {
@@ -3678,26 +3771,9 @@
         return normalizeMcpServer(Object.assign({}, s, {
           env: env,
           missingEnv: missingEnv,
-          status: missingEnv.length ? 'missing_secret' : 'ok',
+          status: missingEnv.length ? 'unavailable' : 'unverified',
           secretsFilled: !missingEnv.length,
           errorSummary: missingEnv.length ? s.errorSummary : ''
-        }));
-      });
-      setMcpServersInternal(key, list);
-      persist();
-      return Promise.resolve(this.getMcpServers(key));
-    },
-    retryMcpConnection: function (expertId, name) {
-      var key = String(expertId);
-      var list = this.getMcpServers(key).map(function (s) {
-        if (s.name !== name) return s;
-        if (s.missingEnv && s.missingEnv.length) {
-          return normalizeMcpServer(Object.assign({}, s, { status: 'missing_secret' }));
-        }
-        // Mock：重试后视为连通成功（路径问题样例可手动再改）
-        return normalizeMcpServer(Object.assign({}, s, {
-          status: 'ok',
-          errorSummary: ''
         }));
       });
       setMcpServersInternal(key, list);

@@ -30,6 +30,9 @@
       var toolBindings = Vue.ref([]);
       var mcpServers = Vue.ref([]);
       var mcpSaving = Vue.ref(false);
+      var mcpTesting = Vue.ref(false);
+      var mcpRowTestingName = Vue.ref('');
+      var mcpFormTestResult = Vue.ref(null);
       var mcpFormVisible = Vue.ref(false);
       var mcpFormMode = Vue.ref('create');
       var mcpEditingName = Vue.ref('');
@@ -750,6 +753,7 @@
       function resetMcpForm() {
         mcpFormMode.value = 'create';
         mcpEditingName.value = '';
+        mcpFormTestResult.value = null;
         mcpForm.value = {
           name: '',
           transport: 'streamable_http',
@@ -776,6 +780,7 @@
 
       function openMcpEditForm(row) {
         if (!row) return;
+        mcpFormTestResult.value = null;
         var env = row.env || {};
         var envText = Object.keys(env).map(function (k) {
           return k + '=' + (env[k] == null ? '' : env[k]);
@@ -796,6 +801,10 @@
         mcpFormVisible.value = true;
       }
 
+      Vue.watch(mcpForm, function () {
+        if (mcpFormVisible.value && !mcpTesting.value) mcpFormTestResult.value = null;
+      }, { deep: true });
+
       function buildMcpFormPayload() {
         var f = mcpForm.value;
         return {
@@ -806,6 +815,7 @@
           envText: f.envText || '',
           secretKey: f.asSecret ? (f.secretKey || '').trim() : '',
           secretValue: f.asSecret ? (f.secretValue || '') : '',
+          asSecret: !!f.asSecret,
           enabled: !!f.enabled
         };
       }
@@ -921,6 +931,11 @@
 
       function submitMcpForm() {
         var payload = buildMcpFormPayload();
+        if (!mcpFormTestResult.value || mcpFormTestResult.value.status !== 'available') {
+          ElementPlus.ElMessage.warning('请先测试连接，连接成功后再保存');
+          return;
+        }
+        payload.validation = mcpFormTestResult.value;
         var isEdit = mcpFormMode.value === 'edit';
         var editingName = mcpEditingName.value;
         mcpSaving.value = true;
@@ -934,6 +949,30 @@
         }).catch(function (err) {
           ElementPlus.ElMessage.error((err && err.message) || (isEdit ? '保存失败' : '添加失败'));
         }).finally(function () { mcpSaving.value = false; });
+      }
+
+      function testMcpFormConnection() {
+        var payload = buildMcpFormPayload();
+        mcpTesting.value = true;
+        mcpFormTestResult.value = null;
+        function revealResult() {
+          Vue.nextTick(function () {
+            var resultEl = document.querySelector('.ed-dialog-mcp .mcp-test-result');
+            if (resultEl && resultEl.scrollIntoView) resultEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+          });
+        }
+        store.testMcpConnection(props.expertId, payload).then(function (result) {
+          mcpFormTestResult.value = result;
+          revealResult();
+        }).catch(function (err) {
+          mcpFormTestResult.value = {
+            status: 'unavailable',
+            errorSummary: (err && err.message) || '连接失败，请检查配置',
+            toolCount: 0,
+            tools: []
+          };
+          revealResult();
+        }).finally(function () { mcpTesting.value = false; });
       }
 
       function toggleMcpEnabled(row, enabled) {
@@ -971,11 +1010,21 @@
         }).finally(function () { mcpSaving.value = false; });
       }
 
-      function retryMcpConnection(row) {
-        store.retryMcpConnection(props.expertId, row.name).then(function () {
-          refreshMcpServers();
-          ElementPlus.ElMessage.success(mcpEffectToast('已重试连接'));
-        });
+      function testMcpRowConnection(row) {
+        if (!row) return;
+        mcpRowTestingName.value = row.name;
+        store.testMcpConnection(props.expertId, row).then(function (result) {
+          return store.updateMcpServer(props.expertId, row.name, result).then(function () {
+            refreshMcpServers();
+            if (result.status === 'available') {
+              ElementPlus.ElMessage.success('连接成功，发现 ' + result.toolCount + ' 个工具');
+            } else {
+              ElementPlus.ElMessage.error(result.errorSummary || '连接失败，请检查配置');
+            }
+          });
+        }).catch(function (err) {
+          ElementPlus.ElMessage.error((err && err.message) || '连接失败，请检查配置');
+        }).finally(function () { mcpRowTestingName.value = ''; });
       }
 
       function deleteMcpServer(row) {
@@ -992,16 +1041,25 @@
       }
 
       function mcpStatusLabel(row) {
-        if (!row.enabled || row.status === 'disabled') return '已禁用';
-        if (row.status === 'missing_secret') return '未配置密钥';
-        if (row.status === 'connection_failed') return '连接失败';
-        return '正常';
+        if (row.status === 'available' || row.status === 'ok') return '可用';
+        if (row.status === 'unavailable' || row.status === 'missing_secret' || row.status === 'connection_failed') return '不可用';
+        return '未验证';
       }
 
       function mcpStatusClass(row) {
-        if (!row.enabled || row.status === 'disabled') return 'mcp-status--disabled';
-        if (row.status === 'missing_secret' || row.status === 'connection_failed') return 'mcp-status--error';
-        return 'mcp-status--ok';
+        if (row.status === 'available' || row.status === 'ok') return 'mcp-status--ok';
+        if (row.status === 'unavailable' || row.status === 'missing_secret' || row.status === 'connection_failed') return 'mcp-status--error';
+        return 'mcp-status--unverified';
+      }
+
+      function mcpStatusDetail(row) {
+        if (mcpStatusLabel(row) === '不可用') return row.errorSummary || '连接失败，请检查服务配置';
+        if (mcpStatusLabel(row) === '未验证') return '尚未测试连接，或配置已发生变化';
+        return '连接正常，可获取工具列表';
+      }
+
+      function mcpToolCountLabel(row) {
+        return mcpStatusLabel(row) === '可用' ? String(row.toolCount || 0) : '—';
       }
 
       function mcpTypeLabel(row) {
@@ -1017,7 +1075,7 @@
 
       var mcpNeedsAttentionCount = Vue.computed(function () {
         return mcpServers.value.filter(function (s) {
-          return s.enabled && (s.status === 'missing_secret' || s.status === 'connection_failed');
+          return s.enabled && mcpStatusLabel(s) !== '可用';
         }).length;
       });
 
@@ -2683,6 +2741,9 @@
         // MCP Tab
         mcpServers: mcpServers,
         mcpSaving: mcpSaving,
+        mcpTesting: mcpTesting,
+        mcpRowTestingName: mcpRowTestingName,
+        mcpFormTestResult: mcpFormTestResult,
         mcpFormVisible: mcpFormVisible,
         mcpFormMode: mcpFormMode,
         mcpSecretVisible: mcpSecretVisible,
@@ -2707,13 +2768,16 @@
         onMcpHubSelectionChange: onMcpHubSelectionChange,
         installSelectedHubMcps: installSelectedHubMcps,
         submitMcpForm: submitMcpForm,
+        testMcpFormConnection: testMcpFormConnection,
+        testMcpRowConnection: testMcpRowConnection,
         toggleMcpEnabled: toggleMcpEnabled,
         openMcpSecretForm: openMcpSecretForm,
         submitMcpSecrets: submitMcpSecrets,
-        retryMcpConnection: retryMcpConnection,
         deleteMcpServer: deleteMcpServer,
         mcpStatusLabel: mcpStatusLabel,
         mcpStatusClass: mcpStatusClass,
+        mcpStatusDetail: mcpStatusDetail,
+        mcpToolCountLabel: mcpToolCountLabel,
         mcpTypeLabel: mcpTypeLabel,
         // IM 渠道
         IM_SUBSCRIPTION_OPTIONS: IM_SUBSCRIPTION_OPTIONS,
@@ -3238,17 +3302,30 @@
                           />\
                         </template>\
                       </el-table-column>\
-                      <el-table-column label="服务器名" min-width="200">\
+                      <el-table-column label="服务器名" min-width="160">\
                         <template #default="{ row }">\
                           <div class="toolset-name-cell">{{ row.name }}</div>\
                         </template>\
                       </el-table-column>\
-                      <el-table-column label="类型" min-width="180" align="center">\
+                      <el-table-column label="类型" min-width="150" align="center">\
                         <template #default="{ row }">{{ mcpTypeLabel(row) }}</template>\
                       </el-table-column>\
-                      <el-table-column label="操作" width="128" align="left" class-name="detail-table-action-cell">\
+                      <el-table-column label="状态" width="116" align="center">\
+                        <template #default="{ row }">\
+                          <el-tooltip :content="mcpStatusDetail(row)" placement="top">\
+                            <span class="mcp-status" :class="mcpStatusClass(row)">\
+                              <span class="mcp-status-dot"></span>{{ mcpStatusLabel(row) }}\
+                            </span>\
+                          </el-tooltip>\
+                        </template>\
+                      </el-table-column>\
+                      <el-table-column label="工具数" width="86" align="center">\
+                        <template #default="{ row }">{{ mcpToolCountLabel(row) }}</template>\
+                      </el-table-column>\
+                      <el-table-column label="操作" width="206" align="left" class-name="detail-table-action-cell">\
                         <template #default="{ row }">\
                           <div class="detail-table-actions">\
+                            <el-button link type="primary" size="small" :loading="mcpRowTestingName === row.name" @click="testMcpRowConnection(row)">测试连接</el-button>\
                             <el-button link type="primary" size="small" @click="openMcpEditForm(row)">编辑</el-button>\
                             <el-button link type="danger" size="small" @click="deleteMcpServer(row)">删除</el-button>\
                           </div>\
@@ -3766,12 +3843,29 @@
                 <el-switch v-model="mcpForm.enabled" />\
               </el-form-item>\
             </el-form>\
+            <div v-if="mcpFormTestResult" class="mcp-test-result" :class="mcpFormTestResult.status === \'available\' ? \'is-success\' : \'is-error\'">\
+              <div class="mcp-test-result-head">\
+                <span class="mcp-test-result-icon">{{ mcpFormTestResult.status === \'available\' ? \'✓\' : \'×\' }}</span>\
+                <div>\
+                  <div class="mcp-test-result-title">{{ mcpFormTestResult.status === \'available\' ? \'连接成功\' : \'连接失败\' }}</div>\
+                  <div class="mcp-test-result-desc">{{ mcpFormTestResult.status === \'available\' ? \'发现 \' + mcpFormTestResult.toolCount + \' 个可调用工具\' : mcpFormTestResult.errorSummary }}</div>\
+                </div>\
+              </div>\
+              <div v-if="mcpFormTestResult.status === \'available\' && mcpFormTestResult.tools.length" class="mcp-test-tools">\
+                <span v-for="tool in mcpFormTestResult.tools.slice(0, 5)" :key="tool.name" class="mcp-test-tool-chip">{{ tool.name }}</span>\
+                <span v-if="mcpFormTestResult.tools.length > 5" class="mcp-test-tool-more">+{{ mcpFormTestResult.tools.length - 5 }}</span>\
+              </div>\
+            </div>\
           </div>\
           <template #footer>\
             <div class="dialog-footer-custom dialog-footer-wizard">\
               <div class="dialog-footer-actions">\
                 <el-button class="wizard-btn wizard-btn-cancel" @click="mcpFormVisible = false">取消</el-button>\
-                <el-button type="primary" class="wizard-btn wizard-btn-submit wizard-btn-submit-expert" :loading="mcpSaving" @click="submitMcpForm">{{ mcpFormMode === \'edit\' ? \'保存\' : \'添加\' }}</el-button>\
+                <el-button v-if="!mcpFormTestResult || mcpFormTestResult.status !== \'available\'" type="primary" class="wizard-btn wizard-btn-submit wizard-btn-submit-expert" :loading="mcpTesting" @click="testMcpFormConnection">测试连接</el-button>\
+                <template v-else>\
+                  <el-button class="wizard-btn" :loading="mcpTesting" @click="testMcpFormConnection">测试连接</el-button>\
+                  <el-button type="primary" class="wizard-btn wizard-btn-submit wizard-btn-submit-expert" :loading="mcpSaving" @click="submitMcpForm">{{ mcpFormMode === \'edit\' ? \'确认保存\' : \'确认添加\' }}</el-button>\
+                </template>\
               </div>\
             </div>\
           </template>\

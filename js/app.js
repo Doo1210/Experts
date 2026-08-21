@@ -8,19 +8,40 @@
   var PROJECT_ICON_PRESETS = window.AppShared.PROJECT_ICON_PRESETS;
   var isProjectIconImage = window.AppShared.isProjectIconImage;
 
+  var TEMPLATE_BUILTIN_SKILL_IDS = {
+    'chief-process-expert': ['skill-yield', 'skill-spc'],
+    'ai-architect': ['skill-vision', 'skill-integration'],
+    'equipment-ops-director': ['skill-pm', 'skill-yield'],
+    'supply-chain-planner': ['skill-supply', 'skill-integration'],
+    'quality-system-advisor': ['skill-spc', 'skill-yield'],
+    'digital-transform-advisor': ['skill-integration', 'skill-vision'],
+    'energy-management-expert': ['skill-energy', 'skill-integration'],
+    'safety-compliance-expert': ['skill-ehs'],
+    'human-robot-collab': ['skill-integration', 'skill-pm']
+  };
+
   var LIST_PAGE_TEMPLATE = [
-    '<div class="main-scroll list-page">',
-    '  <div class="page-header-row">',
-    '    <div class="page-header-text">',
-    '      <h1 class="page-title">专家</h1>',
-    '      <p class="page-subtitle">共 {{ experts.length }} 位智能体专家 · 发起任务或管理专家配置</p>',
+    '<div class="main-scroll list-page expert-list-page">',
+    '  <div class="expert-list-tabs">',
+    '    <div class="expert-list-tab-list" role="tablist">',
+    '      <button type="button" class="expert-list-tab" :class="{ \'is-active\': activeTab === \'template\' }" role="tab" @click="setActiveTab(\'template\')">',
+    '        <svg class="expert-list-tab-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1.2"/><rect x="14" y="3" width="7" height="7" rx="1.2"/><rect x="3" y="14" width="7" height="7" rx="1.2"/><rect x="14" y="14" width="7" height="7" rx="1.2"/></svg>',
+    '        专家模板',
+    '      </button>',
+    '      <button type="button" class="expert-list-tab" :class="{ \'is-active\': activeTab === \'mine\' }" role="tab" @click="setActiveTab(\'mine\')">',
+    '        <svg class="expert-list-tab-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="3.2"/><path d="M5.5 19.2c.8-3.2 3.3-5.2 6.5-5.2s5.7 2 6.5 5.2"/></svg>',
+    '        我的专家',
+    '      </button>',
     '    </div>',
-    '    <create-action-btn label="新建专家" theme="expert" @click="openCreateDialog" />',
+    '    <div class="expert-list-tools">',
+    '      <create-action-btn label="新建专家" theme="expert" @click="openCreateDialog" />',
+    '    </div>',
     '  </div>',
-    '  <div class="expert-grid">',
-    '    <div v-for="expert in experts" :key="expert.id" class="expert-card">',
+    '  <div class="expert-list-scroll">',
+    '    <div class="expert-grid">',
+    '    <div v-for="expert in filteredExperts" :key="expert.id" class="expert-card" :class="{ \'is-preview\': expert.previewOnly, \'expert-card-template\': isTemplate(expert) }">',
     '      <div class="expert-card-accent"></div>',
-    '      <el-dropdown trigger="click" @command="handleExpertMenu($event, expert)">',
+    '      <el-dropdown v-if="!isTemplate(expert)" trigger="click" @command="handleExpertMenu($event, expert)">',
     '        <button class="card-more-btn" title="更多操作" @click.stop>',
     '          <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><circle cx="12" cy="5" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="12" cy="19" r="1.8"/></svg>',
     '        </button>',
@@ -31,41 +52,96 @@
     '          </el-dropdown-menu>',
     '        </template>',
     '      </el-dropdown>',
-    '      <div class="expert-card-body" @click="goManage(expert)">',
+    '      <div class="expert-card-body" @click="openExpertCard(expert)">',
     '        <div class="card-header">',
     '          <img class="card-avatar" :src="expert.avatar" :alt="expert.name">',
     '          <div class="card-header-text">',
     '            <div class="card-name">',
     '              {{ expert.name }}',
-    '              <span v-if="runningCounts[expert.id]" class="expert-card-running-indicator" @click.stop="goStartTask(expert)">',
+    '              <span v-if="!isTemplate(expert) && runningCounts[expert.id]" class="expert-card-running-indicator" @click.stop="goStartTask(expert)">',
     '                <span class="expert-card-running-dot"></span>',
     '                {{ runningCounts[expert.id] }} 个运行中',
     '              </span>',
     '            </div>',
+    '            <div v-if="isTemplate(expert)" class="expert-template-card-meta">专家模板 · {{ expert.category || \'通用\' }}</div>',
     '          </div>',
     '        </div>',
     '        <p class="card-desc">{{ expert.description }}</p>',
-    '        <div class="card-footer">',
+        '        <div class="card-footer">',
     '          <div class="card-tags">',
     '            <span v-for="(tag, idx) in expert.expertise.slice(0, 3)" :key="tag" class="expertise-tag" :class="tagColors[idx % tagColors.length]">{{ tag }}</span>',
     '          </div>',
     '        </div>',
     '      </div>',
     '      <div class="expert-card-actions">',
-    '        <button type="button" class="expert-card-action expert-card-action-primary" @click="goStartTask(expert)">',
+    '        <button v-if="expert.previewOnly" type="button" class="expert-card-action expert-card-action-primary" @click="goStartTask({ id: expert.sourceExpertId })">',
+    '          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 2L11 13"/><path d="M22 2l-7 20-4-9-9-4 20-7z"/></svg>',
+    '          发起任务',
+    '        </button>',
+    '        <button v-else-if="isTemplate(expert)" type="button" class="expert-card-action expert-card-action-primary" @click="useTemplate(expert)">',
+    '          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>',
+    '          使用模板',
+    '        </button>',
+    '        <button v-else type="button" class="expert-card-action expert-card-action-primary" @click="goStartTask(expert)">',
     '          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 2L11 13"/><path d="M22 2l-7 20-4-9-9-4 20-7z"/></svg>',
     '          发起任务',
     '        </button>',
     '      </div>',
     '    </div>',
-    '    <div v-if="experts.length === 0" class="empty-state">',
-    '      <div class="empty-state-icon">👤</div>',
-    '      <p>暂无专家</p>',
-    '      <create-action-btn label="创建第一位专家" theme="expert" soft @click="openCreateDialog" />',
+    '    <div v-if="filteredExperts.length === 0" class="empty-state">',
+    '      <div class="empty-state-icon">{{ activeTab === \'template\' ? \'▦\' : \'👤\' }}</div>',
+    '      <p>{{ activeTab === \'template\' ? \'暂无专家模板\' : \'暂无自建专家\' }}</p>',
+    '      <create-action-btn v-if="activeTab === \'mine\'" label="创建第一位专家" theme="expert" soft @click="openCreateDialog" />',
+    '    </div>',
     '    </div>',
     '  </div>',
+    '  <button type="button" class="expert-preview-toggle expert-preview-toggle-floating" :class="{ \'is-on\': !minePreviewEmpty }" role="switch" :aria-checked="!minePreviewEmpty" title="切换自建专家演示状态" @click="toggleMinePreview">',
+    '    <span>自建专家</span>',
+    '    <span class="expert-preview-toggle-track" aria-hidden="true"><span class="expert-preview-toggle-thumb"></span></span>',
+    '    <span class="expert-preview-toggle-state">{{ minePreviewEmpty ? \'无\' : \'有\' }}</span>',
+    '  </button>',
     '  <expert-create-page-dialog :wizard="createWizard" :tag-colors="tagColors" :skills="skills" :tools="tools" />',
     '  <expert-edit-page-dialog :edit="expertEdit" header-title="编辑专家" :tag-colors="tagColors" />',
+    '  <el-dialog v-model="templateIntro.visible" width="720px" class="template-intro-dialog" :close-on-click-modal="true" append-to-body>',
+    '    <template #header>',
+    '      <div class="template-intro-dialog-title">专家详情</div>',
+    '    </template>',
+    '    <div v-if="templateIntro.expert" class="template-intro-content">',
+    '      <div class="template-intro-hero">',
+    '        <img class="template-intro-avatar" :src="templateIntro.expert.avatar" :alt="templateIntro.expert.name">',
+    '        <div class="template-intro-identity">',
+    '          <span class="template-intro-badge">专家模板</span>',
+    '          <h2>{{ templateIntro.expert.name }}</h2>',
+    '          <p>使用该模板可快速创建一位属于你的专家，并继续完善人设、技能与工具配置。</p>',
+    '        </div>',
+    '      </div>',
+    '      <section class="template-intro-section">',
+    '        <h3>模板简介</h3>',
+    '        <p>{{ templateIntro.expert.description }}</p>',
+    '      </section>',
+    '      <section class="template-intro-section">',
+    '        <h3>擅长领域</h3>',
+    '        <div class="template-intro-tags">',
+    '          <span v-for="(tag, idx) in templateIntro.expert.expertise" :key="tag" class="expertise-tag" :class="tagColors[idx % tagColors.length]">{{ tag }}</span>',
+    '        </div>',
+    '      </section>',
+    '      <section class="template-intro-section template-intro-skills">',
+    '        <h3>内置技能</h3>',
+    '        <div class="template-intro-skill-list">',
+    '          <div v-for="skill in templateIntroSkills" :key="skill.id" class="template-intro-skill-item">',
+    '            <span class="template-intro-skill-name">{{ skill.name }}：</span>',
+    '            <span class="template-intro-skill-description">{{ skill.description }}</span>',
+    '          </div>',
+    '        </div>',
+    '      </section>',
+    '    </div>',
+    '    <template #footer>',
+    '      <div class="dialog-footer-custom">',
+    '        <el-button @click="templateIntro.visible = false">关闭</el-button>',
+    '        <el-button type="primary" @click="useTemplateFromIntro">使用此模板</el-button>',
+    '      </div>',
+    '    </template>',
+    '  </el-dialog>',
     '  <el-dialog v-model="deleteDialog.visible" width="560px" class="form-dialog delete-expert-dialog" :close-on-click-modal="false" append-to-body>',
     '    <template #header>',
     '      <div class="dialog-header-custom">',
@@ -95,17 +171,65 @@
   ].join('\n');
 
   var ExpertCenterPage = {
-    props: ['openCreate'],
+    props: ['openCreate', 'listTab'],
     emits: ['nav', 'refresh'],
     setup: function (props, ctx) {
       var experts = Vue.ref([]);
       var runningCounts = Vue.ref({});
+      var minePreviewEmpty = Vue.ref(false);
+      var templateIntro = Vue.ref({ visible: false, expert: null });
       var expertEdit = createExpertEditForm(store, { onSaved: function () { load(); } });
       var createWizard = createExpertCreateForm(store, {
         onCreated: function (expert) {
           load();
           ctx.emit('nav', '/experts/' + expert.id + '?tab=persona');
         }
+      });
+
+      var activeTab = Vue.computed(function () {
+        return props.listTab === 'mine' ? 'mine' : 'template';
+      });
+
+      var templateIntroSkills = Vue.computed(function () {
+        var expert = templateIntro.value.expert;
+        if (!expert) return [];
+        var skillIds = TEMPLATE_BUILTIN_SKILL_IDS[expert.slug] || [];
+        return skillIds.map(function (skillId) {
+          return catalog.SKILLS_CATALOG.find(function (skill) { return skill.id === skillId; });
+        }).filter(Boolean);
+      });
+
+      function setActiveTab(tab) {
+        ctx.emit('nav', tab === 'mine' ? '/experts?tab=mine' : '/experts?tab=template');
+      }
+
+      function toggleMinePreview() {
+        minePreviewEmpty.value = !minePreviewEmpty.value;
+        if (activeTab.value !== 'mine') ctx.emit('nav', '/experts?tab=mine');
+      }
+
+      function isTemplate(expert) {
+        return store.isTemplateExpert ? store.isTemplateExpert(expert) : expert.origin === 'template';
+      }
+
+      var filteredExperts = Vue.computed(function () {
+        var origin = activeTab.value === 'template' ? 'template' : 'mine';
+        if (origin === 'mine' && minePreviewEmpty.value) return [];
+        var matches = experts.value.filter(function (e) {
+          var eOrigin = e.origin || 'mine';
+          return eOrigin === origin;
+        });
+        if (origin !== 'mine' || matches.length > 0) return matches;
+        return experts.value.filter(function (e) {
+          return (e.origin || 'mine') === 'template';
+        }).slice(0, 4).map(function (e) {
+          return Object.assign({}, e, {
+            id: 'preview-mine-' + e.id,
+            origin: 'mine',
+            previewOnly: true,
+            sourceExpertId: e.id
+          });
+        });
       });
 
       function load() {
@@ -123,9 +247,34 @@
       }
       function goManage(expert) { ctx.emit('nav', '/experts/' + expert.id + '?tab=persona'); }
 
+      function openExpertCard(expert) {
+        if (!expert) return;
+        if (expert.previewOnly) {
+          goManage({ id: expert.sourceExpertId });
+          return;
+        }
+        if (isTemplate(expert)) {
+          templateIntro.value = { visible: true, expert: expert };
+          return;
+        }
+        goManage(expert);
+      }
+
+      function useTemplate(expert) {
+        if (createWizard.openCreateFromTemplate) createWizard.openCreateFromTemplate(expert);
+        else createWizard.openCreateDialog();
+      }
+
+      function useTemplateFromIntro() {
+        var expert = templateIntro.value.expert;
+        templateIntro.value.visible = false;
+        if (expert) useTemplate(expert);
+      }
+
       var deleteDialog = Vue.ref({ visible: false, expert: null, inputName: '', runningCount: 0 });
 
       function openDeleteDialog(expert) {
+        if (isTemplate(expert)) return;
         deleteDialog.value = {
           visible: true,
           expert: expert,
@@ -142,6 +291,12 @@
       function confirmDelete() {
         var d = deleteDialog.value;
         if (!canConfirmDelete()) return;
+        if (d.expert.previewOnly) {
+          minePreviewEmpty.value = true;
+          deleteDialog.value = { visible: false, expert: null, inputName: '', runningCount: 0 };
+          ElementPlus.ElMessage.success('专家已删除');
+          return;
+        }
         store.deleteExpert(d.expert.id);
         deleteDialog.value = { visible: false, expert: null, inputName: '', runningCount: 0 };
         load();
@@ -152,8 +307,22 @@
         return deleteDialog.value.runningCount > 0 ? '强制删除' : '删除';
       }
 
+      function openExpertEdit(expert) {
+        if (!expert.previewOnly) {
+          expertEdit.openEdit(expert);
+          return;
+        }
+        var editable = Object.assign({}, expert, {
+          id: 'expert_' + Date.now().toString(36),
+          origin: 'mine'
+        });
+        delete editable.previewOnly;
+        delete editable.sourceExpertId;
+        expertEdit.openEdit(editable);
+      }
+
       function handleExpertMenu(command, expert) {
-        if (command === 'edit') expertEdit.openEdit(expert);
+        if (command === 'edit') openExpertEdit(expert);
         else if (command === 'delete') openDeleteDialog(expert);
       }
 
@@ -169,22 +338,34 @@
       Vue.watch(function () { return props.openCreate; }, function (v) {
         if (v === '1' || v === true) {
           createWizard.openCreateDialog();
-          ctx.emit('nav', '/experts');
+          ctx.emit('nav', '/experts?tab=mine');
         }
       }, { immediate: true });
 
       return {
         experts: experts,
+        filteredExperts: filteredExperts,
+        minePreviewEmpty: minePreviewEmpty,
+        activeTab: activeTab,
         runningCounts: runningCounts,
         tagColors: catalog.TAG_COLORS,
         skills: catalog.SKILLS_CATALOG,
         tools: catalog.TOOLS_CATALOG,
         expertEdit: expertEdit,
         createWizard: createWizard,
+        templateIntro: templateIntro,
+        templateIntroSkills: templateIntroSkills,
         deleteDialog: deleteDialog,
+        isTemplate: isTemplate,
+        setActiveTab: setActiveTab,
+        toggleMinePreview: toggleMinePreview,
+        openExpertCard: openExpertCard,
+        useTemplate: useTemplate,
+        useTemplateFromIntro: useTemplateFromIntro,
         goStartTask: goStartTask,
         goManage: goManage,
         openCreateDialog: createWizard.openCreateDialog,
+        openExpertEdit: openExpertEdit,
         handleExpertMenu: handleExpertMenu,
         openDeleteDialog: openDeleteDialog,
         canConfirmDelete: canConfirmDelete,
@@ -767,7 +948,7 @@
         <div class="app-body">\
         <app-sidebar :active="sidebarActive" @nav="onNav" />\
         <div class="main-area">\
-          <expert-center-page v-if="route.name === \'experts\'" :open-create="route.query.create === \'1\'" @nav="onNav" />\
+          <expert-center-page v-if="route.name === \'experts\'" :open-create="route.query.create === \'1\'" :list-tab="route.query.tab" @nav="onNav" />\
           <expert-detail-page v-else-if="route.name === \'expert-detail\'" :key="route.params.id" :expert-id="route.params.id" :initial-tab="detailTab" @nav="onNav" />\
           <expert-tasks-page v-else-if="route.name === \'expert-tasks\'" :expert-id="route.params.id" :task-id="route.params.taskId" @nav="onNav" />\
           <project-list-page v-else-if="route.name === \'projects\'" :open-create="route.query.create === \'1\'" @nav="onNav" />\
