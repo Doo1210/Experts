@@ -63,7 +63,6 @@
     '                {{ runningCounts[expert.id] }} 个运行中',
     '              </span>',
     '            </div>',
-    '            <div v-if="isTemplate(expert)" class="expert-template-card-meta">专家模板 · {{ expert.category || \'通用\' }}</div>',
     '          </div>',
     '        </div>',
     '        <p class="card-desc">{{ expert.description }}</p>',
@@ -110,19 +109,20 @@
     '      <div class="template-intro-hero">',
     '        <img class="template-intro-avatar" :src="templateIntro.expert.avatar" :alt="templateIntro.expert.name">',
     '        <div class="template-intro-identity">',
-    '          <span class="template-intro-badge">专家模板</span>',
     '          <h2>{{ templateIntro.expert.name }}</h2>',
-    '          <p>使用该模板可快速创建一位属于你的专家，并继续完善人设、技能与工具配置。</p>',
     '        </div>',
+    '        <el-button type="primary" class="template-intro-use-btn" @click="useTemplateFromIntro">使用模板</el-button>',
     '      </div>',
-    '      <section class="template-intro-section">',
-    '        <h3>模板简介</h3>',
-    '        <p>{{ templateIntro.expert.description }}</p>',
-    '      </section>',
-    '      <section class="template-intro-section">',
-    '        <h3>擅长领域</h3>',
-    '        <div class="template-intro-tags">',
-    '          <span v-for="(tag, idx) in templateIntro.expert.expertise" :key="tag" class="expertise-tag" :class="tagColors[idx % tagColors.length]">{{ tag }}</span>',
+    '      <section class="template-intro-section template-intro-capability">',
+    '        <div class="template-intro-capability-block">',
+    '          <h3>能力介绍</h3>',
+    '          <p>{{ templateIntro.expert.description }}</p>',
+    '        </div>',
+    '        <div class="template-intro-capability-block">',
+    '          <h3>擅长领域</h3>',
+    '          <div class="template-intro-tags">',
+    '            <span v-for="(tag, idx) in templateIntro.expert.expertise" :key="tag" class="expertise-tag" :class="tagColors[idx % tagColors.length]">{{ tag }}</span>',
+    '          </div>',
     '        </div>',
     '      </section>',
     '      <section class="template-intro-section template-intro-skills">',
@@ -135,12 +135,6 @@
     '        </div>',
     '      </section>',
     '    </div>',
-    '    <template #footer>',
-    '      <div class="dialog-footer-custom">',
-    '        <el-button @click="templateIntro.visible = false">关闭</el-button>',
-    '        <el-button type="primary" @click="useTemplateFromIntro">使用此模板</el-button>',
-    '      </div>',
-    '    </template>',
     '  </el-dialog>',
     '  <el-dialog v-model="deleteDialog.visible" width="560px" class="form-dialog delete-expert-dialog" :close-on-click-modal="false" append-to-body>',
     '    <template #header>',
@@ -180,6 +174,7 @@
       var templateIntro = Vue.ref({ visible: false, expert: null });
       var expertEdit = createExpertEditForm(store, { onSaved: function () { load(); } });
       var createWizard = createExpertCreateForm(store, {
+        getExistingExperts: getMineExpertsForDisplay,
         onCreated: function (expert) {
           load();
           ctx.emit('nav', '/experts/' + expert.id + '?tab=persona');
@@ -212,14 +207,12 @@
         return store.isTemplateExpert ? store.isTemplateExpert(expert) : expert.origin === 'template';
       }
 
-      var filteredExperts = Vue.computed(function () {
-        var origin = activeTab.value === 'template' ? 'template' : 'mine';
-        if (origin === 'mine' && minePreviewEmpty.value) return [];
+      function getMineExpertsForDisplay() {
+        if (minePreviewEmpty.value) return [];
         var matches = experts.value.filter(function (e) {
-          var eOrigin = e.origin || 'mine';
-          return eOrigin === origin;
+          return (e.origin || 'mine') === 'mine';
         });
-        if (origin !== 'mine' || matches.length > 0) return matches;
+        if (matches.length > 0) return matches;
         return experts.value.filter(function (e) {
           return (e.origin || 'mine') === 'template';
         }).slice(0, 4).map(function (e) {
@@ -229,6 +222,13 @@
             previewOnly: true,
             sourceExpertId: e.id
           });
+        });
+      }
+
+      var filteredExperts = Vue.computed(function () {
+        if (activeTab.value === 'mine') return getMineExpertsForDisplay();
+        return experts.value.filter(function (e) {
+          return (e.origin || 'mine') === 'template';
         });
       });
 
@@ -243,7 +243,7 @@
 
       function goStartTask(expert) {
         var task = store.createTask({ expertId: expert.id, title: '新任务', type: 'dialogue' });
-        ctx.emit('nav', '/experts/' + expert.id + '/tasks/' + task.id);
+        ctx.emit('nav', '/experts/' + expert.id + '/tasks/' + task.id + '?starting=1');
       }
       function goManage(expert) { ctx.emit('nav', '/experts/' + expert.id + '?tab=persona'); }
 
@@ -950,7 +950,7 @@
         <div class="main-area">\
           <expert-center-page v-if="route.name === \'experts\'" :open-create="route.query.create === \'1\'" :list-tab="route.query.tab" @nav="onNav" />\
           <expert-detail-page v-else-if="route.name === \'expert-detail\'" :key="route.params.id" :expert-id="route.params.id" :initial-tab="detailTab" @nav="onNav" />\
-          <expert-tasks-page v-else-if="route.name === \'expert-tasks\'" :expert-id="route.params.id" :task-id="route.params.taskId" @nav="onNav" />\
+          <expert-tasks-page v-else-if="route.name === \'expert-tasks\'" :expert-id="route.params.id" :task-id="route.params.taskId" :startup="route.query.starting === \'1\'" @nav="onNav" />\
           <project-list-page v-else-if="route.name === \'projects\'" :open-create="route.query.create === \'1\'" @nav="onNav" />\
           <project-detail-page v-else-if="route.name === \'project-detail\'" :project-id="route.params.id" :initial-tab="projectTab" @nav="onNav" />\
         </div>\

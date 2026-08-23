@@ -248,7 +248,7 @@
       form: { type: Object, required: true },
       tagInput: { type: String, default: '' },
       headerTitle: { type: String, default: '编辑专家' },
-      headerSubtitle: { type: String, default: '修改专家名称、介绍、头像与擅长领域' },
+      headerSubtitle: { type: String, default: '修改专家基本信息与默认模型配置' },
       tagColors: { type: Array, default: function () { return window.TAG_COLORS || []; } },
       modelInputMode: { type: String, default: 'platform' },
       selectedModelId: { type: String, default: '' },
@@ -398,6 +398,7 @@
               :mode="modelInputMode"\
               :selected-model-id="selectedModelId"\
               :manual-config="manualModelConfig"\
+              :show-mode-switch="false"\
               required\
               @update:mode="onModelInputMode"\
               @update:selected-model-id="onSelectedModelId" />\

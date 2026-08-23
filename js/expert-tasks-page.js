@@ -26,7 +26,7 @@
       ApprovalCard: ChatInteractive.ApprovalCard,
       ExpertTurnFlow: ChatInteractive.ExpertTurnFlow
     },
-    props: ['expertId', 'taskId'],
+    props: ['expertId', 'taskId', 'startup'],
     emits: ['nav'],
     setup: function (props, ctx) {
       var expert = Vue.ref(null);
@@ -41,6 +41,8 @@
       var hasNewMessage = Vue.ref(false);
       var chatFiles = createChatFileUpload();
       var remoteError = Vue.ref('');
+      var expertStarting = Vue.ref(props.startup === true || props.startup === '1');
+      var expertStartupTimer = null;
       var messagePollTimer = null;
       var titlePollTimer = null;
       var streamTitleWaitTimer = null;
@@ -810,6 +812,19 @@
         }
       }
 
+      function beginExpertStartup() {
+        if (!(props.startup === true || props.startup === '1')) return;
+        expertStarting.value = true;
+        if (expertStartupTimer) clearTimeout(expertStartupTimer);
+        expertStartupTimer = setTimeout(function () {
+          expertStarting.value = false;
+          expertStartupTimer = null;
+          var path = '/experts/' + props.expertId + '/tasks';
+          if (currentTaskId.value) path += '/' + currentTaskId.value;
+          ctx.emit('nav', path);
+        }, 2600);
+      }
+
       function sidecarErrorMessage(fallback) {
         var e = window.SidecarApi && window.SidecarApi.getLastError && window.SidecarApi.getLastError();
         if (!e) return fallback;
@@ -1208,9 +1223,11 @@
       });
       Vue.onMounted(function () {
         loadExpert();
+        beginExpertStartup();
         window.addEventListener('app-store-updated', loadExpert);
       });
       Vue.onBeforeUnmount(function () {
+        if (expertStartupTimer) clearTimeout(expertStartupTimer);
         stopTitlePoll();
         stopStream();
         window.removeEventListener('app-store-updated', loadExpert);
@@ -1218,6 +1235,7 @@
 
       return {
         expert: expert, tasks: tasks,
+        expertStarting: expertStarting,
         remoteError: remoteError,
         currentTaskId: currentTaskId, messages: messages, showExpertIntro: showExpertIntro, chatGroups: chatGroups,
         liveAppendsToLastExpertTurn: liveAppendsToLastExpertTurn,
@@ -1271,7 +1289,12 @@
       };
     },
     template: '<template v-if="expert">\
-      <div class="task-layout">\
+      <div class="task-layout" :class="{ \'is-expert-starting\': expertStarting }">\
+        <div v-if="expertStarting" class="expert-startup-mask" role="status" aria-live="polite">\
+          <div class="expert-startup-dialog">\
+            <span class="expert-startup-text">正在启动{{ expert.name }}…</span>\
+          </div>\
+        </div>\
         <chat-top-bar\
           :expert="expert"\
           :running="sending || streaming"\
@@ -1441,4 +1464,3 @@
 
   window.ExpertTasksPage = ExpertTasksPage;
 })();
-

@@ -52,7 +52,7 @@
         <div class="project-header-actions">\
           <button\
             type="button"\
-            class="project-header-action-btn"\
+            class="project-header-action-btn task-top-bar-new-task-btn"\
             title="发起任务"\
             @click="$emit(\'new-task\')">\
             <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">\

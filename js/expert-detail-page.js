@@ -151,7 +151,7 @@
       function goAssignTask() {
         if (!expert.value) return;
         var task = store.createTask({ expertId: expert.value.id, title: '新任务', type: 'dialogue' });
-        ctx.emit('nav', '/experts/' + expert.value.id + '/tasks/' + task.id);
+        ctx.emit('nav', '/experts/' + expert.value.id + '/tasks/' + task.id + '?starting=1');
       }
 
       var loadSeq = 0;
