@@ -1477,7 +1477,7 @@
 
       function deleteTaskItem(task) {
         ElementPlus.ElMessageBox.confirm(
-          '确定删除该任务？相关对话将一并删除，任务产物会继续保留。', '删除任务',
+          '确定删除该任务？对话记录将被删除，相关产物不会删除', '删除任务',
           { confirmButtonText: '删除', cancelButtonText: '取消', type: 'warning' }
         ).then(function () {
           function afterDeleted() {
@@ -3806,7 +3806,7 @@
                   <template #default="{ row }">\
                     <div class="hub-skill-cell">\
                       <span class="hub-skill-icon" aria-hidden="true">{{ row.icon || \'🔌\' }}</span>\
-                      <span class="hub-skill-title">{{ mcpHubDisplayName(row) }}<span class="hub-skill-eid">({{ mcpHubEnglishId(row) }})</span></span>\
+                      <span class="hub-skill-title">{{ mcpHubDisplayName(row) }}</span>\
                     </div>\
                   </template>\
                 </el-table-column>\
@@ -3914,10 +3914,6 @@
             <div v-loading="mcpDetailLoading">\
               <el-alert v-if="mcpDetailError" :title="mcpDetailError" type="warning" :closable="false" show-icon />\
               <template v-else>\
-                <div class="detail-section-head">\
-                  <h3 class="detail-section-title">可调用工具</h3>\
-                  <p class="detail-section-desc">共 {{ mcpDetailTools.length }} 个工具</p>\
-                </div>\
                 <el-table v-if="mcpDetailTools.length" :data="mcpDetailTools" stripe max-height="440" class="toolset-table">\
                   <el-table-column prop="name" label="工具名称" min-width="220" show-overflow-tooltip />\
                   <el-table-column prop="description" label="工具描述" min-width="340" show-overflow-tooltip />\
