@@ -280,7 +280,7 @@
   }
 
   /** DEV_MOCK MCP 演示种子版本； bump 后会对「空列表」专家补种一次（不覆盖已有配置） */
-  var MCP_DEMO_SEED_VERSION = 5;
+  var MCP_DEMO_SEED_VERSION = 6;
 
   function demoMcpServersForSeed(index) {
     var byIndex = window.DEMO_MCP_SERVERS_BY_INDEX || {};
@@ -3961,9 +3961,6 @@
     deleteTask: function (taskId) {
       state.tasks = state.tasks.filter(function (t) { return t.id !== taskId; });
       delete state.messages[taskId];
-      if (state.taskArtifacts) {
-        state.taskArtifacts = state.taskArtifacts.filter(function (a) { return a.taskId !== taskId; });
-      }
       persist();
     },
     deleteTaskRemote: async function (expertId, taskId) {

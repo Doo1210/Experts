@@ -39,6 +39,11 @@
       var mcpSecretVisible = Vue.ref(false);
       var mcpSecretTarget = Vue.ref(null);
       var mcpSecretDraft = Vue.ref({});
+      var mcpDetailVisible = Vue.ref(false);
+      var mcpDetailTarget = Vue.ref(null);
+      var mcpDetailTools = Vue.ref([]);
+      var mcpDetailLoading = Vue.ref(false);
+      var mcpDetailError = Vue.ref('');
       var mcpHubDialogVisible = Vue.ref(false);
       var mcpHubTab = Vue.ref('imported');
       var mcpHubInstalling = Vue.ref(false);
@@ -888,7 +893,7 @@
       function installSelectedHubMcps() {
         var ids = Object.keys(mcpHubSelectedById.value);
         if (!ids.length) {
-          ElementPlus.ElMessage.warning('请先勾选要导入的 MCP');
+          ElementPlus.ElMessage.warning('请先勾选要导入的 MCP 服务');
           return;
         }
         var items = ids.map(function (id) { return mcpHubSelectedById.value[id]; });
@@ -911,7 +916,14 @@
                 transport: item.transport === 'sse' ? 'sse' : 'streamable_http',
                 url: item.url || '',
                 envText: envText,
-                enabled: true
+                enabled: true,
+                validation: {
+                  status: 'available',
+                  errorSummary: '',
+                  toolCount: item.toolCount || (item.tools || []).length,
+                  tools: item.tools || [],
+                  testedAt: new Date().toISOString()
+                }
               });
             });
           });
@@ -920,7 +932,7 @@
             refreshMcpServers();
             mcpHubSelectedById.value = {};
             mcpHubDialogVisible.value = false;
-            ElementPlus.ElMessage.success(mcpEffectToast('已从平台导入 ' + items.length + ' 台 MCP 服务'));
+            ElementPlus.ElMessage.success(mcpEffectToast('已从平台导入 ' + items.length + ' 项 MCP 服务'));
           }).catch(function (err) {
             mcpHubInstalling.value = false;
             refreshMcpServers();
@@ -1027,10 +1039,47 @@
         }).finally(function () { mcpRowTestingName.value = ''; });
       }
 
+      function normalizeMcpTools(tools) {
+        return (Array.isArray(tools) ? tools : []).map(function (tool, index) {
+          if (typeof tool === 'string') {
+            return { name: tool, description: '暂无描述' };
+          }
+          tool = tool || {};
+          return {
+            name: tool.name || tool.id || ('工具 ' + (index + 1)),
+            description: tool.description || tool.summary || '暂无描述'
+          };
+        });
+      }
+
+      function openMcpDetail(row) {
+        if (!row) return;
+        mcpDetailTarget.value = row;
+        mcpDetailTools.value = normalizeMcpTools(row.tools);
+        mcpDetailError.value = '';
+        mcpDetailVisible.value = true;
+        if (mcpDetailTools.value.length) return;
+
+        mcpDetailLoading.value = true;
+        store.testMcpConnection(props.expertId, row).then(function (result) {
+          if (result.status !== 'available') {
+            mcpDetailError.value = result.errorSummary || '暂时无法获取可调用工具';
+            return;
+          }
+          mcpDetailTools.value = normalizeMcpTools(result.tools);
+          mcpDetailTarget.value = Object.assign({}, row, result);
+          return store.updateMcpServer(props.expertId, row.name, result).then(refreshMcpServers);
+        }).catch(function (err) {
+          mcpDetailError.value = (err && err.message) || '暂时无法获取可调用工具';
+        }).finally(function () {
+          mcpDetailLoading.value = false;
+        });
+      }
+
       function deleteMcpServer(row) {
         ElementPlus.ElMessageBox.confirm(
-          '确定删除 MCP 服务「' + (row.name || row.id) + '」？删除后专家将无法调用该服务暴露的工具。',
-          '删除 MCP',
+          '确定删除 MCP 服务「' + (row.name || row.id) + '」？删除后专家将无法使用该服务提供的工具。',
+          '删除 MCP 服务',
           { confirmButtonText: '删除', cancelButtonText: '取消', type: 'warning' }
         ).then(function () {
           return store.deleteMcpServer(props.expertId, row.name);
@@ -1254,7 +1303,7 @@
             var conflict = store.findImCredentialConflict && store.findImCredentialConflict(props.expertId, lockField, secrets[lockField]);
             if (conflict) {
               imConflictProfile.value = conflict.expertName || conflict.expertId;
-              ElementPlus.ElMessage.error('该凭据（' + secrets[lockField] + '）正被 profile「' + imConflictProfile.value + '」使用，不能复用。');
+              ElementPlus.ElMessage.error('该凭据（' + secrets[lockField] + '）正被专家「' + imConflictProfile.value + '」使用，不能复用。');
               return;
             }
           }
@@ -1262,7 +1311,7 @@
           store.saveImChannels(props.expertId, imChannels.value, { gatewayEnabled: imGatewayEnabled.value });
           imSecretDraft.value = {};
           imPolicyDraft.value = {};
-          ElementPlus.ElMessage.success('配置已保存。需重启 gateway 生效。');
+          ElementPlus.ElMessage.success('配置已保存，请点击「应用配置」使其生效。');
           return;
         }
         if (!window.SidecarApi || !window.SidecarApi.putImChannels) return;
@@ -1272,13 +1321,13 @@
           applyImChannelsResponse(res);
           imSecretDraft.value = {};
           imPolicyDraft.value = {};
-          ElementPlus.ElMessage.success('配置已保存。需重启 gateway 生效。');
+          ElementPlus.ElMessage.success('配置已保存，请点击「应用配置」使其生效。');
         }).catch(function (err) {
           imSaving.value = false;
           var body = err && err.body;
           if (body && body.conflict_profile) {
             imConflictProfile.value = body.conflict_profile;
-            ElementPlus.ElMessage.error('该凭据正被 profile「' + body.conflict_profile + '」使用，不能复用。请为当前专家单独创建机器人/应用。');
+            ElementPlus.ElMessage.error('该凭据正被专家「' + body.conflict_profile + '」使用，不能复用。请为当前专家单独创建机器人或应用。');
           } else {
             ElementPlus.ElMessage.error('保存失败');
           }
@@ -1428,7 +1477,7 @@
 
       function deleteTaskItem(task) {
         ElementPlus.ElMessageBox.confirm(
-          '确定删除该任务？相关对话与产物将一并删除。', '删除任务',
+          '确定删除该任务？相关对话将一并删除，任务产物会继续保留。', '删除任务',
           { confirmButtonText: '删除', cancelButtonText: '取消', type: 'warning' }
         ).then(function () {
           function afterDeleted() {
@@ -2047,7 +2096,7 @@
       // ---- 人设 Tab 方法 ----
       function exportPersonaMd() {
         var content = persona.value.soulMd || '';
-        var filename = 'soul.md';
+        var filename = '专家人设.md';
         var blob = new Blob([content], { type: 'text/markdown;charset=utf-8' });
         var url = URL.createObjectURL(blob);
         var a = document.createElement('a');
@@ -2078,7 +2127,7 @@
       }
 
       function personaPreviewTabLabel() {
-        return 'soul.md';
+        return '人设内容';
       }
 
       // ---- 技能 Tab 方法 ----
@@ -2300,8 +2349,8 @@
         var s = imConnectionStatus(ch);
         if (s === 'disabled') return '已禁用';
         if (s === 'not_configured') return '未配置';
-        if (s === 'gateway_stopped') return '网关未运行';
-        if (s === 'pending_restart') return '待重启';
+        if (s === 'gateway_stopped') return '渠道连接暂不可用';
+        if (s === 'pending_restart') return '待应用';
         if (s === 'connected' || s === 'configured') return '已连接';
         if (s === 'fatal') return '错误';
         return '—';
@@ -2334,13 +2383,13 @@
             });
             store.saveImChannels(props.expertId, imChannels.value, { gatewayEnabled: true });
             imRestarting.value = false;
-            ElementPlus.ElMessage.success('Gateway 已重启，渠道连接状态已刷新');
+            ElementPlus.ElMessage.success('渠道配置已生效，连接状态已刷新');
           }, 1200);
           return;
         }
         if (!window.SidecarApi || !window.SidecarApi.restartGateway) {
           imRestarting.value = false;
-          ElementPlus.ElMessage.warning('当前后端暂不支持重启 gateway');
+          ElementPlus.ElMessage.warning('当前服务暂不支持应用渠道配置');
           return;
         }
         window.SidecarApi.restartGateway(String(props.expertId)).then(function () {
@@ -2352,10 +2401,10 @@
             c.state = imConnectionStatus(c);
           });
           imRestarting.value = false;
-          ElementPlus.ElMessage.success('Gateway 已重启，渠道连接状态已刷新');
+          ElementPlus.ElMessage.success('渠道配置已生效，连接状态已刷新');
         }).catch(function () {
           imRestarting.value = false;
-          ElementPlus.ElMessage.error('重启 gateway 失败');
+          ElementPlus.ElMessage.error('应用渠道配置失败，请稍后重试');
         });
       }
 
@@ -2504,7 +2553,7 @@
         if (state === 'not_configured') return '未配置';
         if (state === 'connected' || state === 'configured') return '已连接';
         if (state === 'pending_restart') return '待重启';
-        if (state === 'gateway_stopped') return '网关未运行';
+        if (state === 'gateway_stopped') return '渠道连接暂不可用';
         if (state === 'fatal') return '错误';
         return state || '—';
       }
@@ -2749,6 +2798,11 @@
         mcpSecretVisible: mcpSecretVisible,
         mcpSecretTarget: mcpSecretTarget,
         mcpSecretDraft: mcpSecretDraft,
+        mcpDetailVisible: mcpDetailVisible,
+        mcpDetailTarget: mcpDetailTarget,
+        mcpDetailTools: mcpDetailTools,
+        mcpDetailLoading: mcpDetailLoading,
+        mcpDetailError: mcpDetailError,
         mcpForm: mcpForm,
         mcpEnabledCount: mcpEnabledCount,
         mcpNeedsAttentionCount: mcpNeedsAttentionCount,
@@ -2770,6 +2824,7 @@
         submitMcpForm: submitMcpForm,
         testMcpFormConnection: testMcpFormConnection,
         testMcpRowConnection: testMcpRowConnection,
+        openMcpDetail: openMcpDetail,
         toggleMcpEnabled: toggleMcpEnabled,
         openMcpSecretForm: openMcpSecretForm,
         submitMcpSecrets: submitMcpSecrets,
@@ -2891,25 +2946,16 @@
                     <h3 class="detail-section-title">人设</h3>\
                     <p class="detail-section-desc">定义专家的核心职责、工作流程与行为准则。保存后默认在新会话生效，不影响已打开的对话。</p>\
                   </div>\
-                  <div v-if="!personaOnboardDismissed && !persona.soulMd" class="persona-onboard-banner">\
-                    <div class="persona-onboard-title">首次使用：为专家编写 SOUL.md</div>\
-                    <div class="persona-onboard-desc">SOUL.md 是专家的「灵魂文件」，定义其角色、职责与行为准则。你可以从模板创建，或导入已有的 soul.md。</div>\
-                    <div class="persona-onboard-actions">\
-                      <el-button type="primary" size="small" @click="fillPersonaFromTemplate">从模板创建</el-button>\
-                      <el-button size="small" @click="importPersonaSoulMd">导入 soul.md</el-button>\
-                      <el-button link size="small" @click="dismissPersonaOnboard">知道了</el-button>\
-                    </div>\
-                  </div>\
                   <div class="detail-action-bar detail-action-bar--split">\
                     <input ref="personaImportInput" type="file" accept=".md" class="material-file-input-hidden" @change="handlePersonaImport">\
                     <div class="detail-action-left">\
                       <el-button size="small" @click="triggerPersonaImport">\
                         <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" style="margin-right:4px"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>\
-                        导入soul.md\
+                        导入人设\
                       </el-button>\
                       <el-button size="small" @click="exportPersonaMd">\
                         <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" style="margin-right:4px"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>\
-                        导出soul.md\
+                        导出人设\
                       </el-button>\
                     </div>\
                     <div class="detail-action-right">\
@@ -2919,7 +2965,7 @@
                   <div class="persona-split-layout">\
                     <div class="persona-edit-panel">\
                       <div class="persona-edit-tabs">\
-                        <button type="button" class="persona-edit-tab active">soul.md</button>\
+                        <button type="button" class="persona-edit-tab active">人设内容</button>\
                       </div>\
                       <div class="persona-edit-toolbar">\
                         <el-dropdown trigger="hover" @command="insertPersonaMarkdown">\
@@ -2969,7 +3015,7 @@
                           </template>\
                         </el-dropdown>\
                       </div>\
-                      <el-input v-model="persona.soulMd" type="textarea" :rows="14" placeholder="编辑 SOUL.md，支持 Markdown 格式" class="persona-textarea" />\
+                      <el-input v-model="persona.soulMd" type="textarea" :rows="14" placeholder="填写专家的角色、职责、工作流程与行为准则" class="persona-textarea" />\
                     </div>\
                     <div class="persona-preview-panel">\
                       <div class="persona-preview-head">\
@@ -2985,12 +3031,7 @@
                 <div class="detail-tab-pane">\
                   <div class="detail-section-head">\
                     <h3 class="detail-section-title">工作空间</h3>\
-                    <p class="detail-section-desc">专家工作空间根；所有 task 共享此目录树，工作目录默认为根，用户可改为子目录</p>\
-                  </div>\
-                  <div class="workspace-root-bar">\
-                    <span style="font-weight:600;color:var(--text-primary,#303133)">工作空间根：</span>\
-                    <span class="workspace-root-path">{{ workspaceRootPath }}</span>\
-                    <el-button size="small" @click="openWorkspaceRootDialog">更改路径</el-button>\
+                    <p class="detail-section-desc">集中管理专家执行任务时使用的文件与资料，也可按需要划分不同文件夹。</p>\
                   </div>\
                   <div class="detail-action-bar detail-action-bar--split workspace-action-bar">\
                     <input ref="materialFileInput" type="file" multiple class="material-file-input-hidden" @change="handleMaterialFileSelect">\
@@ -3158,7 +3199,7 @@
                   <div v-loading="capabilitiesLoading || capabilitySaving || localSkillUploading">\
                     <div v-if="skillBindings.length === 0 && !capabilitiesLoading" class="profile-empty-state">\
                       <p class="profile-empty-title">暂无已安装技能</p>\
-                      <p class="profile-empty-desc">创建专家时会自动 seed 内置技能；也可从平台导入或本地上传。</p>\
+                      <p class="profile-empty-desc">创建专家时会自动配备基础技能；也可从平台导入或本地上传。</p>\
                     </div>\
                     <div v-else-if="filteredSkills.length === 0" class="profile-empty-state">\
                       <p class="profile-empty-title">无匹配技能</p>\
@@ -3275,20 +3316,19 @@
                 <div class="detail-tab-pane">\
                   <div class="detail-section-head">\
                     <h3 class="detail-section-title">MCP</h3>\
-                    <p class="detail-section-desc">接入外部 MCP 服务，扩展专家可调用的外部工具。配置写入本专家 config.yaml，凭据进 .env<span v-if="runningSessionCount > 0">。当前有 {{ runningSessionCount }} 个运行中会话，MCP 变更将在新会话生效</span></p>\
+                    <p class="detail-section-desc">连接 MCP 服务，扩展专家可使用的工具<span v-if="runningSessionCount > 0">。当前有 {{ runningSessionCount }} 个运行中会话，变更将在新会话中生效</span>。</p>\
                   </div>\
                   <div class="detail-action-bar detail-action-bar--split">\
                     <div class="detail-action-left">\
-                      <span class="detail-action-bar-label">已启用 {{ mcpEnabledCount }} 台<span v-if="mcpNeedsAttentionCount"> · 其中 {{ mcpNeedsAttentionCount }} 台需处理</span></span>\
+                      <span class="detail-action-bar-label">已启用 {{ mcpEnabledCount }} 项<span v-if="mcpNeedsAttentionCount"> · 其中 {{ mcpNeedsAttentionCount }} 项需处理</span></span>\
                     </div>\
                     <div class="detail-action-right">\
                       <el-button type="primary" size="small" @click="openMcpPlatformImportDialog">从平台导入</el-button>\
-                      <el-button size="small" :loading="mcpSaving" @click="openMcpForm">+ 添加</el-button>\
                     </div>\
                   </div>\
                   <div v-if="mcpServers.length === 0" class="profile-empty-state">\
-                    <p class="profile-empty-title">尚未接入外部 MCP 服务</p>\
-                    <p class="profile-empty-desc">MCP 用于连接 GitHub、数据库、文件系统等外部工具。可从平台导入，或点击「添加」手动配置。</p>\
+                    <p class="profile-empty-title">尚未连接 MCP 服务</p>\
+                    <p class="profile-empty-desc">可从平台导入 GitHub、数据库、文件系统等服务。</p>\
                   </div>\
                   <div v-else class="detail-table-wrap">\
                     <el-table :data="mcpServers" stripe class="toolset-table">\
@@ -3302,7 +3342,7 @@
                           />\
                         </template>\
                       </el-table-column>\
-                      <el-table-column label="服务器名" min-width="160">\
+                      <el-table-column label="服务名称" min-width="160">\
                         <template #default="{ row }">\
                           <div class="toolset-name-cell">{{ row.name }}</div>\
                         </template>\
@@ -3310,23 +3350,13 @@
                       <el-table-column label="类型" min-width="150" align="center">\
                         <template #default="{ row }">{{ mcpTypeLabel(row) }}</template>\
                       </el-table-column>\
-                      <el-table-column label="状态" width="116" align="center">\
-                        <template #default="{ row }">\
-                          <el-tooltip :content="mcpStatusDetail(row)" placement="top">\
-                            <span class="mcp-status" :class="mcpStatusClass(row)">\
-                              <span class="mcp-status-dot"></span>{{ mcpStatusLabel(row) }}\
-                            </span>\
-                          </el-tooltip>\
-                        </template>\
-                      </el-table-column>\
                       <el-table-column label="工具数" width="86" align="center">\
                         <template #default="{ row }">{{ mcpToolCountLabel(row) }}</template>\
                       </el-table-column>\
-                      <el-table-column label="操作" width="206" align="left" class-name="detail-table-action-cell">\
+                      <el-table-column label="操作" width="128" align="left" class-name="detail-table-action-cell">\
                         <template #default="{ row }">\
                           <div class="detail-table-actions">\
-                            <el-button link type="primary" size="small" :loading="mcpRowTestingName === row.name" @click="testMcpRowConnection(row)">测试连接</el-button>\
-                            <el-button link type="primary" size="small" @click="openMcpEditForm(row)">编辑</el-button>\
+                            <el-button link type="primary" size="small" @click="openMcpDetail(row)">详情</el-button>\
                             <el-button link type="danger" size="small" @click="deleteMcpServer(row)">删除</el-button>\
                           </div>\
                         </template>\
@@ -3336,11 +3366,11 @@
                 </div>\
               </el-tab-pane>\
               <el-tab-pane name="im">\
-                <template #label>IM渠道 <span v-if="tabBadges.im" class="tab-count-badge">{{ tabBadges.im }}</span></template>\
+                <template #label>消息渠道 <span v-if="tabBadges.im" class="tab-count-badge">{{ tabBadges.im }}</span></template>\
                 <div class="detail-tab-pane im-channel-tab">\
                   <div class="detail-section-head">\
-                    <h3 class="detail-section-title">IM渠道</h3>\
-                    <p class="detail-section-desc">配置专家可被触达的 IM 渠道（企业微信 AI Bot / 企业微信自建应用 / 钉钉 / 飞书）。两项企业微信分开展示，对应不同凭据与连接模型。启用后用户在 IM 端 @机器人或私聊即可与该专家对话。</p>\
+                    <h3 class="detail-section-title">消息渠道</h3>\
+                    <p class="detail-section-desc">配置企业微信、钉钉、飞书等消息渠道。启用后，用户可通过群聊提及或私聊的方式与该专家对话。</p>\
                   </div>\
                   <div class="im-channel-layout">\
                     <div class="im-channel-sidebar">\
@@ -3387,7 +3417,7 @@
                         \
                         <div v-if="imConflictProfile" class="im-channel-conflict-hint">\
                           <el-alert type="error" :closable="false" show-icon>\
-                            该凭据正被 profile「{{ imConflictProfile }}」使用，不能复用。请为当前专家单独创建机器人/应用。\
+                            该凭据正被专家「{{ imConflictProfile }}」使用，不能复用。请为当前专家单独创建机器人或应用。\
                           </el-alert>\
                         </div>\
                         \
@@ -3395,12 +3425,12 @@
                           <div class="im-channel-toolbar-left">\
                             <el-button link type="primary" @click="openImSetupGuide(selectedImChannel)">设置指南 ↗</el-button>\
                             <span v-if="!selectedImChannel.enabled" class="im-channel-inline-hint">渠道已禁用，开启右上角开关并填写凭据后保存生效</span>\
-                            <span v-else-if="imConnectionStatus(selectedImChannel) === \'pending_restart\'" class="im-channel-inline-hint">配置已变更，需重启 Gateway 生效</span>\
+                            <span v-else-if="imConnectionStatus(selectedImChannel) === \'pending_restart\'" class="im-channel-inline-hint">配置已变更，请应用配置后生效</span>\
                           </div>\
                           <div class="im-channel-toolbar-right">\
                             <el-button type="primary" :loading="imSaving" @click="saveSelectedImChannel">保存</el-button>\
-                            <el-tooltip content="保存或切换启用状态后，需重启 Gateway 才能加载/卸载平台适配器（MVP 不支持热加载）" placement="top" effect="dark">\
-                              <el-button :loading="imRestarting" :disabled="imSaving" @click="restartImGateway">重启 Gateway</el-button>\
+                            <el-tooltip content="保存或切换启用状态后，请应用配置以更新渠道连接" placement="top" effect="dark">\
+                              <el-button :loading="imRestarting" :disabled="imSaving" @click="restartImGateway">应用配置</el-button>\
                             </el-tooltip>\
                           </div>\
                         </div>\
@@ -3419,7 +3449,7 @@
                               <el-input v-else v-model="imSecretDraft[field.key]" :type="field.password ? \'password\' : \'text\'" :placeholder="credentialPlaceholder(field)" :show-password="!!field.password" class="im-credential-input" />\
                             </div>\
                           </div>\
-                          <div class="im-channel-section-foot">凭据写入 <code>.env</code>（<code>WECOM_*</code> / <code>WECOM_CALLBACK_*</code> / <code>DINGTALK_*</code> / <code>FEISHU_*</code>），保存时校验唯一性（bot_id / corp_id / client_id / app_id 不可跨专家复用；两种企微命名空间互不冲突）</div>\
+                          <div class="im-channel-section-foot">凭据将安全保存，并在保存时检查是否已被其他专家使用。</div>\
                         </div>\
                         \
                         <div v-if="selectedImChannel.policyFields && selectedImChannel.policyFields.length" class="im-channel-section im-channel-policy-section">\
@@ -3429,7 +3459,7 @@
                                 <span class="im-channel-section-label im-channel-policy-title">访问策略</span>\
                                 <span class="im-channel-policy-summary">{{ imPolicySummary(selectedImChannel) }}</span>\
                               </template>\
-                              <div class="im-channel-section-foot">写入 <code>config.yaml</code> / <code>.env</code>，留空使用默认值</div>\
+                              <div class="im-channel-section-foot">未填写的选项将使用默认设置。</div>\
                               <div class="im-credential-form">\
                                 <div v-for="field in selectedImChannel.policyFields" :key="field.key" class="im-credential-row">\
                                   <div>\
@@ -3749,14 +3779,14 @@
                 <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/><path d="M7 8h2M11 8h6M7 12h10"/></svg>\
               </div>\
               <div class="dialog-header-text">\
-                <div class="dialog-header-title">从平台导入 MCP</div>\
-                <div class="dialog-header-sub">从我导入的或我创建的 MCP 库导入到当前专家</div>\
+                <div class="dialog-header-title">从平台导入 MCP 服务</div>\
+                <div class="dialog-header-sub">从已导入或已创建的服务中选择，并添加到当前专家</div>\
               </div>\
             </div>\
           </template>\
           <div class="form-dialog-body ed-dialog-body">\
             <div v-if="mcpHubInstalling" class="hub-install-progress">\
-              <div class="hub-install-progress-text">正在导入 MCP… {{ mcpHubInstallProgress }}%</div>\
+              <div class="hub-install-progress-text">正在导入 MCP 服务… {{ mcpHubInstallProgress }}%</div>\
               <el-progress :percentage="mcpHubInstallProgress" :stroke-width="10" />\
             </div>\
             <template v-else>\
@@ -3771,11 +3801,11 @@
                 stripe\
                 max-height="520"\
                 class="toolset-table capability-picker-table hub-skill-table"\
-                empty-text="暂无可导入的平台 MCP"\
+                empty-text="暂无可导入的 MCP 服务"\
                 @selection-change="onMcpHubSelectionChange"\
               >\
                 <el-table-column type="selection" width="48" align="center" />\
-                <el-table-column label="MCP" min-width="280">\
+                <el-table-column label="MCP 服务" min-width="280">\
                   <template #default="{ row }">\
                     <div class="hub-skill-cell">\
                       <span class="hub-skill-icon" aria-hidden="true">{{ row.icon || \'🔌\' }}</span>\
@@ -3788,7 +3818,7 @@
           </div>\
           <template #footer>\
             <div class="dialog-footer-custom dialog-footer-wizard hub-dialog-footer">\
-              <span class="hub-selected-count">已选择 <strong>{{ mcpHubSelectedCount }}</strong> 个 MCP</span>\
+              <span class="hub-selected-count">已选择 <strong>{{ mcpHubSelectedCount }}</strong> 项服务</span>\
               <div class="dialog-footer-actions">\
                 <el-button class="wizard-btn wizard-btn-cancel" :disabled="mcpHubInstalling" @click="mcpHubDialogVisible = false">取消</el-button>\
                 <el-button type="primary" class="wizard-btn wizard-btn-submit wizard-btn-submit-expert" :loading="mcpHubInstalling" :disabled="mcpHubSelectedCount === 0" @click="installSelectedHubMcps">导入</el-button>\
@@ -3805,7 +3835,7 @@
               </div>\
               <div class="dialog-header-text">\
                 <div class="dialog-header-title">{{ mcpFormMode === \'edit\' ? \'编辑 MCP 服务\' : \'添加 MCP 服务\' }}</div>\
-                <div class="dialog-header-sub">{{ mcpFormMode === \'edit\' ? \'修改配置后将在新会话生效\' : \'配置 HTTP MCP 服务（Streamable HTTP / SSE）\' }}</div>\
+                <div class="dialog-header-sub">{{ mcpFormMode === \'edit\' ? \'修改配置后将在新会话生效\' : \'填写 MCP 服务的连接信息\' }}</div>\
               </div>\
             </div>\
           </template>\
@@ -3823,11 +3853,11 @@
               <el-form-item label="URL" required>\
                 <el-input v-model="mcpForm.url" :placeholder="mcpUrlPlaceholder()" />\
               </el-form-item>\
-              <el-form-item label="Env">\
-                <el-input v-model="mcpForm.envText" type="textarea" :rows="3" placeholder="多行 KEY=VALUE；密钥建议勾选下方「作为密钥」" />\
+              <el-form-item label="附加参数">\
+                <el-input v-model="mcpForm.envText" type="textarea" :rows="3" placeholder="每行填写一项，格式为“名称=值”；敏感信息请勾选下方选项" />\
               </el-form-item>\
               <el-form-item>\
-                <el-checkbox v-model="mcpForm.asSecret">作为密钥写入 .env</el-checkbox>\
+                <el-checkbox v-model="mcpForm.asSecret">作为敏感凭据安全保存</el-checkbox>\
               </el-form-item>\
               <template v-if="mcpForm.asSecret">\
                 <div class="ed-mcp-secret-panel">\
@@ -3870,6 +3900,45 @@
             </div>\
           </template>\
         </el-dialog>\
+        <!-- MCP 详情 -->\
+        <el-dialog v-model="mcpDetailVisible" width="680px" append-to-body class="form-dialog ed-dialog ed-dialog-mcp-detail">\
+          <template #header>\
+            <div class="dialog-header-custom dialog-header-mcp">\
+              <div class="dialog-header-icon dialog-header-icon-mcp">\
+                <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/><path d="M7 8h2M11 8h6M7 12h10"/></svg>\
+              </div>\
+              <div class="dialog-header-text">\
+                <div class="dialog-header-title">MCP 详情</div>\
+                <div class="dialog-header-sub">{{ (mcpDetailTarget && mcpDetailTarget.name) || \'MCP 服务\' }}</div>\
+              </div>\
+            </div>\
+          </template>\
+          <div class="form-dialog-body ed-dialog-body">\
+            <div v-loading="mcpDetailLoading">\
+              <el-alert v-if="mcpDetailError" :title="mcpDetailError" type="warning" :closable="false" show-icon />\
+              <template v-else>\
+                <div class="detail-section-head">\
+                  <h3 class="detail-section-title">可调用工具</h3>\
+                  <p class="detail-section-desc">共 {{ mcpDetailTools.length }} 个工具</p>\
+                </div>\
+                <el-table v-if="mcpDetailTools.length" :data="mcpDetailTools" stripe max-height="440" class="toolset-table">\
+                  <el-table-column prop="name" label="工具名称" min-width="220" show-overflow-tooltip />\
+                  <el-table-column prop="description" label="工具描述" min-width="340" show-overflow-tooltip />\
+                </el-table>\
+                <div v-else class="profile-empty-state">\
+                  <p class="profile-empty-title">暂无可调用工具</p>\
+                </div>\
+              </template>\
+            </div>\
+          </div>\
+          <template #footer>\
+            <div class="dialog-footer-custom dialog-footer-wizard">\
+              <div class="dialog-footer-actions">\
+                <el-button type="primary" class="wizard-btn" @click="mcpDetailVisible = false">关闭</el-button>\
+              </div>\
+            </div>\
+          </template>\
+        </el-dialog>\
         <!-- MCP 密钥 -->\
         <el-dialog v-model="mcpSecretVisible" width="480px" append-to-body class="form-dialog ed-dialog ed-dialog-secret" :close-on-click-modal="false">\
           <template #header>\
@@ -3879,7 +3948,7 @@
               </div>\
               <div class="dialog-header-text">\
                 <div class="dialog-header-title">填写密钥</div>\
-                <div class="dialog-header-sub">{{ (mcpSecretTarget && mcpSecretTarget.name) || \'MCP 服务\' }} · 密钥仅写入本专家环境</div>\
+                <div class="dialog-header-sub">{{ (mcpSecretTarget && mcpSecretTarget.name) || \'MCP 服务\' }} · 凭据仅供当前专家使用</div>\
               </div>\
             </div>\
           </template>\

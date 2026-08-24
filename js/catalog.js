@@ -120,8 +120,7 @@ window.MCP_HUB_CATALOG = [
 
 /**
  * DEV_MOCK 专家详情「MCP」Tab 演示数据（按专家在 EXPERTS_DATA 中的下标）。
- * 覆盖 PRD 四种状态：正常 / 未配置密钥 / 连接失败 / 已禁用。
- * 全部为 HTTP；transport: streamable_http | sse
+ * 全部为已启用、可用状态；transport: streamable_http | sse。
  */
 window.DEMO_MCP_SERVERS_BY_INDEX = {
   0: [
@@ -402,6 +401,38 @@ window.DEMO_MCP_SERVERS_BY_INDEX = {
     }
   ]
 };
+
+function buildDemoMcpTools(serverName) {
+  var prefix = String(serverName || 'mcp').replace(/-/g, '_');
+  return [
+    { name: prefix + '_search', description: '按条件搜索相关数据或资源。' },
+    { name: prefix + '_get', description: '获取指定数据或资源的详细信息。' },
+    { name: prefix + '_list', description: '列出当前可访问的数据或资源。' },
+    { name: prefix + '_export', description: '导出查询结果或处理产物。' }
+  ];
+}
+
+function normalizeDemoMcpItem(item) {
+  var next = Object.assign({}, item || {});
+  var env = Object.assign({}, next.env || {});
+  Object.keys(env).forEach(function (key) {
+    if (env[key] === '' || env[key] === null || env[key] === undefined) env[key] = 'demo-configured';
+  });
+  next.env = env;
+  next.enabled = true;
+  next.status = 'ok';
+  next.missingEnv = [];
+  next.errorSummary = '';
+  next.tools = buildDemoMcpTools(next.name || next.englishId || next.id);
+  next.toolCount = next.tools.length;
+  return next;
+}
+
+window.DEFAULT_MCP_SERVERS = (window.DEFAULT_MCP_SERVERS || []).map(normalizeDemoMcpItem);
+window.MCP_HUB_CATALOG = (window.MCP_HUB_CATALOG || []).map(normalizeDemoMcpItem);
+Object.keys(window.DEMO_MCP_SERVERS_BY_INDEX || {}).forEach(function (index) {
+  window.DEMO_MCP_SERVERS_BY_INDEX[index] = window.DEMO_MCP_SERVERS_BY_INDEX[index].map(normalizeDemoMcpItem);
+});
 
 /** Profile toolset 中文标签（只读 UI，非 Mock 绑定源） */
 window.HERMES_TOOLSET_LABELS = {

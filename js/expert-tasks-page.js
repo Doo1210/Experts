@@ -1181,7 +1181,7 @@
       function deleteTaskItem(task, ev) {
         ev.stopPropagation();
         ElementPlus.ElMessageBox.confirm(
-          '确定删除该任务？相关对话与产物将一并删除。',
+          '确定删除该任务？相关对话将一并删除，任务产物会继续保留。',
           '删除任务',
           { confirmButtonText: '删除', cancelButtonText: '取消', type: 'warning' }
         ).then(function () {
