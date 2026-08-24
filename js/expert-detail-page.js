@@ -3350,9 +3350,6 @@
                       <el-table-column label="类型" min-width="150" align="center">\
                         <template #default="{ row }">{{ mcpTypeLabel(row) }}</template>\
                       </el-table-column>\
-                      <el-table-column label="工具数" width="86" align="center">\
-                        <template #default="{ row }">{{ mcpToolCountLabel(row) }}</template>\
-                      </el-table-column>\
                       <el-table-column label="操作" width="128" align="left" class-name="detail-table-action-cell">\
                         <template #default="{ row }">\
                           <div class="detail-table-actions">\
