@@ -4969,6 +4969,7 @@
       { kind: 'thought', pattern: /思考|think|推理|思路/, label: '思考 / 推理', desc: '较长思考后回复' },
       { kind: 'tool', pattern: /调用工具|工具|查询|检索|tool/, label: '查询 / 检索 / 工具', desc: '多次工具调用后回复' },
       { kind: 'subagent', pattern: /子智能体|复杂|委派|subagent/i, label: '子智能体 / 委派', desc: '子智能体流程' },
+      { kind: 'file', pattern: /生成文件|文件生成|导出文件|生成报表|生成文档|生成\s*Excel|导出\s*Excel|生成表格/i, label: '生成文件 / 导出', desc: '处理 → 生成文件条 → 回复' },
       { kind: 'clarify', pattern: /澄清|clarify/, label: '澄清', desc: '处理 → 说明 → 澄清卡片' },
       { kind: 'approval', pattern: /审批|确认|approval/, label: '审批 / 确认', desc: '处理 → 说明 → 审批卡片' }
     ],
@@ -5241,6 +5242,38 @@
           push({ type: 'reply.commit', content: '抱歉，工具调用失败，建议稍后重试或切换数据源。' });
           push({ type: 'done', script: 'error' });
         }, 3600);
+        return { kind: kind, scheduled: steps.length };
+      }
+
+      if (kind === 'file') {
+        push({ type: 'thought.start', title: '思考中' });
+        later(function () {
+          push({ type: 'text.delta', text: '整理分析结论，并按工作空间的交付格式生成文件。' });
+          push({ type: 'thought.commit', duration: 0.6 });
+        }, 500);
+        later(function () {
+          push({ type: 'tool.start', toolName: 'export_report', params: { format: 'xlsx', topic: shortT } });
+        }, 900);
+        later(function () {
+          push({ type: 'tool.commit', toolName: 'export_report', params: { format: 'xlsx', topic: shortT }, summary: '已汇总数据并生成 Excel 报告', duration: 1.1, isError: false });
+        }, 1700);
+        later(function () {
+          push({
+            type: 'file.commit',
+            name: '分析结果.xlsx',
+            size: 246784,
+            mime: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            content: '分析结果\n\n任务：' + (t || '当前任务') + '\n\n指标,数值\n完成率,96.4%\n异常项,3\n\n（模拟生成文件 · 对接引擎后替换为真实文件内容）'
+          });
+        }, 2200);
+        later(function () {
+          push({ type: 'reply.start' });
+          push({ type: 'text.delta', text: '分析文件已生成，可直接预览或下载。' });
+        }, 2700);
+        later(function () {
+          push({ type: 'reply.commit', content: '分析文件已生成，可直接预览或下载。' });
+          push({ type: 'done', script: 'file' });
+        }, 3300);
         return { kind: kind, scheduled: steps.length };
       }
 

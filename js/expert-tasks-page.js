@@ -269,6 +269,29 @@
         }
       }
 
+      function handleGeneratedFilePreview(file) {
+        if (!file) return;
+        // Generated files are already self-contained in the dialogue message,
+        // so they can reuse the workspace preview dialog without a tree lookup.
+        previewFile.value = {
+          id: file.id,
+          name: file.name || file.fileName || '未命名文件',
+          size: file.size || 0,
+          mime: file.mime || '',
+          content: file.content || '',
+          kind: 'file'
+        };
+      }
+
+      function handleGeneratedFileDownload(file) {
+        if (!file || !window.AppShared || !window.AppShared.downloadWorkspaceFile) return;
+        window.AppShared.downloadWorkspaceFile({
+          name: file.name || file.fileName || '未命名文件',
+          mime: file.mime || '',
+          content: file.content || ''
+        });
+      }
+
       function handleCreateFolder(payload) {
         if (!payload || !payload.name) return;
         if (!store.addWorkspaceFolder) return;
@@ -1048,6 +1071,16 @@
               });
               loadMessages();
               Vue.nextTick(function () { scrollChatToBottom(); });
+            } else if (step.type === 'file.commit') {
+              store.addMessage(taskId, {
+                role: 'expert', type: 'generated_file', expertId: expert.value.id,
+                name: step.name,
+                size: step.size,
+                mime: step.mime,
+                content: step.content || ''
+              });
+              loadMessages();
+              Vue.nextTick(function () { scrollChatToBottom(); });
             } else if (step.type === 'error.commit') {
               store.addMessage(taskId, {
                 role: 'expert', type: 'error', expertId: expert.value.id,
@@ -1279,7 +1312,8 @@
         sessionModel: sessionModel, sessionCwd: sessionCwd, workspaceOpen: workspaceOpen,
         workspaceTree: workspaceTree, workspaceRootPath: workspaceRootPath, previewFile: previewFile,
         loadWorkspaceTree: loadWorkspaceTree, handleSetCwd: handleSetCwd, handlePreviewFile: handlePreviewFile,
-        handleDownloadFile: handleDownloadFile,
+        handleDownloadFile: handleDownloadFile, handleGeneratedFilePreview: handleGeneratedFilePreview,
+        handleGeneratedFileDownload: handleGeneratedFileDownload,
         handleCreateFolder: handleCreateFolder, handleUploadFile: handleUploadFile,
         handleOpenWorkspaceFromTask: handleOpenWorkspaceFromTask,
         toggleWorkspace: toggleWorkspace,
@@ -1331,7 +1365,7 @@
                       <img class="msg-avatar" :src="expert.avatar" :alt="expert.name" />\
                       <span class="msg-sender">{{ expert.name }}</span>\
                     </div>\
-                    <expert-turn-flow :segments="turnSegmentsFor(group, groupIndex)" :render-markdown="renderMarkdown" />\
+                    <expert-turn-flow :segments="turnSegmentsFor(group, groupIndex)" :render-markdown="renderMarkdown" @preview-file="handleGeneratedFilePreview" @download-file="handleGeneratedFileDownload" />\
                   </div>\
                 </div>\
                 <user-message v-else :message="group.message" />\
@@ -1343,7 +1377,7 @@
                       <img class="msg-avatar" :src="expert.avatar" :alt="expert.name" />\
                       <span class="msg-sender">{{ expert.name }}</span>\
                     </div>\
-                    <expert-turn-flow :segments="liveOnlySegments" :render-markdown="renderMarkdown" />\
+                    <expert-turn-flow :segments="liveOnlySegments" :render-markdown="renderMarkdown" @preview-file="handleGeneratedFilePreview" @download-file="handleGeneratedFileDownload" />\
                   </div>\
                 </div>\
               </div>\

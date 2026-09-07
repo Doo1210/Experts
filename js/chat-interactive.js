@@ -105,42 +105,294 @@
   };
 
   /**
-   * 澄清提问卡片（HITL）
-   * props: { requestId, question, choices, answer }
-   * - pending 态（answer 为空）：展示选项按钮
-   * - resolved 态（answer 有值）：展示已选答案
+   * 澄清提问卡片（HITL）—— 新原型
+   *
+   * 支持两种模式（自动推断，亦可显式指定 mode）：
+   *   - 'choice'（多选）：最多 4 个预设选项 + "其他（输入你的答案）" 内联输入
+   *   - 'open'（开放）：单一自由输入框
+   *
+   * 交互规则（按需求文档）：
+   *   - 点击预设选项：选中它，并清空 Other
+   *   - 在 Other 输入：取消预设选中
+   *   - Enter：提交当前答案（IME 组词态不触发）
+   *   - Shift+Enter：换行（仅 Other / 开放模式输入框）
+   *   - A/B/C/D：快速选中对应预设；E：聚焦 Other
+   *   - 跳过：发送空字符串 ""
+   *   - 提交中：Continue 按钮显示 loading，所有输入禁用
+   *
+   * props: { requestId, question, choices, answer, mode }
    * emits: 'answer' ({ requestId, choice })
+   *   - choice 为预设文本 / Other 文本 / ""（跳过）
    */
   var ClarifyCard = {
     props: {
       requestId: { type: String, default: '' },
-      question: { type: String, default: '' },
-      choices: { type: Array, default: function () { return []; } },
-      answer: { type: String, default: null }
+      question:  { type: String, default: '' },
+      choices:   { type: Array,  default: function () { return []; } },
+      answer:    { type: String, default: null },
+      mode:      { type: String, default: null }
+    },
+    data: function () {
+      return {
+        // -2 = 尚未选择；-1 = Other；>=0 = 预设下标
+        selectedIndex: -2,
+        otherValue: '',
+        submitting: false,
+        isComposing: false,
+        resolvedInit: false
+      };
     },
     computed: {
       isResolved: function () {
-        return this.answer !== null && this.answer !== undefined && this.answer !== '';
+        return this.answer !== null && this.answer !== undefined;
+      },
+      effectiveMode: function () {
+        if (this.mode === 'choice' || this.mode === 'open') return this.mode;
+        return (this.choices && this.choices.length) ? 'choice' : 'open';
+      },
+      choiceKeys: function () { return ['A', 'B', 'C', 'D']; },
+      currentAnswer: function () {
+        if (this.selectedIndex >= 0 && this.selectedIndex < (this.choices || []).length) {
+          return this.choices[this.selectedIndex];
+        }
+        if (this.selectedIndex === -1) return (this.otherValue || '').trim();
+        return '';
+      },
+      hasSelection: function () {
+        if (this.submitting || this.isResolved) return false;
+        if (this.effectiveMode === 'choice') {
+          if (this.selectedIndex >= 0) return true;
+          if (this.selectedIndex === -1) return (this.otherValue || '').trim().length > 0;
+          return false;
+        }
+        return (this.otherValue || '').trim().length > 0;
+      },
+      resolvedDisplay: function () {
+        if (this.answer === '' || this.answer == null) {
+          return { kind: 'skip', label: '已跳过' };
+        }
+        var idx = (this.choices || []).indexOf(this.answer);
+        if (idx >= 0) return { kind: 'preset', label: this.answer, index: idx };
+        return { kind: 'other', label: this.answer };
+      }
+    },
+    watch: {
+      answer: {
+        immediate: true,
+        handler: function (val) {
+          if (val != null && !this.resolvedInit) {
+            this.initFromAnswer(val);
+          } else if (val == null) {
+            this.selectedIndex = -2;
+            this.otherValue = '';
+            this.submitting = false;
+            this.isComposing = false;
+            this.resolvedInit = false;
+          }
+        }
       }
     },
     methods: {
-      selectChoice: function (choice) {
-        if (this.isResolved) return;
-        this.$emit('answer', { requestId: this.requestId, choice: choice });
+      initFromAnswer: function (val) {
+        if (val === '' || val == null) {
+          this.selectedIndex = -2;
+        } else {
+          var idx = (this.choices || []).indexOf(val);
+          if (idx >= 0) {
+            this.selectedIndex = idx;
+            this.otherValue = '';
+          } else {
+            this.selectedIndex = -1;
+            this.otherValue = val;
+          }
+        }
+        this.resolvedInit = true;
+      },
+      selectOption: function (idx) {
+        if (this.isResolved || this.submitting) return;
+        if (idx === -1) {
+          this.selectedIndex = -1;
+          this.$nextTick(this.focusOther);
+        } else {
+          this.selectedIndex = idx;
+          this.otherValue = '';
+        }
+      },
+      focusOther: function () {
+        var el = this.$refs.otherInput || this.$refs.openTextarea;
+        if (el && typeof el.focus === 'function') {
+          el.focus();
+          try {
+            var len = (el.value || '').length;
+            if (typeof el.setSelectionRange === 'function') el.setSelectionRange(len, len);
+          } catch (e) { /* ignore */ }
+        }
+      },
+      onOtherInput: function () {
+        if (this.selectedIndex !== -1) this.selectedIndex = -1;
+      },
+      onOtherKeydown: function (e) {
+        if (e.isComposing || e.keyCode === 229) return;
+        if (e.key === 'Enter' && !e.shiftKey) {
+          e.preventDefault();
+          this.submit();
+        }
+      },
+      onOpenKeydown: function (e) {
+        if (e.isComposing || e.keyCode === 229) return;
+        if (e.key === 'Enter' && !e.shiftKey) {
+          e.preventDefault();
+          this.submit();
+        }
+      },
+      onCompositionStart: function () { this.isComposing = true; },
+      onCompositionEnd: function () { this.isComposing = false; },
+      submit: function () {
+        if (this.submitting || this.isResolved) return;
+        if (!this.hasSelection) return;
+        var answer = this.currentAnswer;
+        var self = this;
+        this.submitting = true;
+        setTimeout(function () {
+          self.$emit('answer', { requestId: self.requestId, choice: answer });
+        }, 260);
+      },
+      skip: function () {
+        if (this.submitting || this.isResolved) return;
+        var self = this;
+        this.submitting = true;
+        setTimeout(function () {
+          self.$emit('answer', { requestId: self.requestId, choice: '' });
+        }, 200);
+      },
+      onDocumentKeydown: function (e) {
+        if (this.isResolved || this.submitting) return;
+        if (e.isComposing || e.keyCode === 229) return;
+        var t = e.target;
+        var isOurInput = t === this.$refs.otherInput || t === this.$refs.openTextarea;
+        var tag = (t && t.tagName) || '';
+        var isInputLike = tag === 'INPUT' || tag === 'TEXTAREA';
+        var key = (e.key || '').toUpperCase();
+        if (this.effectiveMode === 'choice') {
+          if (!isInputLike && key >= 'A' && key <= 'D') {
+            var idx = key.charCodeAt(0) - 65;
+            if (idx < (this.choices || []).length) {
+              e.preventDefault();
+              this.selectOption(idx);
+              return;
+            }
+          }
+          if (!isInputLike && key === 'E') {
+            e.preventDefault();
+            this.selectOption(-1);
+            return;
+          }
+          if (key === 'ENTER' && !isOurInput) {
+            e.preventDefault();
+            this.submit();
+          }
+        } else {
+          if (key === 'ENTER' && !isOurInput) {
+            e.preventDefault();
+            this.submit();
+          }
+        }
       }
     },
+    mounted: function () {
+      document.addEventListener('keydown', this.onDocumentKeydown);
+    },
+    beforeUnmount: function () {
+      document.removeEventListener('keydown', this.onDocumentKeydown);
+    },
     template: '\
-      <div class="clarify-card" :class="{ \'is-resolved\': isResolved }">\
+      <div class="clarify-card"\
+           :class="{\
+             \'is-resolved\': isResolved,\
+             \'is-submitting\': submitting,\
+             \'mode-choice\': effectiveMode === \'choice\',\
+             \'mode-open\': effectiveMode === \'open\'\
+           }">\
         <div class="clarify-header">\
-          <span class="clarify-icon">❓</span>\
+          <span class="clarify-icon" aria-hidden="true">❓</span>\
           <span class="clarify-question">{{ question }}</span>\
         </div>\
-        <div v-if="!isResolved" class="clarify-choices">\
-          <button v-for="c in choices" :key="c" type="button" class="clarify-choice-btn" @click="selectChoice(c)">{{ c }}</button>\
+        <div v-if="!isResolved" class="clarify-body">\
+          <template v-if="effectiveMode === \'choice\'">\
+            <div class="clarify-options" role="listbox" aria-label="澄清选项">\
+              <button v-for="(c, idx) in choices" :key="idx"\
+                      type="button"\
+                      role="option"\
+                      class="clarify-option"\
+                      :class="{ \'is-selected\': selectedIndex === idx }"\
+                      :aria-selected="selectedIndex === idx"\
+                      :disabled="submitting"\
+                      @click="selectOption(idx)">\
+                <span class="clarify-option-kbd">{{ choiceKeys[idx] }}</span>\
+                <span class="clarify-option-text">{{ c }}</span>\
+                <span class="clarify-option-check" aria-hidden="true">✓</span>\
+              </button>\
+              <div class="clarify-option is-other"\
+                   :class="{ \'is-selected\': selectedIndex === -1 }">\
+                <div class="clarify-option-other-row">\
+                  <span class="clarify-option-kbd">E</span>\
+                  <span class="clarify-option-text">其他（输入你的答案）</span>\
+                </div>\
+                <input ref="otherInput"\
+                       type="text"\
+                       class="clarify-option-other-input"\
+                       :value="otherValue"\
+                       @input="onOtherInput; otherValue = $event.target.value"\
+                       @keydown="onOtherKeydown"\
+                       @compositionstart="onCompositionStart"\
+                       @compositionend="onCompositionEnd"\
+                       :disabled="submitting"\
+                       placeholder="在此输入..." />\
+              </div>\
+            </div>\
+          </template>\
+          <template v-else>\
+            <textarea ref="openTextarea"\
+                      class="clarify-textarea"\
+                      :value="otherValue"\
+                      @input="otherValue = $event.target.value"\
+                      @keydown="onOpenKeydown"\
+                      @compositionstart="onCompositionStart"\
+                      @compositionend="onCompositionEnd"\
+                      :disabled="submitting"\
+                      placeholder="请输入..."\
+                      rows="3"></textarea>\
+          </template>\
+          <div class="clarify-actions">\
+            <button type="button"\
+                    class="clarify-skip-btn"\
+                    @click="skip"\
+                    :disabled="submitting">跳过</button>\
+            <button type="button"\
+                    class="clarify-continue-btn"\
+                    @click="submit"\
+                    :disabled="submitting || !hasSelection">\
+              <span v-if="submitting" class="clarify-spinner" aria-hidden="true"></span>\
+              <span v-else class="clarify-continue-label">继续</span>\
+              <span v-if="!submitting" class="clarify-kbd-hint" aria-hidden="true">⏎</span>\
+            </button>\
+          </div>\
         </div>\
-        <div v-else class="clarify-answer">\
-          <span class="clarify-answer-label">已选择：</span>\
-          <span class="clarify-answer-value">{{ answer }}</span>\
+        <div v-else class="clarify-resolved">\
+          <template v-if="resolvedDisplay.kind === \'skip\'">\
+            <span class="clarify-resolved-label">已跳过</span>\
+          </template>\
+          <template v-else-if="resolvedDisplay.kind === \'preset\'">\
+            <span class="clarify-resolved-label">已选择：</span>\
+            <span class="clarify-resolved-value">\
+              <span class="clarify-resolved-kbd">{{ choiceKeys[resolvedDisplay.index] }}</span>\
+              {{ resolvedDisplay.label }}\
+            </span>\
+          </template>\
+          <template v-else>\
+            <span class="clarify-resolved-label">已选择：</span>\
+            <span class="clarify-resolved-value">{{ resolvedDisplay.label }}</span>\
+          </template>\
         </div>\
       </div>'
   };
@@ -220,6 +472,16 @@
       mode:    { type: String, default: 'pending' }
     },
     emits: ['answer', 'resolve'],
+    data: function () {
+      return {
+        selectedChoiceIndex: -1,
+        otherValue: '',
+        otherExpanded: false,
+        otherFocused: false,
+        submitting: false,
+        isComposing: false
+      };
+    },
     computed: {
       isPending:  function () { return this.mode === 'pending'; },
       isResolved: function () { return this.mode === 'resolved'; },
@@ -228,7 +490,7 @@
 
       requestId: function () { return this.data.requestId || ''; },
       question:  function () { return this.data.question || ''; },
-      choices:   function () { return this.data.choices || []; },
+      choices:   function () { return (this.data.choices || []).slice(0, 4); },
       command:   function () { return this.data.command || ''; },
       description: function () { return this.data.description || ''; },
       allowPermanent: function () { return !!this.data.allowPermanent; },
@@ -245,6 +507,18 @@
         if (this.isClarify) return '❓';
         return this.isPending ? '⚠' : '🔐';
       },
+      otherKey: function () {
+        return String.fromCharCode(65 + this.choices.length);
+      },
+      clarifyAnswer: function () {
+        if (this.selectedChoiceIndex >= 0 && this.selectedChoiceIndex < this.choices.length) {
+          return this.choices[this.selectedChoiceIndex];
+        }
+        return (this.otherValue || '').trim();
+      },
+      hasClarifyAnswer: function () {
+        return this.isClarify && this.isPending && !this.submitting && this.clarifyAnswer.length > 0;
+      },
 
       resolvedAnswer: function () {
         return this.data.answer != null ? this.data.answer : '';
@@ -259,8 +533,74 @@
     },
     methods: {
       onSelectChoice: function (choice) {
-        if (!this.isPending) return;
-        this.$emit('answer', { requestId: this.requestId, choice: choice });
+        if (!this.isClarify || !this.isPending || this.submitting) return;
+        this.selectedChoiceIndex = this.choices.indexOf(choice);
+        this.otherValue = '';
+        this.otherExpanded = false;
+        this.otherFocused = false;
+      },
+      activateOther: function () {
+        if (!this.isClarify || !this.isPending || this.submitting) return;
+        this.selectedChoiceIndex = -1;
+        this.otherExpanded = true;
+        var self = this;
+        this.$nextTick(function () {
+          var el = self.$refs.otherInput;
+          if (el && typeof el.focus === 'function') el.focus();
+        });
+      },
+      onOtherInput: function (event) {
+        this.otherValue = event.target.value;
+        this.selectedChoiceIndex = -1;
+      },
+      onClarifyKeydown: function (event) {
+        if (event.isComposing || event.keyCode === 229) return;
+        if (event.key === 'Enter' && !event.shiftKey) {
+          event.preventDefault();
+          this.submitClarify();
+        }
+      },
+      submitClarify: function () {
+        if (!this.hasClarifyAnswer) return;
+        var self = this;
+        this.submitting = true;
+        setTimeout(function () {
+          self.$emit('answer', { requestId: self.requestId, choice: self.clarifyAnswer });
+        }, 220);
+      },
+      skipClarify: function () {
+        if (!this.isClarify || !this.isPending || this.submitting) return;
+        var self = this;
+        this.submitting = true;
+        setTimeout(function () {
+          self.$emit('answer', { requestId: self.requestId, choice: '' });
+        }, 180);
+      },
+      onClarifyDocumentKeydown: function (event) {
+        if (!this.isClarify || !this.isPending || this.submitting || event.isComposing || event.keyCode === 229) return;
+        if (event.metaKey || event.ctrlKey || event.altKey || event.defaultPrevented) return;
+        var target = event.target;
+        var tag = (target && target.tagName) || '';
+        var isInput = tag === 'INPUT' || tag === 'TEXTAREA' || (target && target.isContentEditable);
+        var key = (event.key || '').toUpperCase();
+
+        if (!isInput && key >= 'A' && key <= 'D') {
+          var index = key.charCodeAt(0) - 65;
+          if (index < this.choices.length) {
+            event.preventDefault();
+            this.onSelectChoice(this.choices[index]);
+            return;
+          }
+        }
+        if (!isInput && key === this.otherKey) {
+          event.preventDefault();
+          this.activateOther();
+          return;
+        }
+        if (!isInput && key === 'ENTER' && this.hasClarifyAnswer) {
+          event.preventDefault();
+          this.submitClarify();
+        }
       },
       onResolve: function (choice) {
         if (!this.isPending) return;
@@ -268,26 +608,82 @@
         this.$emit('resolve', { requestId: this.requestId, choice: choice, permanent: permanent });
       }
     },
+    mounted: function () {
+      document.addEventListener('keydown', this.onClarifyDocumentKeydown);
+    },
+    beforeUnmount: function () {
+      document.removeEventListener('keydown', this.onClarifyDocumentKeydown);
+    },
     template: '\
       <div class="hitl-card"\
            :class="[\'variant-\' + variant, \'mode-\' + mode, isDanger ? \'is-danger\' : \'\']">\
-        <div class="hitl-card-header">\
-          <span class="hitl-card-icon">{{ headerIcon }}</span>\
-          <span class="hitl-card-title">{{ headerTitle }}</span>\
-          <span v-if="isPending && headerBadge" class="hitl-card-badge">{{ headerBadge }}</span>\
-          <span v-else-if="isPending" class="hitl-card-pulse"></span>\
+        <div class="hitl-card-header" :class="{ \'is-clarify\': isClarify }">\
+          <template v-if="isClarify">\
+            <span class="hitl-card-icon">{{ headerIcon }}</span>\
+            <span class="hitl-card-title">{{ question }}</span>\
+          </template>\
+          <template v-else>\
+            <span class="hitl-card-icon">{{ headerIcon }}</span>\
+            <span class="hitl-card-title">{{ headerTitle }}</span>\
+            <span v-if="isPending && headerBadge" class="hitl-card-badge">{{ headerBadge }}</span>\
+            <span v-else-if="isPending" class="hitl-card-pulse"></span>\
+          </template>\
         </div>\
         <div class="hitl-card-body">\
           <template v-if="isClarify">\
-            <div v-if="question" class="hitl-card-question">{{ question }}</div>\
-            <div v-if="isPending && choices.length" class="hitl-card-choices">\
-              <button v-for="c in choices" :key="c"\
+            <div v-if="isPending && choices.length" class="hitl-clarify-options" role="group" aria-label="澄清选项">\
+              <button v-for="(choice, index) in choices" :key="choice + index"\
                       type="button"\
-                      class="hitl-card-choice-btn"\
-                      @click="onSelectChoice(c)">{{ c }}</button>\
+                      class="hitl-clarify-option"\
+                      :class="{ \'is-selected\': selectedChoiceIndex === index }"\
+                      :aria-pressed="selectedChoiceIndex === index"\
+                      :disabled="submitting"\
+                      @click="onSelectChoice(choice)">\
+                <span class="hitl-clarify-key">{{ String.fromCharCode(65 + index) }}</span>\
+                <span class="hitl-clarify-option-text">{{ choice }}</span>\
+              </button>\
+              <button v-if="!otherExpanded && !otherValue"\
+                      type="button"\
+                      class="hitl-clarify-option hitl-clarify-other-trigger"\
+                      :disabled="submitting"\
+                      @click="activateOther">\
+                <span class="hitl-clarify-key">{{ otherKey }}</span>\
+                <span class="hitl-clarify-option-text">其他（输入你的答案）</span>\
+              </button>\
+              <label v-else class="hitl-clarify-other" :class="{ \'is-focused\': otherFocused, \'is-filled\': otherValue.trim() }">\
+                <span class="hitl-clarify-key">{{ otherKey }}</span>\
+                <textarea ref="otherInput"\
+                          class="hitl-clarify-other-input"\
+                          :disabled="submitting"\
+                          :value="otherValue"\
+                          @blur="otherFocused = false"\
+                          @compositionend="isComposing = false"\
+                          @compositionstart="isComposing = true"\
+                          @focus="otherFocused = true"\
+                          @input="onOtherInput"\
+                          @keydown="onClarifyKeydown"\
+                          placeholder="其他（输入你的答案）"\
+                          rows="1"></textarea>\
+              </label>\
             </div>\
-            <div v-else-if="isPending && !choices.length" class="hitl-card-hint">\
-              请在下方输入框回复（回答后输入区将自动启用）\
+            <div v-else-if="isPending" class="hitl-clarify-open">\
+              <textarea ref="otherInput"\
+                        class="hitl-clarify-open-input"\
+                        :disabled="submitting"\
+                        :value="otherValue"\
+                        @compositionend="isComposing = false"\
+                        @compositionstart="isComposing = true"\
+                        @input="onOtherInput"\
+                        @keydown="onClarifyKeydown"\
+                        placeholder="请输入你的答案"\
+                        rows="3"></textarea>\
+            </div>\
+            <div v-if="isPending" class="hitl-clarify-actions">\
+              <button type="button" class="hitl-clarify-skip" :disabled="submitting" @click="skipClarify">跳过</button>\
+              <button type="button" class="hitl-clarify-continue" :disabled="submitting || !hasClarifyAnswer" @click="submitClarify">\
+                <span v-if="submitting" class="hitl-clarify-spinner" aria-hidden="true"></span>\
+                <template v-else>继续 <span class="hitl-clarify-enter" aria-hidden="true">⏎</span></template>\
+              </button>\
             </div>\
             <div v-else-if="isResolved" class="hitl-card-resolved">\
               <span class="hitl-card-resolved-label">已选择：</span>\
@@ -318,6 +714,63 @@
   };
 
   /**
+   * 专家在对话中生成文件后的轻量展示条。
+   * 父级负责把 preview / download 接到工作空间的既有能力上。
+   */
+  var GeneratedFileCard = {
+    props: {
+      file: { type: Object, required: true }
+    },
+    emits: ['preview', 'download'],
+    computed: {
+      name: function () { return this.file.name || this.file.fileName || '未命名文件'; },
+      sizeLabel: function () {
+        var bytes = Number(this.file.size || 0);
+        if (!isFinite(bytes) || bytes <= 0) return '文件已生成';
+        if (bytes < 1024) return bytes + ' B';
+        if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+        return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+      },
+      extension: function () {
+        var match = this.name.match(/\.([a-z0-9]{1,5})$/i);
+        return match ? match[1].toUpperCase() : 'FILE';
+      },
+      kind: function () {
+        var ext = this.extension.toLowerCase();
+        if (/^(xlsx|xls|csv)$/.test(ext)) return 'sheet';
+        if (ext === 'pdf') return 'pdf';
+        if (/^(doc|docx|md|txt)$/.test(ext)) return 'document';
+        if (/^(png|jpe?g|gif|webp|svg)$/.test(ext)) return 'image';
+        return 'file';
+      }
+    },
+    template: '\
+      <section class="generated-file-card" :class="\'file-kind-\' + kind" :aria-label="\'已生成文件：\' + name">\
+        <span class="generated-file-icon" aria-hidden="true">\
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">\
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>\
+            <polyline points="14 2 14 8 20 8"/>\
+          </svg>\
+          <span>{{ extension }}</span>\
+        </span>\
+        <div class="generated-file-meta">\
+          <span class="generated-file-name" :title="name">{{ name }}</span>\
+          <span class="generated-file-size">{{ sizeLabel }}</span>\
+        </div>\
+        <div class="generated-file-actions">\
+          <button type="button" class="generated-file-action" title="预览文件" @click="$emit(\'preview\', file)">\
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12z"/><circle cx="12" cy="12" r="2.5"/></svg>\
+            <span>预览</span>\
+          </button>\
+          <button type="button" class="generated-file-action" title="下载文件" @click="$emit(\'download\', file)">\
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>\
+            <span>下载</span>\
+          </button>\
+        </div>\
+      </section>'
+  };
+
+  /**
    * 专家回合内容流：过程折叠轨 + 回复 / HITL / 错误行
    * segments 来自 ChatBlocks.segmentExpertTurn
    */
@@ -333,8 +786,10 @@
       StatusLine: (window.ChatBlocks || {}).StatusLine,
       ErrorRow: (window.ChatBlocks || {}).ErrorRow,
       SubagentCard: SubagentCard,
-      HitlCard: HitlCard
+      HitlCard: HitlCard,
+      GeneratedFileCard: GeneratedFileCard
     },
+    emits: ['preview-file', 'download-file'],
     methods: {
       actionStatus: (window.ChatBlocks || {}).actionItemStatus || function () { return 'success'; }
     },
@@ -355,8 +810,9 @@
         <template v-else-if="seg.item">\
           <hitl-card v-if="seg.item.type === \'clarify\' && seg.item.answer != null" variant="clarify" :data="seg.item" mode="resolved" />\
           <hitl-card v-else-if="seg.item.type === \'approval\' && seg.item.choice != null" variant="approval" :data="seg.item" mode="resolved" />\
+          <generated-file-card v-else-if="seg.item.type === \'generated_file\'" :file="seg.item" @preview="$emit(\'preview-file\', $event)" @download="$emit(\'download-file\', $event)" />\
           <error-row v-else-if="seg.item.type === \'error\'" :content="seg.item.content" />\
-          <reply-block v-else-if="seg.item.type !== \'clarify\' && seg.item.type !== \'approval\'" :content="seg.item.content" :render-markdown="renderMarkdown" :attachments="seg.item.attachments" :live="!!seg.item.live" />\
+          <reply-block v-else-if="seg.item.type !== \'clarify\' && seg.item.type !== \'approval\' && seg.item.type !== \'generated_file\'" :content="seg.item.content" :render-markdown="renderMarkdown" :attachments="seg.item.attachments" :live="!!seg.item.live" />\
         </template>\
       </template>\
       </div>'
@@ -367,6 +823,7 @@
     HitlCard: HitlCard,
     ClarifyCard: ClarifyCard,
     ApprovalCard: ApprovalCard,
+    GeneratedFileCard: GeneratedFileCard,
     ExpertTurnFlow: ExpertTurnFlow
   };
 })();

@@ -24,13 +24,13 @@
     '<div class="main-scroll list-page expert-list-page">',
     '  <div class="expert-list-tabs">',
     '    <div class="expert-list-tab-list" role="tablist">',
-    '      <button type="button" class="expert-list-tab" :class="{ \'is-active\': activeTab === \'template\' }" role="tab" @click="setActiveTab(\'template\')">',
-    '        <svg class="expert-list-tab-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1.2"/><rect x="14" y="3" width="7" height="7" rx="1.2"/><rect x="3" y="14" width="7" height="7" rx="1.2"/><rect x="14" y="14" width="7" height="7" rx="1.2"/></svg>',
-    '        专家模板',
-    '      </button>',
     '      <button type="button" class="expert-list-tab" :class="{ \'is-active\': activeTab === \'mine\' }" role="tab" @click="setActiveTab(\'mine\')">',
     '        <svg class="expert-list-tab-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="3.2"/><path d="M5.5 19.2c.8-3.2 3.3-5.2 6.5-5.2s5.7 2 6.5 5.2"/></svg>',
     '        我的专家',
+    '      </button>',
+    '      <button type="button" class="expert-list-tab" :class="{ \'is-active\': activeTab === \'template\' }" role="tab" @click="setActiveTab(\'template\')">',
+    '        <svg class="expert-list-tab-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1.2"/><rect x="14" y="3" width="7" height="7" rx="1.2"/><rect x="3" y="14" width="7" height="7" rx="1.2"/><rect x="14" y="14" width="7" height="7" rx="1.2"/></svg>',
+    '        专家模板',
     '      </button>',
     '    </div>',
     '    <div class="expert-list-tools">',
@@ -182,7 +182,7 @@
       });
 
       var activeTab = Vue.computed(function () {
-        return props.listTab === 'mine' ? 'mine' : 'template';
+        return props.listTab === 'template' ? 'template' : 'mine';
       });
 
       var templateIntroSkills = Vue.computed(function () {

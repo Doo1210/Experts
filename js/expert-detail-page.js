@@ -1311,7 +1311,7 @@
           store.saveImChannels(props.expertId, imChannels.value, { gatewayEnabled: imGatewayEnabled.value });
           imSecretDraft.value = {};
           imPolicyDraft.value = {};
-          ElementPlus.ElMessage.success('配置已保存，请点击「应用配置」使其生效。');
+          ElementPlus.ElMessage.success('配置已保存，请点击「应用」以更新渠道连接。');
           return;
         }
         if (!window.SidecarApi || !window.SidecarApi.putImChannels) return;
@@ -1321,7 +1321,7 @@
           applyImChannelsResponse(res);
           imSecretDraft.value = {};
           imPolicyDraft.value = {};
-          ElementPlus.ElMessage.success('配置已保存，请点击「应用配置」使其生效。');
+          ElementPlus.ElMessage.success('配置已保存，请点击「应用」以更新渠道连接。');
         }).catch(function (err) {
           imSaving.value = false;
           var body = err && err.body;
@@ -2427,10 +2427,50 @@
         return v === true || v === 'true' || v === '1';
       }
 
-      function toggleImChannelEnabled(ch) {
-        ch.enabled = !ch.enabled;
+      function applyImChannelEnabledChange(ch, previousEnabled) {
+        if (store.isDevMock()) {
+          restartImGateway();
+          return;
+        }
+        if (!window.SidecarApi || !window.SidecarApi.putImChannels) {
+          ch.enabled = previousEnabled;
+          ch.state = imConnectionStatus(ch);
+          ElementPlus.ElMessage.warning('当前服务暂不支持更新渠道状态');
+          return;
+        }
+        var payload = {
+          gatewayEnabled: imGatewayEnabled.value,
+          channels: imChannels.value.map(function (channel) {
+            return {
+              type: channel.type || channel.id,
+              id: channel.id || channel.type,
+              enabled: !!channel.enabled
+            };
+          })
+        };
+        imSaving.value = true;
+        window.SidecarApi.putImChannels(String(props.expertId), payload).then(function (res) {
+          imSaving.value = false;
+          applyImChannelsResponse(res);
+          restartImGateway();
+        }).catch(function () {
+          imSaving.value = false;
+          ch.enabled = previousEnabled;
+          ch.state = imConnectionStatus(ch);
+          ElementPlus.ElMessage.error('渠道状态更新失败，请稍后重试');
+        });
+      }
+
+      function toggleImChannelEnabled(ch, nextEnabled) {
+        if (!ch || imSaving.value || imRestarting.value) return;
+        var previousEnabled = !!ch.enabled;
+        ch.enabled = typeof nextEnabled === 'boolean' ? nextEnabled : !previousEnabled;
         if (ch.enabled && ch.configured) ch.pendingRestart = true;
         ch.state = imConnectionStatus(ch);
+        if (ch.enabled && !previousEnabled) {
+          ElementPlus.ElMessage.success('启用消息渠道后，该专家将保持启动状态，以持续接收并响应此渠道的消息。');
+        }
+        applyImChannelEnabledChange(ch, previousEnabled);
       }
 
       function imPolicySummary(ch) {
@@ -2531,6 +2571,31 @@
       function imPlatformIcon(ch) {
         if (!ch) return '📨';
         return window.imPlatformIcon ? window.imPlatformIcon(ch.type || ch.id) : '📨';
+      }
+
+      function imChannelLogo(ch) {
+        var type = String((ch && (ch.type || ch.id)) || '').toLowerCase();
+        if (type === 'wecom' || type === 'wecom_callback') {
+          return '<svg viewBox="0 0 24 24" fill="#07C160" aria-hidden="true"><path d="M12 1c6.075 0 11 4.925 11 11s-4.925 11-11 11S1 18.075 1 12S5.925 1 12 1m3.52 15.49a.35.35 0 0 0-.24.1c-.14.13-.16.34.02.53l.07.07c.44.44.74.99.85 1.57c0 .02.04.23.04.23c.05.19.15.37.29.5c.21.21.51.34.82.34c.3 0 .59-.12.8-.33c.44-.44.44-1.16 0-1.61c-.15-.15-.34-.26-.53-.3l-.15-.03c-.61-.11-1.17-.41-1.62-.86c-.03-.03-.07-.07-.1-.11c-.06-.074-.16-.1-.25-.1M11 4.75c-2.117 0-4.264.77-5.75 2.31C4.111 8.246 3.5 9.72 3.5 11.24c0 1.06.3 2.12.88 3.06c.47.695.993 1.371 1.66 1.89l-.384 1.624a.6.6 0 0 0 .856.673L8.64 17.41c.53.166 1.08.234 1.63.3a8.3 8.3 0 0 0 1.7-.03l.38-.05q.283-.046.564-.112a2.33 2.33 0 0 1-.92-1.605l-.254.037c-.62.067-1.232.03-1.85-.04c-.43-.057-.838-.185-1.25-.31l-1.02.5l.23-.67l-.74-.6c-.513-.401-.917-.934-1.28-1.47c-.4-.65-.61-1.38-.61-2.11c0-1.08.456-2.119 1.26-2.97c1.158-1.198 2.854-1.78 4.5-1.78c1.54 0 3.108.513 4.24 1.58c.365.365.707.75.95 1.21c.177.354.338.722.424 1.107a2.34 2.34 0 0 1 1.811.123c-.075-.716-.33-1.4-.665-2.04c-.329-.62-.776-1.155-1.27-1.65c-1.468-1.38-3.471-2.08-5.47-2.08m9.37 9.77a1.136 1.136 0 0 0-1.1.86l-.03.15a3.1 3.1 0 0 1-.86 1.63c-.04.03-.07.07-.11.1c-.14.13-.14.35 0 .49c.07.06.17.1.26.1h.01c.07 0 .15-.02.26-.13l.07-.07c.44-.44.99-.74 1.57-.85c.023 0 .227-.04.23-.04c.2-.06.37-.16.5-.3c.44-.44.44-1.17 0-1.61c-.21-.21-.5-.33-.8-.33m-4.21-1.07c-.08 0-.16.03-.27.14l-.07.07c-.44.44-.99.74-1.57.85c-.02 0-.23.04-.23.04c-.2.06-.37.16-.5.3c-.44.44-.44 1.17 0 1.61c.21.21.51.34.82.34c.3 0 .59-.12.8-.33c.15-.16.25-.34.29-.53a.4.4 0 0 0 .03-.16c.11-.61.41-1.18.86-1.63c.03-.03.06-.06.1-.09c.146-.115.13-.36 0-.49a.34.34 0 0 0-.26-.12m1.18-1.97c-.3 0-.59.12-.8.33c-.44.44-.44 1.16 0 1.61c.15.15.34.26.53.3c.054.006.144.029.15.03c.61.12 1.17.41 1.62.86c.03.03.07.07.1.11c.08.08.16.1.25.1c.1 0 .16-.04.23-.11c.12-.13.14-.32-.02-.52l-.08-.08c-.44-.44-.74-.99-.85-1.57c0-.02-.04-.23-.04-.23c-.05-.19-.15-.37-.29-.5c-.21-.21-.5-.33-.8-.33"/></svg>';
+        }
+        if (type === 'dingtalk') {
+          return '<svg viewBox="0 0 1024 1024" fill="#1677FF" aria-hidden="true"><path d="M573.7 252.5C422.5 197.4 201.3 96.7 201.3 96.7c-15.7-4.1-17.9 11.1-17.9 11.1c-5 61.1 33.6 160.5 53.6 182.8c19.9 22.3 319.1 113.7 319.1 113.7S326 357.9 270.5 341.9c-55.6-16-37.9 17.8-37.9 17.8c11.4 61.7 64.9 131.8 107.2 138.4c42.2 6.6 220.1 4 220.1 4s-35.5 4.1-93.2 11.9c-42.7 5.8-97 12.5-111.1 17.8c-33.1 12.5 24 62.6 24 62.6c84.7 76.8 129.7 50.5 129.7 50.5c33.3-10.7 61.4-18.5 85.2-24.2L565 743.1h84.6L603 928l205.3-271.9H700.8l22.3-38.7c.3.5.4.8.4.8S799.8 496.1 829 433.8l.6-1h-.1c5-10.8 8.6-19.7 10-25.8c17-71.3-114.5-99.4-265.8-154.5"/></svg>';
+        }
+        if (type === 'feishu') {
+          return '<svg viewBox="0 0 48 48" fill="#3370FF" aria-hidden="true"><g fill-rule="evenodd" clip-rule="evenodd"><path d="M41.0716 5.99409L3.31071 16.5187L12.3856 25.8126L20.7998 25.9594L30.4827 16.5187C30.2266 15.9943 30.0985 15.5552 30.0985 15.2013C30.0985 14.4074 30.4104 13.7786 30.8947 13.333C31.7241 12.57 32.7222 12.4558 33.8889 12.9905L41.0716 5.99409Z"/><path d="M42.1021 6.72842L31.5775 44.4893L22.2836 35.4144L22.1367 27.0002L31.5115 17.4816C32.0195 17.8454 32.5743 18.0105 33.1759 17.9769C34.0784 17.9264 34.6614 17.3813 34.9349 17.0602C35.2083 16.7392 35.5293 16.2051 35.5025 15.4113C35.4847 14.8821 35.3109 14.3941 34.9812 13.9472L42.1021 6.72842Z"/></g></svg>';
+        }
+        return '<svg viewBox="0 0 48 48" aria-hidden="true"><rect width="48" height="48" rx="12" fill="#8a94a6"/><path d="M14 16h20v12H23l-5 5v-5h-4V16Z" fill="#fff"/></svg>';
+      }
+
+      function imChannelLogoSrc(ch) {
+        var type = String((ch && (ch.type || ch.id)) || '').toLowerCase();
+        var assetName = {
+          wecom: 'wecom',
+          wecom_callback: 'wecom',
+          dingtalk: 'dingtalk',
+          feishu: 'feishu'
+        }[type];
+        return assetName ? ('assets/channel-icons/' + assetName + '.svg') : '';
       }
 
       function imChannelDotClass(ch) {
@@ -2850,7 +2915,7 @@
         imRestarting: imRestarting, imConflictProfile: imConflictProfile,
         imPolicyCollapse: imPolicyCollapse,
         imRequiredFields: imRequiredFields, imOptionalFields: imOptionalFields,
-        selectImChannel: selectImChannel, imPlatformIcon: imPlatformIcon, imChannelDotClass: imChannelDotClass,
+        selectImChannel: selectImChannel, imPlatformIcon: imPlatformIcon, imChannelLogoSrc: imChannelLogoSrc, imChannelDotClass: imChannelDotClass,
         credentialPlaceholder: credentialPlaceholder, openImSetupGuide: openImSetupGuide,
         saveSelectedImChannel: saveSelectedImChannel, saveGatewayEnabled: saveGatewayEnabled,
         restartImGateway: restartImGateway,
@@ -3374,10 +3439,9 @@
                       <el-input v-model="messagingSearchQuery" placeholder="搜索渠道..." clearable size="small" class="im-channel-search" />\
                       <div class="im-channel-list">\
                         <button v-for="ch in filteredImSidebarChannels" :key="ch.id || ch.type" type="button" class="im-channel-list-item" :class="{ active: String(selectedImChannelId) === String(ch.id || ch.type) }" @click="selectImChannel(ch)">\
-                          <span class="im-channel-list-icon">{{ ch.emoji || imPlatformIcon(ch) }}</span>\
+                          <span class="im-channel-list-icon"><img :src="imChannelLogoSrc(ch)" :alt="(ch.name || ch.label || \'渠道\') + \'图标\'"></span>\
                           <span class="im-channel-list-meta">\
                             <span class="im-channel-list-name">{{ ch.name || ch.label }}</span>\
-                            <span v-if="ch.connectionHint" class="im-channel-list-hint">{{ ch.connectionHint }}</span>\
                           </span>\
                           <span class="im-channel-list-right">\
                             <span class="im-channel-list-switch">{{ ch.enabled ? \'开\' : \'关\' }}</span>\
@@ -3395,19 +3459,19 @@
                         <div class="im-channel-panel-head">\
                           <div class="im-channel-panel-top">\
                             <div class="im-channel-panel-title">\
-                              <span class="im-channel-panel-icon">{{ selectedImChannel.emoji || imPlatformIcon(selectedImChannel) }}</span>\
-                              <div>\
-                                <h3 class="im-channel-panel-name">{{ selectedImChannel.name || selectedImChannel.label }}</h3>\
-                                <p v-if="selectedImChannel.connectionHint" class="im-channel-panel-hint">{{ selectedImChannel.connectionHint }} · {{ imConnectionLabel(selectedImChannel) }}</p>\
-                                <p class="im-channel-panel-desc">{{ selectedImChannel.description || \'\' }}</p>\
+                              <span class="im-channel-panel-icon"><img :src="imChannelLogoSrc(selectedImChannel)" :alt="(selectedImChannel.name || selectedImChannel.label || \'渠道\') + \'图标\'"></span>\
+                              <div class="im-channel-panel-title-main">\
+                                <div class="im-channel-panel-name-row">\
+                                  <h3 class="im-channel-panel-name">{{ selectedImChannel.name || selectedImChannel.label }}</h3>\
+                                  <div class="im-channel-panel-title-actions">\
+                                    <el-tag size="small" :type="messagingStateType(imConnectionStatus(selectedImChannel))">\
+                                      <span class="im-channel-status-dot" :class="imConnectionDotClass(selectedImChannel)"></span>\
+                                      {{ imConnectionLabel(selectedImChannel) }}\
+                                    </el-tag>\
+                                    <el-switch :model-value="!!selectedImChannel.enabled" :disabled="imSaving || imRestarting" @change="toggleImChannelEnabled(selectedImChannel, $event)" active-text="启用" inactive-text="禁用" inline-prompt />\
+                                  </div>\
+                                </div>\
                               </div>\
-                            </div>\
-                            <div class="im-channel-panel-actions">\
-                              <el-tag size="small" :type="messagingStateType(imConnectionStatus(selectedImChannel))">\
-                                <span class="im-channel-status-dot" :class="imConnectionDotClass(selectedImChannel)"></span>\
-                                {{ imConnectionLabel(selectedImChannel) }}\
-                              </el-tag>\
-                              <el-switch :model-value="!!selectedImChannel.enabled" @change="toggleImChannelEnabled(selectedImChannel)" active-text="启用" inactive-text="禁用" inline-prompt />\
                             </div>\
                           </div>\
                         </div>\
@@ -3425,9 +3489,9 @@
                             <span v-else-if="imConnectionStatus(selectedImChannel) === \'pending_restart\'" class="im-channel-inline-hint">配置已变更，请应用配置后生效</span>\
                           </div>\
                           <div class="im-channel-toolbar-right">\
-                            <el-button type="primary" :loading="imSaving" @click="saveSelectedImChannel">保存</el-button>\
-                            <el-tooltip content="保存或切换启用状态后，请应用配置以更新渠道连接" placement="top" effect="dark">\
-                              <el-button :loading="imRestarting" :disabled="imSaving" @click="restartImGateway">应用配置</el-button>\
+                            <el-button :loading="imSaving" @click="saveSelectedImChannel">保存配置</el-button>\
+                            <el-tooltip content="修改保存配置后，请点击应用配置以更新渠道连接" placement="top" effect="dark">\
+                              <el-button type="primary" :loading="imRestarting" :disabled="imSaving" @click="restartImGateway">应用</el-button>\
                             </el-tooltip>\
                           </div>\
                         </div>\
