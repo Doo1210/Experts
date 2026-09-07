@@ -723,10 +723,33 @@
     },
     emits: ['preview', 'download'],
     computed: {
-      name: function () { return this.file.name || this.file.fileName || '未命名文件'; },
-      sizeLabel: function () {
+      inferredExtension: function () {
+        var mime = String(this.file.mime || '').toLowerCase();
+        var type = String(this.file.type || '').toLowerCase();
+        if (mime.indexOf('spreadsheetml') >= 0 || /xlsx|excel/.test(type)) return 'xlsx';
+        if (mime.indexOf('csv') >= 0) return 'csv';
+        if (mime.indexOf('pdf') >= 0) return 'pdf';
+        if (mime.indexOf('wordprocessingml') >= 0 || /docx|document/.test(type)) return 'docx';
+        if (mime.indexOf('markdown') >= 0) return 'md';
+        if (mime.indexOf('image/') === 0) return mime.split('/')[1] || 'png';
+        return 'txt';
+      },
+      name: function () {
+        var raw = this.file.name || this.file.fileName || this.file.title || this.file.path || '未命名文件';
+        var base = String(raw).split(/[\\/]/).pop() || '未命名文件';
+        return /\.[a-z0-9]{1,8}$/i.test(base) ? base : base + '.' + this.inferredExtension;
+      },
+      sizeBytes: function () {
         var bytes = Number(this.file.size || 0);
-        if (!isFinite(bytes) || bytes <= 0) return '文件已生成';
+        if (isFinite(bytes) && bytes > 0) return bytes;
+        if (this.file.content !== undefined && this.file.content !== null) {
+          return new Blob([this.file.content]).size;
+        }
+        return 0;
+      },
+      sizeLabel: function () {
+        var bytes = this.sizeBytes;
+        if (!isFinite(bytes) || bytes <= 0) return '--';
         if (bytes < 1024) return bytes + ' B';
         if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
         return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
@@ -734,6 +757,9 @@
       extension: function () {
         var match = this.name.match(/\.([a-z0-9]{1,5})$/i);
         return match ? match[1].toUpperCase() : 'FILE';
+      },
+      fileRecord: function () {
+        return Object.assign({}, this.file, { name: this.name, size: this.sizeBytes });
       },
       kind: function () {
         var ext = this.extension.toLowerCase();
@@ -758,11 +784,11 @@
           <span class="generated-file-size">{{ sizeLabel }}</span>\
         </div>\
         <div class="generated-file-actions">\
-          <button type="button" class="generated-file-action" title="预览文件" @click="$emit(\'preview\', file)">\
+          <button type="button" class="generated-file-action" title="预览文件" @click="$emit(\'preview\', fileRecord)">\
             <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12z"/><circle cx="12" cy="12" r="2.5"/></svg>\
             <span>预览</span>\
           </button>\
-          <button type="button" class="generated-file-action" title="下载文件" @click="$emit(\'download\', file)">\
+          <button type="button" class="generated-file-action" title="下载文件" @click="$emit(\'download\', fileRecord)">\
             <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>\
             <span>下载</span>\
           </button>\

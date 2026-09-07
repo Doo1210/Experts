@@ -275,7 +275,7 @@
         // so they can reuse the workspace preview dialog without a tree lookup.
         previewFile.value = {
           id: file.id,
-          name: file.name || file.fileName || '未命名文件',
+          name: file.name || file.fileName || file.title || '未命名文件.txt',
           size: file.size || 0,
           mime: file.mime || '',
           content: file.content || '',
@@ -286,7 +286,7 @@
       function handleGeneratedFileDownload(file) {
         if (!file || !window.AppShared || !window.AppShared.downloadWorkspaceFile) return;
         window.AppShared.downloadWorkspaceFile({
-          name: file.name || file.fileName || '未命名文件',
+          name: file.name || file.fileName || file.title || '未命名文件.txt',
           mime: file.mime || '',
           content: file.content || ''
         });
