@@ -37,6 +37,10 @@
     return slug;
   }
 
+  function defaultProjectWorkdir(slug) {
+    return '~/.hermes/boards/' + String(slug || 'project') + '/project-workspace';
+  }
+
   function sameId(a, b) {
     return String(a) === String(b);
   }
@@ -2476,8 +2480,9 @@
         p.slug = uniqueProjectSlug(p.name, p.id);
         updated = true;
       }
-      if (p.defaultWorkdir == null) {
-        p.defaultWorkdir = p.workdir || '';
+      var managedWorkdir = defaultProjectWorkdir(p.slug);
+      if (p.defaultWorkdir !== managedWorkdir) {
+        p.defaultWorkdir = managedWorkdir;
         updated = true;
       }
       if (p.orchestratorProfileId === undefined) { p.orchestratorProfileId = null; updated = true; }
@@ -4098,13 +4103,14 @@
     },
     createProject: function (payload) {
       payload = payload || {};
+      var slug = uniqueProjectSlug(payload.name);
       var project = {
         id: uid(),
-        slug: uniqueProjectSlug(payload.name),
+        slug: slug,
         name: payload.name,
         icon: payload.icon || '📁',
         description: payload.description,
-        defaultWorkdir: payload.defaultWorkdir || payload.workdir || '',
+        defaultWorkdir: defaultProjectWorkdir(slug),
         visibility: payload.visibility || 'public',
         status: 'active',
         orchestratorProfileId: payload.orchestratorProfileId || null,
@@ -4132,7 +4138,7 @@
       var idx = state.projects.findIndex(function (p) { return sameId(p.id, project.id); });
       project.updatedAt = nowIso();
       project.slug = project.slug || uniqueProjectSlug(project.name, project.id);
-      project.defaultWorkdir = project.defaultWorkdir || project.workdir || '';
+      project.defaultWorkdir = defaultProjectWorkdir(project.slug);
       if (project.orchestratorProfileId === undefined) project.orchestratorProfileId = null;
       if (project.defaultAssignee === undefined) project.defaultAssignee = null;
       if (project.autoDecomposeEnabled === undefined) project.autoDecomposeEnabled = true;
@@ -4257,20 +4263,6 @@
         })
         .sort(function (a, b) { return (b.createdAt || '').localeCompare(a.createdAt || ''); });
     },
-    saveProjectWorkdir: function (projectId, workdir) {
-      var p = state.projects.find(function (x) { return sameId(x.id, projectId); });
-      if (!p) return null;
-      p.defaultWorkdir = String(workdir || '').trim();
-      p.updatedAt = nowIso();
-      AppStore.addProjectEvent(projectId, {
-        type: 'workdir_updated',
-        category: 'project',
-        title: p.defaultWorkdir ? '工作目录已更新' : '工作目录已清空',
-        content: p.defaultWorkdir ? ('默认工作目录：' + p.defaultWorkdir) : '已清空项目默认工作目录。'
-      }, { skipPersist: true });
-      persist();
-      return p;
-    },
     getProjectTasks: function (projectId) {
       return (state.projectTasks || [])
         .filter(function (t) { return sameId(t.projectId, projectId); })
@@ -4306,6 +4298,7 @@
         priority: payload.priority || 'medium',
         parentTaskId: payload.parentTaskId || null,
         isTriage: !!payload.isTriage,
+        decompositionModel: payload.decompositionModel || '',
         commentCount: 0,
         latestSummary: String(payload.body || '').trim(),
         result: '',

@@ -387,7 +387,7 @@
       var projects = Vue.ref([]);
       var showCreateDialog = Vue.ref(false);
       var showEditDialog = Vue.ref(false);
-      var form = Vue.ref({ name: '', description: '', workdir: '', expertIds: [], icon: '📁' });
+      var form = Vue.ref({ name: '', description: '', expertIds: [], icon: '📁' });
       var editForm = Vue.ref({ name: '', description: '', icon: '📁' });
       var editingProject = Vue.ref(null);
       var allExperts = Vue.ref(store.getExperts());
@@ -403,7 +403,7 @@
       }
 
       function resetForm() {
-        form.value = { name: '', description: '', workdir: '', expertIds: [], icon: '📁' };
+        form.value = { name: '', description: '', expertIds: [], icon: '📁' };
         createStep.value = 0;
         memberSearchQuery.value = '';
       }
@@ -550,7 +550,6 @@
           name: form.value.name.trim(),
           description: form.value.description.trim(),
           icon: form.value.icon,
-          defaultWorkdir: form.value.workdir.trim(),
           expertIds: form.value.expertIds
         });
         ElementPlus.ElMessage.success('项目创建成功');
@@ -675,10 +674,6 @@
                 <span class="card-time">{{ p.updatedAt }}</span>\
               </div>\
             </div>\
-            <div class="card-hover-bar project-hover-bar">\
-              <span class="card-hover-text">进入项目</span>\
-              <svg class="card-hover-arrow" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M5 12h14M13 6l6 6-6 6"/></svg>\
-            </div>\
           </div>\
           <div v-if="projects.length === 0" class="empty-state">\
             <div class="empty-state-icon">📁</div>\
@@ -745,9 +740,6 @@
                     </el-form-item>\
                     <el-form-item label="项目描述" required>\
                       <el-input v-model="form.description" type="textarea" :rows="4" placeholder="简要描述项目目标与背景" />\
-                    </el-form-item>\
-                    <el-form-item label="默认工作目录">\
-                      <el-input v-model="form.workdir" placeholder="如：D:\\projects\\yield-improvement" size="large" clearable />\
                     </el-form-item>\
                   </el-form>\
                 </div>\

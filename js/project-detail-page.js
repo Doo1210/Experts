@@ -97,7 +97,6 @@
       var eventFilter = Vue.ref('all');
       var selectedProjectTaskId = Vue.ref(null);
       var drawerTaskId = Vue.ref(null);
-      var workdirDraft = Vue.ref('');
       var workspaceCurrentFolderId = Vue.ref(null);
       var workspaceFolderDialogVisible = Vue.ref(false);
       var workspaceFolderName = Vue.ref('');
@@ -108,16 +107,17 @@
       var addMemberSearchQuery = Vue.ref('');
       var showOrchestrationDialog = Vue.ref(false);
       var orchestrationDraft = Vue.ref({ orchestratorProfileId: null, defaultAssignee: null, autoDecomposeEnabled: true });
-      var goalForm = Vue.ref({ title: '', description: '', priority: 'medium' });
+      var showGoalDialog = Vue.ref(false);
+      var goalForm = Vue.ref({ title: '', description: '', model: '' });
       var goalSubmitting = Vue.ref(false);
+      var decompositionModelOptions = (window.MODELS_CATALOG || []).slice();
       var historyItems = Vue.ref([]);
       var historyExpandedId = Vue.ref(null);
       var historyPanelVisible = Vue.ref(false);
       var showHistoryCommentDialog = Vue.ref(false);
       var historyCommentDraft = Vue.ref({ taskId: null, text: '' });
       var showManualCreateDialog = Vue.ref(false);
-      var manualAdvancedVisible = Vue.ref(false);
-      var manualForm = Vue.ref({ title: '', body: '', assignee: '', status: 'todo', parentTaskId: '', priority: 'medium', workdir: '' });
+      var manualForm = Vue.ref({ title: '', body: '', assignee: '', status: 'todo', parentTaskId: '', priority: 'medium' });
       var cardMenuTaskId = Vue.ref(null);
       var drawerCommentDraft = Vue.ref('');
       var taskAction = Vue.ref({ type: '', taskId: null });
@@ -209,7 +209,6 @@
         projectTasks.value = [];
         events.value = [];
         selectedProjectTaskId.value = null;
-        workdirDraft.value = '';
         workspaceCurrentFolderId.value = null;
         projectWorkspaceMaterials.value = [];
       }
@@ -252,7 +251,6 @@
         }).filter(function (m) { return !!m.expert; });
         projectTasks.value = store.getProjectTasks(props.projectId);
         events.value = store.getProjectEvents ? store.getProjectEvents(props.projectId, eventFilter.value) : [];
-        workdirDraft.value = currentProject.defaultWorkdir || '';
         orchestrationDraft.value = {
           orchestratorProfileId: currentProject.orchestratorProfileId || null,
           defaultAssignee: currentProject.defaultAssignee || null,
@@ -943,7 +941,70 @@
       }
 
       function resetGoalForm() {
-        goalForm.value = { title: '', description: '', priority: 'medium' };
+        goalForm.value = { title: '', description: '', model: '' };
+      }
+
+      function goalFormDirty() {
+        var f = goalForm.value;
+        return !!(trimText(f.title) || trimText(f.description) || f.model);
+      }
+
+      function openGoalDialog() {
+        membersSidebarVisible.value = false;
+        historyPanelVisible.value = false;
+        showGoalDialog.value = true;
+      }
+
+      function closeGoalDialog() {
+        if (goalSubmitting.value) return;
+        if (!goalFormDirty()) {
+          showGoalDialog.value = false;
+          resetGoalForm();
+          return;
+        }
+        ElementPlus.ElMessageBox.confirm(
+          '当前目标尚未提交，关闭后已填写的内容将丢失。',
+          '放弃本次编辑？',
+          { confirmButtonText: '放弃', cancelButtonText: '继续编辑', type: 'warning' }
+        ).then(function () {
+          showGoalDialog.value = false;
+          resetGoalForm();
+        }).catch(function () {});
+      }
+
+      function handleGoalDialogBeforeClose(done) {
+        if (goalSubmitting.value) return;
+        if (!goalFormDirty()) {
+          done();
+          resetGoalForm();
+          return;
+        }
+        ElementPlus.ElMessageBox.confirm(
+          '当前目标尚未提交，关闭后已填写的内容将丢失。',
+          '放弃本次编辑？',
+          { confirmButtonText: '放弃', cancelButtonText: '继续编辑', type: 'warning' }
+        ).then(function () {
+          done();
+          resetGoalForm();
+        }).catch(function () {});
+      }
+
+      function openGoalHistoryFromDialog() {
+        function openHistory() {
+          showGoalDialog.value = false;
+          resetGoalForm();
+          membersSidebarVisible.value = false;
+          historyPanelVisible.value = true;
+        }
+        if (!goalFormDirty()) {
+          openHistory();
+          return;
+        }
+        ElementPlus.ElMessageBox.confirm(
+          '打开发起记录将关闭当前弹窗，已填写的内容不会保留。',
+          '查看发起记录？',
+          { confirmButtonText: '查看记录', cancelButtonText: '继续编辑', type: 'warning' }
+        ).then(openHistory).catch(function () {});
       }
 
       function resetManualForm(preset) {
@@ -954,14 +1015,8 @@
           assignee: preset.assignee || '',
           status: preset.status || 'todo',
           parentTaskId: preset.parentTaskId || '',
-          priority: preset.priority || 'medium',
-          workdir: preset.workdir || (project.value && project.value.defaultWorkdir) || '',
-          skill: '',
-          goalMode: '',
-          maxRuntime: '',
-          maxRetries: ''
+          priority: preset.priority || 'medium'
         };
-        manualAdvancedVisible.value = false;
       }
 
       function resetTaskActionForm() {
@@ -975,25 +1030,29 @@
         var f = goalForm.value;
         if (!trimText(f.title)) return ElementPlus.ElMessage.warning('请填写目标标题');
         if (!trimText(f.description)) return ElementPlus.ElMessage.warning('请填写目标描述');
-        var oid = (project.value && project.value.orchestratorProfileId) || (orchestratorExpert.value && orchestratorExpert.value.id);
-        if (!oid) return ElementPlus.ElMessage.warning('请先在编排配置中选择协作专家');
+        var oid = (project.value && project.value.orchestratorProfileId) ||
+          (orchestratorExpert.value && orchestratorExpert.value.id) ||
+          (members.value[0] && members.value[0].expertId);
+        if (!oid) return ElementPlus.ElMessage.warning('请先添加项目成员');
         goalSubmitting.value = true;
         var root = store.createProjectTask(props.projectId, {
           title: trimText(f.title),
           body: trimText(f.description),
           assignee: oid,
-          priority: f.priority,
+          priority: 'medium',
           status: 'triage',
-          isTriage: true
+          isTriage: true,
+          decompositionModel: f.model || ''
         });
         selectedProjectTaskId.value = root.id;
-        ElementPlus.ElMessage.success('已提交目标，协作专家开始拆解并派发');
+        ElementPlus.ElMessage.success('目标已提交，可在发起记录中查看进度');
         if (project.value.autoDecomposeEnabled !== false) {
-          try { store.decomposeProjectTask(props.projectId, root.id, { children: [] }); } catch (e) { /* noop */ }
+          try { store.decomposeProjectTask(props.projectId, root.id, { children: [], model: f.model || '' }); } catch (e) { /* noop */ }
         }
         goalSubmitting.value = false;
         load();
         resetGoalForm();
+        showGoalDialog.value = false;
       }
 
       function openManualCreateDialog(preset) {
@@ -1004,24 +1063,6 @@
 
       function closeManualCreateDialog() {
         showManualCreateDialog.value = false;
-      }
-
-      function submitManualCreate() {
-        var m = manualForm.value;
-        if (!trimText(m.title)) return ElementPlus.ElMessage.warning('请填写任务标题');
-        if (!m.assignee) return ElementPlus.ElMessage.warning('请选择负责人');
-        var created = store.createProjectTask(props.projectId, {
-          title: trimText(m.title),
-          body: trimText(m.body),
-          assignee: m.assignee || null,
-          priority: m.priority,
-          parentTaskId: m.parentTaskId || null,
-          status: m.status || 'todo'
-        });
-        selectedProjectTaskId.value = created.id;
-        ElementPlus.ElMessage.success('任务已创建');
-        load();
-        closeManualCreateDialog();
       }
 
       function submitManualCreateAndDispatch() {
@@ -1039,9 +1080,8 @@
         selectedProjectTaskId.value = created.id;
         try {
           store.promoteProjectTask(props.projectId, created.id);
-          store.moveProjectTaskStatus(props.projectId, created.id, 'running');
         } catch (e) { /* noop */ }
-        ElementPlus.ElMessage.success('任务已创建并派发');
+        ElementPlus.ElMessage.success('任务已创建并加入执行队列');
         load();
         closeManualCreateDialog();
       }
@@ -1308,14 +1348,8 @@
         showOrchestrationDialog.value = true;
       }
 
-      function saveWorkdir() {
-        store.saveProjectWorkdir(props.projectId, workdirDraft.value);
-        load();
-        ElementPlus.ElMessage.success('工作目录已保存');
-      }
-
       function copyWorkdir() {
-        var path = trimText(workdirDraft.value || (project.value && project.value.defaultWorkdir));
+        var path = trimText(project.value && project.value.defaultWorkdir);
         if (!path) return;
         if (navigator.clipboard && navigator.clipboard.writeText) {
           navigator.clipboard.writeText(path).then(function () {
@@ -1515,10 +1549,11 @@
         drawerTask: drawerTask,
         orchestratorExpert: orchestratorExpert,
         orchestratorForm: goalForm,
+        showGoalDialog: showGoalDialog,
         goalForm: goalForm,
         goalSubmitting: goalSubmitting,
+        decompositionModelOptions: decompositionModelOptions,
         manualForm: manualForm,
-        manualAdvancedVisible: manualAdvancedVisible,
         showManualCreateDialog: showManualCreateDialog,
         historyItems: historyItems,
         historyExpandedId: historyExpandedId,
@@ -1535,7 +1570,6 @@
         eventFilter: eventFilter,
         eventFilters: EVENT_FILTERS,
         selectedProjectTaskId: selectedProjectTaskId,
-        workdirDraft: workdirDraft,
         workspaceCurrentFolderId: workspaceCurrentFolderId,
         workspaceFolderDialogVisible: workspaceFolderDialogVisible,
         workspaceFolderName: workspaceFolderName,
@@ -1586,10 +1620,13 @@
         handleDrawerAction: handleDrawerAction,
         submitDrawerComment: submitDrawerComment,
         drawerCommentDraft: drawerCommentDraft,
+        openGoalDialog: openGoalDialog,
+        closeGoalDialog: closeGoalDialog,
+        handleGoalDialogBeforeClose: handleGoalDialogBeforeClose,
+        openGoalHistoryFromDialog: openGoalHistoryFromDialog,
         submitGoal: submitGoal,
         openManualCreateDialog: openManualCreateDialog,
         closeManualCreateDialog: closeManualCreateDialog,
-        submitManualCreate: submitManualCreate,
         submitManualCreateAndDispatch: submitManualCreateAndDispatch,
         openTaskAction: openTaskAction,
         closeTaskAction: closeTaskAction,
@@ -1603,7 +1640,6 @@
         submitHistoryComment: submitHistoryComment,
         saveOrchestration: saveOrchestration,
         openOrchestrationDialog: openOrchestrationDialog,
-        saveWorkdir: saveWorkdir,
         copyWorkdir: copyWorkdir,
         workspaceFileTypeClass: workspaceFileTypeClass,
         workspaceFileIcon: workspaceFileIcon,
@@ -1683,7 +1719,6 @@
           '<div class="project-detail-content">',
             '<div class="project-detail-main-wrapper">',
               mainTemplate(),
-              bottomGoalFormTemplate(),
             '</div>',
           '</div>',
         '</div>',
@@ -1691,6 +1726,7 @@
         membersSidebarTemplate(),
       '</div>',
       drawerTemplate(),
+      goalDialogTemplate(),
       manualCreateDialogTemplate(),
       taskActionDialogTemplate(),
       historyCommentDialogTemplate(),
@@ -1722,6 +1758,10 @@
         '</div>',
         '<div class="project-header-summary project-header-summary-compact">',
           '<span class="project-progress-pill">{{ todoStats.done }}/{{ todoStats.total }} 已完成</span>',
+          '<button type="button" class="project-header-action-btn project-header-goal-btn" @click="openGoalDialog">',
+            '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 2L11 13"/><path d="M22 2l-7 20-4-9-9-4 20-7z"/></svg>',
+            '<span>发起目标</span>',
+          '</button>',
           '<button type="button" class="project-header-action-btn" :class="{ active: membersSidebarVisible }" @click="openMemberDrawer">',
             '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">',
               '<path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>',
@@ -1749,7 +1789,7 @@
 
   function mainTemplate() {
     return [
-      '<main class="project-detail-main project-detail-main-with-bottom-form">',
+      '<main class="project-detail-main">',
         kanbanTabTemplate(),
         timelineTabTemplate(),
         workspaceTabTemplate(),
@@ -1859,10 +1899,10 @@
           '</div>',
         '</div>',
         '<div class="project-workdir-inline-card">',
-          '<span class="project-workdir-inline-label">默认目录</span>',
-          '<el-input v-model="workdirDraft" placeholder="如：D:\\projects\\yield-improvement" clearable />',
-          '<el-button type="success" @click="saveWorkdir">保存</el-button>',
-          '<el-button :disabled="!workdirDraft" @click="copyWorkdir">复制</el-button>',
+          '<span class="project-workdir-inline-label">系统工作空间</span>',
+          '<code class="project-workdir-inline-path">{{ project.defaultWorkdir }}</code>',
+          '<span class="project-workdir-managed-badge">系统默认</span>',
+          '<el-button @click="copyWorkdir">复制路径</el-button>',
         '</div>',
         '<div class="workspace-list-panel project-workspace-list-panel">',
           workspaceEmptyTemplate(),
@@ -1912,32 +1952,42 @@
     ].join('');
   }
 
-  function bottomGoalFormTemplate() {
+  function goalDialogTemplate() {
     return [
-      '\u003csection class="project-bottom-goal-form" v-if="project"\u003e',
-        '\u003cdiv class="project-goal-form-head"\u003e',
-          '\u003cdiv class="project-goal-form-head-left"\u003e',
-            '\u003cspan v-if="orchestratorExpert" class="project-goal-orchestrator-hint"\u003e协作专家：\u003cbutton type="button" class="project-goal-orchestrator-name" @click="openOrchestrationDialog" title="点击设置项目编排"\u003e{{ orchestratorExpert.name }}\u003c/button\u003e\u003c/span\u003e',
-            '\u003cspan v-else class="project-goal-orchestrator-hint project-goal-orchestrator-warn"\u003e未配置协作专家\u003cbutton type="button" class="project-goal-orchestrator-name" @click="openOrchestrationDialog" title="点击设置项目编排"\u003e点击设置\u003c/button\u003e\u003c/span\u003e',
-            '\u003cspan class="project-goal-form-tip-inline"\u003e💡 描述你的项目目标，系统会自动拆解为具体任务并分配给相关专家。\u003c/span\u003e',
+      '<el-dialog v-model="showGoalDialog" width="640px" class="project-goal-dialog" :close-on-click-modal="false" :before-close="handleGoalDialogBeforeClose" append-to-body>',
+        '<template #header>',
+          '<div class="project-goal-dialog-header">',
+            '<strong>发起目标</strong>',
+            '<button type="button" class="project-goal-history-link" @click="openGoalHistoryFromDialog">',
+              '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v5h5"/><path d="M3.5 8a9 9 0 1 1-1 6"/><path d="M12 7v5l3 2"/></svg>',
+              '<span>发起记录</span>',
+            '</button>',
           '\u003c/div\u003e',
-          '\u003cdiv class="project-goal-form-head-right"\u003e',
-            '\u003cel-button type="primary" :loading="goalSubmitting" @click="submitGoal"\u003e发起\u003c/el-button\u003e',
-            '\u003cbutton type="button" class="project-goal-history-btn" @click="toggleHistoryPanel" :class="{ active: historyPanelVisible }"\u003e发起记录\u003c/button\u003e',
-          '\u003c/div\u003e',
-        '\u003c/div\u003e',
-        '\u003cdiv class="project-goal-form-body"\u003e',
-          '\u003cdiv class="project-goal-form-row"\u003e',
-            '\u003cel-input v-model="goalForm.title" placeholder="目标标题" class="project-goal-title-input" /\u003e',
-            '\u003cel-select v-model="goalForm.priority" class="project-goal-priority-select"\u003e',
-              '\u003cel-option v-for="p in priorityOptions" :key="p.key" :label="p.label" :value="p.key" /\u003e',
-            '\u003c/select\u003e',
-          '\u003c/div\u003e',
-          '\u003cel-input v-model="goalForm.description" type="textarea" :rows="3" placeholder="目标描述（必填）：描述项目目标的背景、范围和期望结果" /\u003e',
-        '\u003c/div\u003e',
-      '\u003c/section\u003e'
+        '</template>',
+        '<div class="project-goal-dialog-tip">💡 描述你的项目目标，系统会自动拆解为具体任务并分配给相关专家。</div>',
+        '<el-form label-position="top" class="project-goal-dialog-form">',
+          '<el-form-item label="目标标题" required>',
+            '<el-input v-model="goalForm.title" maxlength="100" show-word-limit placeholder="一句话概括要达成的目标" />',
+          '</el-form-item>',
+          '<el-form-item label="目标描述" required>',
+            '<el-input v-model="goalForm.description" type="textarea" :rows="6" resize="vertical" placeholder="描述目标背景、范围和期望结果" />',
+          '</el-form-item>',
+          '<el-form-item label="拆解模型">',
+            '<el-select v-model="goalForm.model" class="project-goal-model-select" placeholder="系统默认" filterable>',
+              '<el-option label="系统默认" value="" />',
+              '<el-option v-for="model in decompositionModelOptions" :key="model.id" :label="model.name" :value="model.id" />',
+            '</el-select>',
+            '<div class="project-goal-model-help">默认使用当前服务配置的拆解模型，仅影响本次目标拆解。</div>',
+          '</el-form-item>',
+        '</el-form>',
+        '<template #footer>',
+          '<el-button :disabled="goalSubmitting" @click="closeGoalDialog">取消</el-button>',
+          '<el-button type="primary" :loading="goalSubmitting" @click="submitGoal">发起目标</el-button>',
+        '</template>',
+      '</el-dialog>'
     ].join('');
   }
+
   function drawerTemplate() {
     return [
       '<el-drawer v-model="drawerVisible" direction="rtl" size="480px" class="project-unified-drawer project-task-detail-drawer" :show-header="false" append-to-body>',
@@ -2271,41 +2321,20 @@
               '<el-option v-for="m in members" :key="m.expertId" :label="m.expert.name" :value="m.expertId" />',
             '</el-select>',
           '</el-form-item>',
-          '<div class="project-manual-form-row">',
-            '<el-form-item label="任务状态" class="project-manual-form-col">',
-              '<el-select v-model="manualForm.status">',
-                '<el-option label="自动（待开始）" value="todo" />',
-                '<el-option label="阻塞" value="blocked" />',
-              '</el-select>',
-            '</el-form-item>',
-            '<el-form-item label="优先级" class="project-manual-form-col">',
-              '<el-select v-model="manualForm.priority">',
-                '<el-option v-for="p in priorityOptions" :key="p.key" :label="p.label" :value="p.key" />',
-              '</el-select>',
-            '</el-form-item>',
-          '</div>',
+          '<el-form-item label="优先级">',
+            '<el-select v-model="manualForm.priority">',
+              '<el-option v-for="p in priorityOptions" :key="p.key" :label="p.label" :value="p.key" />',
+            '</el-select>',
+          '</el-form-item>',
           '<el-form-item label="父任务">',
             '<el-select v-model="manualForm.parentTaskId" placeholder="可选，选择已有任务作为依赖" filterable clearable>',
               '<el-option v-for="task in projectTasks" :key="task.id" :label="taskDisplayTitle(task)" :value="task.id" />',
             '</el-select>',
           '</el-form-item>',
-          '<el-form-item label="工作目录">',
-            '<el-input v-model="manualForm.workdir" placeholder="默认继承项目工作目录" />',
-          '</el-form-item>',
-          '<div class="project-manual-advanced">',
-            '<button type="button" class="project-manual-advanced-toggle" @click="manualAdvancedVisible = !manualAdvancedVisible">▾ 高级设置</button>',
-            '<div v-show="manualAdvancedVisible" class="project-manual-advanced-body">',
-              '<el-form-item label="额外 Skill"><el-input v-model="manualForm.skill" placeholder="后续扩展" disabled /></el-form-item>',
-              '<el-form-item label="Goal Mode"><el-input v-model="manualForm.goalMode" placeholder="后续扩展" disabled /></el-form-item>',
-              '<el-form-item label="最大运行时长"><el-input v-model="manualForm.maxRuntime" placeholder="如 90s / 30m / 2h" disabled /></el-form-item>',
-              '<el-form-item label="失败重试上限"><el-input v-model="manualForm.maxRetries" placeholder="数字" disabled /></el-form-item>',
-            '</div>',
-          '</div>',
         '</el-form>',
         '<template #footer>',
           '<el-button @click="closeManualCreateDialog">取消</el-button>',
-          '<el-button @click="submitManualCreate">创建</el-button>',
-          '<el-button type="primary" @click="submitManualCreateAndDispatch">创建并派发</el-button>',
+          '<el-button type="primary" @click="submitManualCreateAndDispatch">创建并加入执行队列</el-button>',
         '</template>',
       '</el-dialog>'
     ].join('');
