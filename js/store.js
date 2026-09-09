@@ -1584,6 +1584,8 @@
       priority: 'medium',
       parentTaskId: null,
       isTriage: false,
+      goalRequestStatus: '',
+      decomposeError: '',
       commentCount: 0,
       body: '',
       latestSummary: '',
@@ -1603,8 +1605,130 @@
       taskEvents: [],
       diagnostics: [],
       comments: [],
-      skills: []
+      skills: [],
+      attachments: [],
+      outputFacts: null
     }, fields || {});
+  }
+
+  function demoTaskFile(name, mime, content, size) {
+    var body = content || '';
+    var bytes = 0;
+    try { bytes = new Blob([body]).size; } catch (e) { bytes = String(body).length; }
+    return {
+      id: uid(),
+      name: name,
+      mime: mime || 'text/plain',
+      size: size || Math.max(bytes, 1024),
+      content: body
+    };
+  }
+
+  function demoOutputsByTitle(title) {
+    var map = {
+      '良率根因分析': {
+        attachments: [
+          demoTaskFile('yield-root-cause-report.pdf', 'application/pdf', '良率根因分析报告\n\n主要根因：etch 区 3 号 chamber 压力偏差 +12%。\n建议参数回标并加严 SPC 监控。', 1258291),
+          demoTaskFile('etch-3-pressure-trend.csv', 'text/csv', 'date,chamber,pressure,yield\n2026-08-01,etch-3,1.12,0.912\n2026-08-08,etch-3,1.18,0.903\n2026-08-15,etch-3,1.24,0.891\n2026-08-22,etch-3,1.25,0.886\n', 18432)
+        ],
+        facts: {
+          published_pr: 'PR #128',
+          changed_files: ['analysis/root-cause.md', 'charts/chamber-pressure.png', 'reports/yield-root-cause.pdf', 'data/etch-3-pressure-trend.csv'],
+          findings: ['etch-3 chamber 压力偏差 +12%', '颗粒污染与压力漂移时间窗重合']
+        }
+      },
+      '窗口偏差分析报告': {
+        attachments: [
+          demoTaskFile('window-bias-weights.xlsx', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', '工序,偏差贡献度\netch,42%\nCMP,27%\n光刻,18%\n其他,13%\n', 48200)
+        ],
+        facts: {
+          findings: ['etch 窗口偏差贡献度最高（42%）']
+        }
+      },
+      '工艺窗口参数采集': {
+        attachments: [
+          demoTaskFile('process-window-params.csv', 'text/csv', 'step,param,target,actual\netch,pressure,1.10,1.24\nCMP,downforce,3.2,3.4\nlitho,overlay,2.0,2.6\n', 9600)
+        ]
+      },
+      '复盘纪要输出': {
+        attachments: [
+          demoTaskFile('process-window-review.md', 'text/markdown', '# 工艺窗口复盘纪要\n\netch 窗口偏差贡献度 42%，建议下周复测。\n', 8200)
+        ]
+      },
+      '站会纪要整理': {
+        attachments: [
+          demoTaskFile('standup-notes.md', 'text/markdown', '# 本周良率攻关站会纪要\n\n- 根因已确认\n- MES 权限仍阻塞\n- 下周 SPC 复测\n', 5400)
+        ]
+      },
+      '工艺参数回标方案': {
+        attachments: [
+          demoTaskFile('chamber-retune-plan.md', 'text/markdown', '# etch-3 参数回标方案\n\n将 chamber 压力从 1.24 回调至 1.10 ± 0.02。\n提交 PR 待系统自动评审。\n', 11200)
+        ],
+        facts: {
+          published_pr: 'PR #136',
+          changed_files: ['recipes/etch-3-pressure.yaml']
+        }
+      },
+      '立项背景调研': {
+        attachments: [
+          demoTaskFile('kickoff-background.pdf', 'application/pdf', '立项背景调研：确认 etch 区为良率波动主要贡献站点。', 216000)
+        ]
+      },
+      '初期数据摸底': {
+        attachments: [
+          demoTaskFile('yield-baseline.xlsx', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'site,baseline_yield\netch-3,0.918\nCMP,0.941\nlitho,0.936\n', 22000)
+        ]
+      },
+      '数据质量基线报告': {
+        attachments: [
+          demoTaskFile('data-quality-baseline.pdf', 'application/pdf', '数据质量基线报告：完整率 96.2%。', 388000)
+        ]
+      },
+      '历史特征工程': {
+        attachments: [
+          demoTaskFile('feature-set-v2.csv', 'text/csv', 'sku,seasonality,promo_flag,lag_7\nA01,1.12,0,240\nA02,0.87,1,118\n', 28600)
+        ],
+        facts: {
+          findings: ['特征集 v2 已发布，含季节性分解字段']
+        }
+      },
+      'WMS 库位热力图导出': {
+        attachments: [
+          demoTaskFile('wms-heatmap.xlsx', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'zone,hits\nA,1820\nB,940\nC,310\n', 64000)
+        ]
+      },
+      '数据治理规范': {
+        attachments: [
+          demoTaskFile('data-governance-draft.docx', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', '数据治理规范草案：物料编码、供应商主数据与一对多映射。', 42000)
+        ],
+        facts: {
+          published_pr: 'PR #41'
+        }
+      }
+    };
+    return map[title] || null;
+  }
+
+  function applyDemoTaskOutputs(task) {
+    if (!task || task.isTriage === true) return;
+    if (!Array.isArray(task.attachments)) task.attachments = [];
+    var demo = demoOutputsByTitle(task.title);
+    if (!demo) return;
+    if (!task.attachments.length && demo.attachments) task.attachments = demo.attachments;
+    if (demo.facts && !task.outputFacts) task.outputFacts = demo.facts;
+    if (demo.facts && Array.isArray(task.runs)) {
+      var i;
+      for (i = 0; i < task.runs.length; i++) {
+        if (task.runs[i] && (task.runs[i].outcome === 'completed' || task.runs[i].status === 'completed')) {
+          task.runs[i].metadata = Object.assign({}, demo.facts, task.runs[i].metadata || {});
+          break;
+        }
+      }
+    }
+  }
+
+  function applyDemoOutputsToTaskList(tasks) {
+    (tasks || []).forEach(applyDemoTaskOutputs);
   }
 
   function defaultYieldProjectTasksFor(p, members) {
@@ -1617,17 +1741,19 @@
     var goalActive = uid();
     var goalDone = uid();
     var goalTriage = uid();
+    var goalDecomposing = uid();
     var tReadySpc = uid();
     var tDoneRoot = uid();
     var tRunningDevice = uid();
     var tRunningFdc = uid();
 
-    return [
+    var yieldTasks = [
       projectTaskSeed(p, {
         id: goalActive,
         title: '针对近期良率波动组织专家排查',
         status: 'todo',
         isTriage: true,
+        goalRequestStatus: 'running',
         expertId: lead.expertId,
         sortOrder: -30,
         priority: 'high',
@@ -1640,6 +1766,7 @@
         title: '12寸产线工艺窗口复盘',
         status: 'done',
         isTriage: true,
+        goalRequestStatus: 'completed',
         expertId: lead.expertId,
         sortOrder: -20,
         priority: 'medium',
@@ -1652,12 +1779,27 @@
         title: 'etch 区设备健康度评估',
         status: 'triage',
         isTriage: true,
+        goalRequestStatus: 'decompose_failed',
+        decomposeError: '模型未能生成有效任务图。请补充评估范围、关键设备和验收标准后重试拆解。',
         expertId: device.expertId,
         sortOrder: -10,
         priority: 'medium',
         body: '评估 etch 区关键设备健康状态，识别潜在故障模式与良率关联风险。',
         createdAt: daysAgoIso(3, 14, 20),
         updatedAt: daysAgoIso(3, 14, 20)
+      }),
+      projectTaskSeed(p, {
+        id: goalDecomposing,
+        title: '光刻胶厚度窗口评估',
+        status: 'triage',
+        isTriage: true,
+        goalRequestStatus: 'decomposing',
+        expertId: lead.expertId,
+        sortOrder: -8,
+        priority: 'medium',
+        body: '评估光刻胶厚度窗口对关键层良率的影响，输出加严监控建议。',
+        createdAt: minutesAgoIso(8),
+        updatedAt: minutesAgoIso(8)
       }),
 
       projectTaskSeed(p, {
@@ -1840,9 +1982,11 @@
         expertId: lead.expertId,
         sortOrder: 20,
         priority: 'high',
-        body: '反复阻塞后需重新拆解，梳理参数漂移与良率波动的关联假设。',
-        latestSummary: '反复 block/unblock 已达上限，需协调专家重新拆解。',
-        blockedReason: '反复阻塞已达上限，需重新拆解',
+        body: '反复阻塞后被系统踢回，需人工确认参数漂移与良率波动的关联假设。',
+        latestSummary: '反复 block/unblock 已达上限，需人工介入。',
+        blockedReason: '反复阻塞已达上限，需人工介入',
+        blockKind: 'block_loop_detected',
+        consecutiveFailures: 3,
         createdAt: minutesAgoIso(180),
         updatedAt: minutesAgoIso(60)
       }),
@@ -1899,6 +2043,23 @@
         body: '梳理 etch 区 FDC 告警规则，识别与良率波动相关的异常模式。',
         latestSummary: '已梳理 23 条告警规则，正在交叉验证命中率。',
         commentCount: 2,
+        startedAt: minutesAgoIso(40),
+        currentRunId: 'run-1',
+        lastHeartbeatAt: minutesAgoIso(1),
+        workspaceKind: 'git',
+        workspacePath: '/workspace/yield/fdc-rules',
+        skills: ['fdc-analysis'],
+        runs: [
+          {
+            id: 'run-1', profile: device.expertId, outcome: 'running', status: 'running',
+            startedAt: minutesAgoIso(40), endedAt: null,
+            summary: '已梳理 23 条告警规则，正在交叉验证命中率。', error: '', metadata: null
+          }
+        ],
+        taskEvents: [
+          { id: uid(), kind: 'spawned', label: '启动', author: device.expertId, payload: { assignee: device.expertId }, createdAt: minutesAgoIso(40) },
+          { id: uid(), kind: 'created', label: '创建', author: lead.expertId, payload: {}, createdAt: minutesAgoIso(110) }
+        ],
         createdAt: minutesAgoIso(110),
         updatedAt: minutesAgoIso(10)
       }),
@@ -1909,8 +2070,25 @@
         sortOrder: 26,
         priority: 'high',
         body: '输出 etch 区 3 号 chamber 参数回标方案，提交系统自动评审。',
-        latestSummary: 'PR 已提交，系统正在自动评审中。',
+        latestSummary: '已提交 etch-3 压力回标方案，等待系统自动评审。',
         commentCount: 2,
+        startedAt: minutesAgoIso(90),
+        completedAt: minutesAgoIso(25),
+        workspaceKind: 'git',
+        workspacePath: '/workspace/yield/chamber-retune',
+        skills: ['recipe-tuning'],
+        runs: [
+          {
+            id: 'run-1', profile: lead.expertId, outcome: 'completed', status: 'completed',
+            startedAt: minutesAgoIso(90), endedAt: minutesAgoIso(25),
+            summary: '已提交 etch-3 压力回标方案与 PR #136。', error: '', metadata: { published_pr: 'PR #136' }
+          }
+        ],
+        taskEvents: [
+          { id: uid(), kind: 'completed', label: '完成', author: lead.expertId, payload: {}, createdAt: minutesAgoIso(25) },
+          { id: uid(), kind: 'spawned', label: '启动', author: lead.expertId, payload: { assignee: lead.expertId }, createdAt: minutesAgoIso(90) },
+          { id: uid(), kind: 'created', label: '创建', author: lead.expertId, payload: {}, createdAt: minutesAgoIso(100) }
+        ],
         createdAt: minutesAgoIso(100),
         updatedAt: minutesAgoIso(25)
       }),
@@ -2005,6 +2183,8 @@
         updatedAt: daysAgoIso(9, 11, 0)
       })
     ];
+    applyDemoOutputsToTaskList(yieldTasks);
+    return yieldTasks;
   }
 
   function defaultYieldProjectEventsFor(p, tasks) {
@@ -2026,6 +2206,8 @@
       { type: 'comment_added', category: 'comment', title: '新增评论', taskId: taskId('SPC 数据分析'), expertId: quality, content: '[质量专家] 建议同步检查冷却系统对颗粒污染的影响。', createdAt: minutesAgoIso(50) },
       { type: 'execution_run', category: 'execution', title: '执行记录', taskId: taskId('良率根因分析'), expertId: lead, content: 'Run #1 工艺专家 完成 18m32s — 已定位 etch 区 3 号 chamber 压力漂移。', createdAt: minutesAgoIso(95) },
       { type: 'goal_completed', category: 'task', title: '目标已完成', taskId: taskId('12寸产线工艺窗口复盘'), expertId: lead, content: '目标「12寸产线工艺窗口复盘」全部子任务已完成（4/4）。', createdAt: daysAgoIso(1, 16, 30) },
+      { type: 'goal_created', category: 'task', title: '目标已发起', taskId: taskId('etch 区设备健康度评估'), expertId: lead, content: '用户发起目标「etch 区设备健康度评估」，拆解失败，需补充说明后重试。', createdAt: daysAgoIso(3, 14, 20) },
+      { type: 'goal_created', category: 'task', title: '目标已发起', taskId: taskId('光刻胶厚度窗口评估'), expertId: lead, content: '用户发起目标「光刻胶厚度窗口评估」，系统正在拆解。', createdAt: minutesAgoIso(8) },
       { type: 'task_review', category: 'execution', title: '进入评审', taskId: taskId('工艺参数回标方案'), expertId: lead, content: '任务「工艺参数回标方案」已提交 PR，系统自动评审中。', createdAt: minutesAgoIso(25) }
     ].map(function (e) {
       return Object.assign({ id: uid(), projectId: p.id, meta: null }, e);
@@ -2041,12 +2223,13 @@
     var goalTriage = uid();
     var tForecast = uid();
 
-    return [
+    var supplyTasks = [
       projectTaskSeed(p, {
         id: goalActive,
         title: '推进供应链数字化核心能力建设',
         status: 'todo',
         isTriage: true,
+        goalRequestStatus: 'running',
         expertId: supplyLead.expertId,
         sortOrder: -30,
         priority: 'high',
@@ -2059,6 +2242,7 @@
         title: '完成供应链数据底座建设',
         status: 'done',
         isTriage: true,
+        goalRequestStatus: 'completed',
         expertId: supplyLead.expertId,
         sortOrder: -20,
         priority: 'medium',
@@ -2071,12 +2255,13 @@
         title: '数据治理规范建设',
         status: 'triage',
         isTriage: true,
+        goalRequestStatus: 'decomposing',
         expertId: digital.expertId,
         sortOrder: -10,
         priority: 'high',
         body: '制定供应链主数据治理规范，覆盖物料编码、供应商主数据与一对多映射规则。',
         createdAt: daysAgoIso(3, 14, 20),
-        updatedAt: daysAgoIso(3, 14, 20)
+        updatedAt: minutesAgoIso(6)
       }),
 
       projectTaskSeed(p, {
@@ -2220,9 +2405,11 @@
         expertId: supplyLead.expertId,
         sortOrder: 22,
         priority: 'high',
-        body: '反复阻塞后需重新拆解安全库存策略优化方案。',
-        latestSummary: '反复 block/unblock 已达上限，需重新拆解。',
-        blockedReason: '反复阻塞已达上限，需重新拆解',
+        body: '反复阻塞后被系统踢回，需人工确认安全库存策略优化方案。',
+        latestSummary: '反复 block/unblock 已达上限，需人工介入。',
+        blockedReason: '反复阻塞已达上限，需人工介入',
+        blockKind: 'block_loop_detected',
+        consecutiveFailures: 3,
         createdAt: minutesAgoIso(90),
         updatedAt: minutesAgoIso(50)
       }),
@@ -2240,6 +2427,8 @@
         updatedAt: minutesAgoIso(35)
       })
     ];
+    applyDemoOutputsToTaskList(supplyTasks);
+    return supplyTasks;
   }
 
   function defaultSupplyProjectEventsFor(p, tasks) {
@@ -2260,7 +2449,7 @@
       { type: 'task_blocked', category: 'exception', title: '任务阻塞', taskId: taskId('供应商协同平台对接'), expertId: digital, content: '任务「供应商协同平台对接」被阻塞：供应商平台 API 密钥待采购部门审批。', createdAt: minutesAgoIso(35) },
       { type: 'comment_added', category: 'comment', title: '新增评论', taskId: taskId('需求预测建模'), expertId: digital, content: '[数字化顾问] WMS 热力图特征已可供模型使用，请同步纳入。', createdAt: minutesAgoIso(60) },
       { type: 'goal_completed', category: 'task', title: '目标已完成', taskId: taskId('完成供应链数据底座建设'), expertId: lead, content: '目标「完成供应链数据底座建设」全部子任务已完成（4/4）。', createdAt: daysAgoIso(2, 16, 0) },
-      { type: 'goal_created', category: 'task', title: '目标已发起', taskId: taskId('数据治理规范建设'), expertId: digital, content: '用户发起目标「数据治理规范建设」，待协调专家拆解。', createdAt: daysAgoIso(3, 14, 20) },
+      { type: 'goal_created', category: 'task', title: '目标已发起', taskId: taskId('数据治理规范建设'), expertId: digital, content: '用户发起目标「数据治理规范建设」，系统正在拆解。', createdAt: daysAgoIso(3, 14, 20) },
       { type: 'task_review', category: 'execution', title: '进入评审', taskId: taskId('数据治理规范'), expertId: digital, content: '任务「数据治理规范」已提交 PR，系统自动评审中。', createdAt: minutesAgoIso(30) }
     ].map(function (e) {
       return Object.assign({ id: uid(), projectId: p.id, meta: null }, e);
@@ -2419,6 +2608,7 @@
     '针对近期良率波动组织专家排查': 'todo',
     '12寸产线工艺窗口复盘': 'done',
     'etch 区设备健康度评估': 'triage',
+    '光刻胶厚度窗口评估': 'triage',
     '颗粒污染 Top3 归因': 'todo',
     '工艺窗口参数采集': 'done',
     '窗口偏差分析报告': 'done',
@@ -2467,10 +2657,130 @@
     if (t.commentCount == null) { t.commentCount = 0; changed = true; }
     if (t.parentTaskId === undefined) { t.parentTaskId = null; changed = true; }
     if (t.isTriage === undefined) { t.isTriage = false; changed = true; }
+    if (t.goalRequestStatus === undefined) { t.goalRequestStatus = ''; changed = true; }
+    if (t.decomposeError === undefined) { t.decomposeError = ''; changed = true; }
     if (!t.latestSummary) { t.latestSummary = t.result || t.blockedReason || t.body || ''; changed = true; }
     if (!t.createdAt) { t.createdAt = t.updatedAt || nowIso(); changed = true; }
     if (!t.updatedAt) { t.updatedAt = t.createdAt || nowIso(); changed = true; }
     return changed;
+  }
+
+  function isProjectGoalRoot(task) {
+    return !!(task && task.isTriage === true);
+  }
+
+  function isKickbackTriageTask(task) {
+    return !!(task && task.isTriage !== true && normalizeProjectTaskStatus(task.status) === 'triage');
+  }
+
+  function inferGoalRequestStatus(task) {
+    if (!isProjectGoalRoot(task)) return '';
+    var explicit = String(task.goalRequestStatus || '').trim();
+    if (explicit) return explicit;
+    var s = normalizeProjectTaskStatus(task.status);
+    if (s === 'archived') return 'archived';
+    if (s === 'done') return 'completed';
+    if (s === 'triage') return 'decomposing';
+    return 'running';
+  }
+
+  function migrateGoalRequestAndKickback() {
+    var SCHEMA = 8;
+    if ((state.projectTaskSchemaVersion || 0) >= SCHEMA) return;
+    var updated = false;
+    (state.projectTasks || []).forEach(function (t) {
+      if (t.goalRequestStatus === undefined) { t.goalRequestStatus = ''; updated = true; }
+      if (t.decomposeError === undefined) { t.decomposeError = ''; updated = true; }
+      if (t.isTriage === true) {
+        if (t.title === 'etch 区设备健康度评估') {
+          t.status = 'triage';
+          t.goalRequestStatus = 'decompose_failed';
+          t.decomposeError = t.decomposeError || '模型未能生成有效任务图。请补充评估范围、关键设备和验收标准后重试拆解。';
+          updated = true;
+        } else if (t.title === '数据治理规范建设') {
+          t.status = 'triage';
+          t.goalRequestStatus = 'decomposing';
+          t.decomposeError = '';
+          updated = true;
+        } else if (!t.goalRequestStatus) {
+          t.goalRequestStatus = inferGoalRequestStatus(t);
+          updated = true;
+        }
+      }
+      if (t.title === 'chamber 参数漂移复盘' || t.title === '安全库存策略评审') {
+        if (t.isTriage !== true) {
+          t.status = 'triage';
+          t.blockKind = 'block_loop_detected';
+          t.blockedReason = t.blockedReason || '反复阻塞已达上限，需人工介入';
+          updated = true;
+        }
+      }
+    });
+    (state.projects || []).forEach(function (p) {
+      if (p.name.indexOf('良率') < 0) return;
+      var exists = (state.projectTasks || []).some(function (t) {
+        return sameId(t.projectId, p.id) && t.title === '光刻胶厚度窗口评估';
+      });
+      if (exists) return;
+      var lead = (state.projectMembers || []).find(function (m) {
+        return sameId(m.projectId, p.id) && m.role === 'lead';
+      });
+      state.projectTasks.push(projectTaskSeed(p, {
+        title: '光刻胶厚度窗口评估',
+        status: 'triage',
+        isTriage: true,
+        goalRequestStatus: 'decomposing',
+        expertId: lead ? lead.expertId : null,
+        sortOrder: -8,
+        priority: 'medium',
+        body: '评估光刻胶厚度窗口对关键层良率的影响，输出加严监控建议。',
+        createdAt: minutesAgoIso(8),
+        updatedAt: minutesAgoIso(8)
+      }));
+      updated = true;
+    });
+    state.projectTaskSchemaVersion = SCHEMA;
+    persist();
+    return updated;
+  }
+
+  function migrateTaskOutputDemo() {
+    var SCHEMA = 9;
+    if ((state.projectTaskSchemaVersion || 0) >= SCHEMA) return;
+    (state.projectTasks || []).forEach(function (t) {
+      applyDemoTaskOutputs(t);
+    });
+    state.projectTaskSchemaVersion = SCHEMA;
+    persist();
+  }
+
+  function migrateTaskProcessDemo() {
+    var SCHEMA = 10;
+    if ((state.projectTaskSchemaVersion || 0) >= SCHEMA) return;
+    (state.projectTasks || []).forEach(function (t) {
+      if (!t || t.isTriage === true) return;
+      if (!Array.isArray(t.runs)) t.runs = [];
+      if (t.title === 'FDC 告警规则梳理' && !t.runs.length) {
+        t.startedAt = t.startedAt || minutesAgoIso(40);
+        t.currentRunId = t.currentRunId || 'run-1';
+        t.lastHeartbeatAt = t.lastHeartbeatAt || minutesAgoIso(1);
+        t.runs = [{
+          id: 'run-1', profile: t.expertId, outcome: 'running', status: 'running',
+          startedAt: t.startedAt, endedAt: null,
+          summary: t.latestSummary || '已梳理告警规则，正在交叉验证命中率。', error: '', metadata: null
+        }];
+      }
+      if (t.title === '工艺参数回标方案' && !t.runs.length) {
+        t.runs = [{
+          id: 'run-1', profile: t.expertId, outcome: 'completed', status: 'completed',
+          startedAt: t.startedAt || minutesAgoIso(90), endedAt: t.updatedAt || minutesAgoIso(25),
+          summary: '已提交 etch-3 压力回标方案与 PR #136。', error: '', metadata: { published_pr: 'PR #136' }
+        }];
+      }
+      applyDemoTaskOutputs(t);
+    });
+    state.projectTaskSchemaVersion = SCHEMA;
+    persist();
   }
 
   function migrateProjectsKanbanFields() {
@@ -2901,6 +3211,9 @@
       migrateYieldProjectSeed();
       migrateSupplyProjectSeed();
       migrateTaskDetailFields();
+      migrateGoalRequestAndKickback();
+      migrateTaskOutputDemo();
+      migrateTaskProcessDemo();
       migrateDialogueTaskLastActivity();
       migrateProjectFiles();
       migrateProjectMessageTypes();
@@ -4298,6 +4611,8 @@
         priority: payload.priority || 'medium',
         parentTaskId: payload.parentTaskId || null,
         isTriage: !!payload.isTriage,
+        goalRequestStatus: payload.goalRequestStatus || (payload.isTriage ? 'submitted' : ''),
+        decomposeError: payload.decomposeError || '',
         decompositionModel: payload.decompositionModel || '',
         commentCount: 0,
         latestSummary: String(payload.body || '').trim(),
@@ -4326,8 +4641,10 @@
       var root = (state.projectTasks || []).find(function (t) { return sameId(t.projectId, projectId) && sameId(t.id, rootTaskId); });
       if (!root) return { children: [] };
       plan = plan || {};
-      root.status = normalizeProjectTaskStatus('running');
-      root.latestSummary = '协调专家正在拆解目标并派发子任务';
+      root.status = normalizeProjectTaskStatus('triage');
+      root.goalRequestStatus = 'decomposing';
+      root.decomposeError = '';
+      root.latestSummary = '系统正在拆解目标并派发子任务';
       root.updatedAt = nowIso();
       AppStore.addProjectEvent(projectId, {
         type: 'task_decompose_started',
@@ -4362,7 +4679,9 @@
           content: '协调专家派发子任务「' + child.title + '」' + (assignee ? ('给 ' + ((AppStore.getExpert(assignee) || {}).name || '专家')) : '，暂未指派。')
         }, { skipPersist: true });
       });
-      root.status = normalizeProjectTaskStatus('review');
+      root.status = normalizeProjectTaskStatus('todo');
+      root.goalRequestStatus = 'running';
+      root.decomposeError = '';
       root.latestSummary = '已拆解为 ' + children.length + ' 个子任务并完成派发';
       root.updatedAt = nowIso();
       AppStore.addProjectEvent(projectId, {
@@ -4375,6 +4694,20 @@
       }, { skipPersist: true });
       persist();
       return { root: root, children: children };
+    },
+    retryDecomposeProjectGoal: function (projectId, rootTaskId, specifyText) {
+      var root = (state.projectTasks || []).find(function (t) { return sameId(t.projectId, projectId) && sameId(t.id, rootTaskId); });
+      if (!root) return { children: [] };
+      var extra = String(specifyText || '').trim();
+      if (extra) {
+        root.body = (root.body ? (root.body + '\n\n') : '') + extra;
+      }
+      root.goalRequestStatus = 'decomposing';
+      root.decomposeError = '';
+      root.status = normalizeProjectTaskStatus('triage');
+      root.updatedAt = nowIso();
+      persist();
+      return AppStore.decomposeProjectTask(projectId, rootTaskId, { children: [] });
     },
     commentProjectTask: function (projectId, taskId, comment) {
       var task = (state.projectTasks || []).find(function (t) { return sameId(t.projectId, projectId) && sameId(t.id, taskId); });
@@ -4505,9 +4838,17 @@
     unblockProjectTask: function (projectId, taskId, reason) {
       var task = (state.projectTasks || []).find(function (t) { return sameId(t.projectId, projectId) && sameId(t.id, taskId); });
       if (!task) return null;
+      if (isKickbackTriageTask(task)) {
+        throw new Error('kickback_triage_cannot_unblock');
+      }
       var text = String(reason || '').trim();
-      task.status = normalizeProjectTaskStatus('ready');
+      var parent = task.parentTaskId
+        ? (state.projectTasks || []).find(function (t) { return sameId(t.id, task.parentTaskId); })
+        : null;
+      var parentOpen = parent && ['done', 'archived'].indexOf(normalizeProjectTaskStatus(parent.status)) < 0;
+      task.status = normalizeProjectTaskStatus(parentOpen ? 'todo' : 'ready');
       task.blockedReason = '';
+      task.blockKind = '';
       task.consecutiveFailures = 0;
       task.latestSummary = text ? ('已重启：' + text) : '任务已重启';
       task.updatedAt = nowIso();
@@ -4561,6 +4902,44 @@
         content: '任务「' + task.title + '」已被永久删除。'
       });
       return true;
+    },
+    resumeFromLoopProjectTask: function (projectId, taskId, supplement) {
+      var task = (state.projectTasks || []).find(function (t) { return sameId(t.projectId, projectId) && sameId(t.id, taskId); });
+      if (!task) return null;
+      if (!isKickbackTriageTask(task)) {
+        throw new Error('resume_from_loop_requires_kickback');
+      }
+      var text = String(supplement || '').trim();
+      if (!text) throw new Error('resume_from_loop_requires_supplement');
+      task.body = (task.body ? String(task.body).replace(/\s+$/, '') + '\n\n' : '') + text;
+      var parent = task.parentTaskId
+        ? (state.projectTasks || []).find(function (t) { return sameId(t.id, task.parentTaskId); })
+        : null;
+      var parentOpen = parent && ['done', 'archived'].indexOf(normalizeProjectTaskStatus(parent.status)) < 0;
+      task.status = normalizeProjectTaskStatus(parentOpen ? 'todo' : 'ready');
+      task.blockedReason = '';
+      task.blockKind = '';
+      task.latestSummary = '已根据补充说明继续：' + text.slice(0, 80);
+      task.updatedAt = nowIso();
+      if (!Array.isArray(task.taskEvents)) task.taskEvents = [];
+      task.taskEvents.unshift({
+        id: uid(),
+        kind: 'resumed_from_loop',
+        label: '完善后继续',
+        author: '当前用户',
+        payload: { supplement: text },
+        createdAt: nowIso()
+      });
+      AppStore.addProjectEvent(projectId, {
+        type: 'task_resumed_from_loop',
+        category: 'task',
+        taskId: task.id,
+        expertId: task.expertId,
+        title: '完善后继续',
+        content: '任务「' + task.title + '」已根据补充说明离开反复阻塞。'
+      }, { skipPersist: true });
+      persist();
+      return task;
     },
     promoteProjectTask: function (projectId, taskId) {
       var task = (state.projectTasks || []).find(function (t) { return sameId(t.projectId, projectId) && sameId(t.id, taskId); });
@@ -4673,6 +5052,9 @@
         })
         .sort(function (a, b) { return (b.createdAt || '').localeCompare(a.createdAt || ''); });
     },
+    isProjectGoalRoot: isProjectGoalRoot,
+    isKickbackTriageTask: isKickbackTriageTask,
+    inferGoalRequestStatus: inferGoalRequestStatus,
     normalizeProjectTaskStatus: normalizeProjectTaskStatus,
     getProjectFiles: function (projectId) {
       return (state.projectFiles || [])

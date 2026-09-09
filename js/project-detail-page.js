@@ -6,7 +6,7 @@
   var expertMatchesSearch = window.AppShared.expertMatchesSearch;
 
   var STATUS_TEXT = {
-    triage: '需人工拆解',
+    triage: '需人工介入',
     todo: '待开始',
     scheduled: '已排期',
     ready: '可执行',
@@ -32,7 +32,7 @@
   };
 
   var STATUS_COLUMNS = [
-    { key: 'todo', title: 'Todo', statuses: ['triage', 'todo', 'scheduled', 'ready'] },
+    { key: 'todo', title: 'Todo', statuses: ['todo', 'scheduled', 'ready'] },
     { key: 'running', title: 'Running', statuses: ['running', 'review'] },
     { key: 'blocked', title: 'Blocked', statuses: ['blocked'] },
     { key: 'done', title: 'Done', statuses: ['done', 'archived'] }
@@ -83,6 +83,9 @@
   var ProjectDetailPage = {
     props: ['projectId', 'initialTab'],
     emits: ['nav'],
+    components: {
+      GeneratedFileCard: (window.ChatInteractive && window.ChatInteractive.GeneratedFileCard) || { template: '<div></div>' }
+    },
     setup: function (props) {
       var project = Vue.ref(null);
       var members = Vue.ref([]);
@@ -112,21 +115,25 @@
       var goalSubmitting = Vue.ref(false);
       var decompositionModelOptions = (window.MODELS_CATALOG || []).slice();
       var historyItems = Vue.ref([]);
-      var historyExpandedId = Vue.ref(null);
-      var historyPanelVisible = Vue.ref(false);
-      var showHistoryCommentDialog = Vue.ref(false);
-      var historyCommentDraft = Vue.ref({ taskId: null, text: '' });
+      var historyDetailId = Vue.ref(null);
+      var showHistoryDialog = Vue.ref(false);
+      var historySpecifyDraft = Vue.ref('');
+      var historyRetrying = Vue.ref(false);
       var showManualCreateDialog = Vue.ref(false);
       var manualForm = Vue.ref({ title: '', body: '', assignee: '', status: 'todo', parentTaskId: '', priority: 'medium' });
       var cardMenuTaskId = Vue.ref(null);
       var drawerCommentDraft = Vue.ref('');
       var taskAction = Vue.ref({ type: '', taskId: null });
-      var taskActionForm = Vue.ref({ comment: '', assignee: '', result: '', blockedReason: '', unblockReason: '', reassignReason: '', editTitle: '', editBody: '', editPriority: '', moveTarget: '', blockKind: 'dependency' });
+      var taskActionVisible = Vue.ref(false);
+      var taskActionForm = Vue.ref({ comment: '', assignee: '', result: '', blockedReason: '', unblockReason: '', reassignReason: '', editTitle: '', editBody: '', editPriority: '', moveTarget: '', blockKind: 'dependency', resumeSupplement: '' });
       var expandedRunIds = Vue.ref({});
       var execDetailExpanded = Vue.ref({});
       var contextSectionExpanded = Vue.ref(true);
       var logPanelVisible = Vue.ref({});
       var logTailContent = Vue.ref({});
+      var detailPane = Vue.ref('task');
+      var outputPreviewVisible = Vue.ref(false);
+      var outputPreviewFile = Vue.ref(null);
 
       function toggleRunExpanded(runId) {
         var map = Object.assign({}, expandedRunIds.value);
@@ -177,6 +184,21 @@
         return lines.join('\n');
       }
 
+      function isGoalRoot(task) {
+        if (store.isProjectGoalRoot) return store.isProjectGoalRoot(task);
+        return !!(task && task.isTriage === true);
+      }
+
+      function isKickbackTriage(task) {
+        if (store.isKickbackTriageTask) return store.isKickbackTriageTask(task);
+        return !!(task && task.isTriage !== true && normalizeTaskStatus(task.status) === 'triage');
+      }
+
+      function goalRequestStatusOf(task) {
+        if (store.inferGoalRequestStatus) return store.inferGoalRequestStatus(task);
+        return String((task && task.goalRequestStatus) || '');
+      }
+
       function isProjectIconImage(icon) {
         return typeof icon === 'string' && /^(data:image|https?:\/\/|blob:)/.test(icon);
       }
@@ -218,19 +240,26 @@
         historyItems.value = store.getRootProjectTasks(props.projectId).map(function (t) {
           var children = store.getChildProjectTasks ? store.getChildProjectTasks(props.projectId, t.id) : [];
           var doneCount = children.filter(function (c) { return normalizeTaskStatus(c.status) === 'done'; }).length;
-          var statusLabel = '待拆解';
-          var ns = normalizeTaskStatus(t.status);
-          if (ns === 'archived') statusLabel = '已归档';
-          else if (ns === 'done') statusLabel = '已完成';
-          else if (ns === 'triage') statusLabel = '待拆解';
+          var requestStatus = goalRequestStatusOf(t);
+          var statusLabel = '进行中';
+          if (requestStatus === 'archived' || normalizeTaskStatus(t.status) === 'archived') statusLabel = '已归档';
+          else if (requestStatus === 'completed' || normalizeTaskStatus(t.status) === 'done') statusLabel = '已完成';
+          else if (requestStatus === 'decompose_failed') statusLabel = '拆解失败';
+          else if (requestStatus === 'decomposing') statusLabel = '拆解中';
+          else if (requestStatus === 'submitted') statusLabel = '待拆解';
           else if (children.length > 0) statusLabel = doneCount === children.length ? '已完成' : '进行中';
-          else statusLabel = '进行中';
+          var iconKind = 'done';
+          if (requestStatus === 'decompose_failed') iconKind = 'failed';
+          else if (requestStatus === 'decomposing' || requestStatus === 'submitted') iconKind = 'loading';
           return {
             id: t.id,
             title: t.title,
             body: t.body || '',
             createdAt: t.createdAt,
+            requestStatus: requestStatus,
             statusLabel: statusLabel,
+            iconKind: iconKind,
+            decomposeError: t.decomposeError || '',
             childCount: children.length,
             doneCount: doneCount,
             children: children
@@ -264,10 +293,19 @@
       }
 
       var todoStats = Vue.computed(function () {
-        var total = projectTasks.value.length;
-        var done = projectTasks.value.filter(function (t) { return normalizeTaskStatus(t.status) === 'done' || normalizeTaskStatus(t.status) === 'archived'; }).length;
-        var blocked = projectTasks.value.filter(function (t) { return normalizeTaskStatus(t.status) === 'blocked'; }).length;
-        var running = projectTasks.value.filter(function (t) { return normalizeTaskStatus(t.status) === 'running' || normalizeTaskStatus(t.status) === 'review'; }).length;
+        var executable = projectTasks.value.filter(function (t) {
+          if (isGoalRoot(t)) return false;
+          return normalizeTaskStatus(t.status) !== 'archived';
+        });
+        var total = executable.length;
+        var done = executable.filter(function (t) { return normalizeTaskStatus(t.status) === 'done'; }).length;
+        var blocked = executable.filter(function (t) {
+          return normalizeTaskStatus(t.status) === 'blocked' || isKickbackTriage(t);
+        }).length;
+        var running = executable.filter(function (t) {
+          var s = normalizeTaskStatus(t.status);
+          return s === 'running' || s === 'review';
+        }).length;
         return {
           total: total,
           done: done,
@@ -281,10 +319,40 @@
         return STATUS_COLUMNS.map(function (col) {
           return Object.assign({}, col, {
             tasks: projectTasks.value.filter(function (task) {
-              if (task.isTriage === true) return false;
-              return col.statuses.indexOf(normalizeTaskStatus(task.status)) !== -1;
+              if (isGoalRoot(task)) return false;
+              var s = normalizeTaskStatus(task.status);
+              if (col.key === 'blocked') return s === 'blocked' || isKickbackTriage(task);
+              if (s === 'triage') return false;
+              return col.statuses.indexOf(s) !== -1;
             })
           });
+        });
+      });
+
+      var historyBadgeKind = Vue.computed(function () {
+        var items = historyItems.value || [];
+        if (items.some(function (item) { return item.requestStatus === 'decompose_failed'; })) return 'failed';
+        if (items.some(function (item) {
+          return item.requestStatus === 'decomposing' || item.requestStatus === 'submitted';
+        })) return 'loading';
+        return 'idle';
+      });
+
+      var historyDetail = Vue.computed(function () {
+        if (!historyDetailId.value) return null;
+        return historyItems.value.find(function (item) { return item.id === historyDetailId.value; }) || null;
+      });
+
+      var historyDetailCanSpecify = Vue.computed(function () {
+        var item = historyDetail.value;
+        if (!item) return false;
+        return item.requestStatus === 'decompose_failed' || item.requestStatus === 'submitted';
+      });
+
+      var formParentTasks = Vue.computed(function () {
+        return projectTasks.value.filter(function (task) {
+          if (isGoalRoot(task)) return false;
+          return normalizeTaskStatus(task.status) !== 'archived';
         });
       });
 
@@ -377,12 +445,14 @@
           complete: '完成任务',
           block: '标记阻塞',
           unblock: '重启任务',
+          updateBlock: '更新阻塞说明',
+          editResult: '补录结果',
+          resumeFromLoop: '完善后继续',
           edit: '编辑任务',
           reassign: '转交任务',
           moveStatus: '移动状态',
           archive: '归档任务',
-          delete: '永久删除',
-          decompose: '下发拆解'
+          delete: '永久删除'
         };
         return map[taskAction.value.type] || '任务操作';
       });
@@ -394,12 +464,14 @@
           complete: '完成',
           block: '阻塞',
           unblock: '重启',
+          updateBlock: '保存',
+          editResult: '保存',
+          resumeFromLoop: '提交并继续',
           edit: '保存',
           reassign: '转交',
           moveStatus: '移动',
           archive: '归档',
-          delete: '永久删除',
-          decompose: '拆解'
+          delete: '永久删除'
         };
         return map[taskAction.value.type] || '确定';
       });
@@ -427,17 +499,232 @@
         return body || '暂无任务说明';
       }
 
+      function isStatusEchoSummary(task, summary) {
+        var s = trimText(summary);
+        if (!s) return true;
+        if (task) {
+          if (s === trimText(task.body) || s === trimText(task.blockedReason) || s === trimText(task.result)) return true;
+        }
+        if (/^已指派给/.test(s) || /^已转交给/.test(s) || /^状态从「/.test(s) || /^已重启：/.test(s) || /^已拆解为/.test(s) || /^已根据补充说明/.test(s)) return true;
+        return /反复 block\/unblock|任务已归档|任务已完成|任务被阻塞|任务已重启|任务已晋升为排队中|系统正在拆解|系统正在自动评审中/.test(s);
+      }
+
       function shouldShowTaskSummary(task) {
         if (!task) return false;
-        var summary = trimText(task.latestSummary);
-        if (!summary) return false;
-        if (summary === trimText(task.body)) return false;
-        if (summary === trimText(task.blockedReason)) return false;
-        if (summary === trimText(task.result)) return false;
+        return !isStatusEchoSummary(task, task.latestSummary);
+      }
+
+      function taskOutputFiles(task) {
+        if (!task || !Array.isArray(task.attachments)) return [];
+        return task.attachments;
+      }
+
+      function taskStructuredFacts(task) {
+        if (!task) return null;
+        var facts = task.outputFacts || null;
+        if (!facts && Array.isArray(task.runs)) {
+          var i;
+          for (i = 0; i < task.runs.length; i++) {
+            var md = task.runs[i] && task.runs[i].metadata;
+            if (md && (md.published_pr || (md.changed_files && md.changed_files.length) || (md.findings && md.findings.length))) {
+              facts = md;
+              break;
+            }
+          }
+        }
+        if (!facts) return null;
+        var files = Array.isArray(facts.changed_files) ? facts.changed_files : [];
+        var findings = Array.isArray(facts.findings) ? facts.findings : [];
+        if (!facts.published_pr && !files.length && !findings.length) return null;
+        return {
+          publishedPr: facts.published_pr || '',
+          changedFiles: files,
+          findings: findings
+        };
+      }
+
+      function taskChildOutputs(task) {
+        return drawerChildTasks(task).filter(function (child) {
+          return shouldShowTaskSummary(child) || !!trimText(child.result);
+        });
+      }
+
+      function shouldShowOutputSummary(task) {
+        if (!task) return false;
+        var s = normalizeTaskStatus(task.status);
+        if (s === 'todo' || s === 'scheduled') return false;
+        if (s === 'running') {
+          return drawerTaskRuns(task).some(function (run) {
+            return run && run.outcome !== 'running' && run.status !== 'running' && !!trimText(run.summary);
+          });
+        }
+        return shouldShowTaskSummary(task);
+      }
+
+      function hasOutputPane(task) {
+        if (!task) return false;
+        var s = normalizeTaskStatus(task.status);
+        if (s === 'done') return true;
+        if (taskOutputFiles(task).length) return true;
+        if (taskStructuredFacts(task)) return true;
+        if (trimText(task.result) && (s === 'archived')) return true;
+        if (taskChildOutputs(task).length) return true;
+        return shouldShowOutputSummary(task);
+      }
+
+      function defaultDetailPane(task) {
+        if (!task) return 'task';
+        if (isKickbackTriage(task)) return 'task';
+        var s = normalizeTaskStatus(task.status);
+        if (s === 'running' || s === 'blocked') return 'process';
+        if (s === 'done') return 'output';
+        if (s === 'review' || s === 'archived') return hasOutputPane(task) ? 'output' : 'task';
+        return 'task';
+      }
+
+      function detailPaneTabs(task) {
+        var tabs = [
+          { key: 'task', label: '任务' },
+          { key: 'process', label: '过程' }
+        ];
+        if (hasOutputPane(task)) tabs.push({ key: 'output', label: '产出' });
+        tabs.push({ key: 'comments', label: '评论', count: drawerTaskComments(task).length });
+        return tabs;
+      }
+
+      function setDetailPane(key) {
+        detailPane.value = key;
+      }
+
+      function hasProcessHistory(task) {
+        return drawerTaskRuns(task).length > 0;
+      }
+
+      function showProcessLog(task) {
+        if (!task) return false;
+        var s = normalizeTaskStatus(task.status);
+        if (s === 'todo' || s === 'scheduled') return false;
+        if (s === 'ready' && !hasProcessHistory(task)) return false;
+        if (!hasProcessHistory(task) && s !== 'running' && s !== 'blocked' && s !== 'review' && s !== 'done') return false;
+        return hasProcessHistory(task) || s === 'running' || s === 'blocked' || s === 'review' || s === 'done';
+      }
+
+      function isDetailRunning(task) {
+        return normalizeTaskStatus(task && task.status) === 'running';
+      }
+
+      function isDetailArchived(task) {
+        return normalizeTaskStatus(task && task.status) === 'archived';
+      }
+
+      function leadTaskPaneWithDeps(task) {
+        if (isKickbackTriage(task)) return false;
+        return hasUnfinishedParentDependency(task);
+      }
+
+      function copyTaskId(task) {
+        var id = task && task.id;
+        if (!id) return;
+        var text = String(id);
+        function succeed() {
+          ElementPlus.ElMessage.success('已复制任务 ID');
+        }
+        function fallback() {
+          try {
+            var ta = document.createElement('textarea');
+            ta.value = text;
+            ta.setAttribute('readonly', 'readonly');
+            ta.style.position = 'fixed';
+            ta.style.left = '-9999px';
+            document.body.appendChild(ta);
+            ta.select();
+            var ok = document.execCommand('copy');
+            document.body.removeChild(ta);
+            if (ok) succeed();
+            else ElementPlus.ElMessage.info(text);
+          } catch (err) {
+            ElementPlus.ElMessage.info(text);
+          }
+        }
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(text).then(succeed).catch(fallback);
+          return;
+        }
+        fallback();
+      }
+
+      function previewTaskOutputFile(file) {
+        if (!file) return;
+        outputPreviewFile.value = {
+          id: file.id,
+          name: file.name || file.fileName || file.title || '未命名文件',
+          size: file.size || 0,
+          mime: file.mime || '',
+          content: file.content || ''
+        };
+        outputPreviewVisible.value = true;
+      }
+
+      function closeOutputPreview() {
+        outputPreviewVisible.value = false;
+        outputPreviewFile.value = null;
+      }
+
+      function outputPreviewMeta(file) {
+        if (!file) return '';
+        var bytes = Number(file.size || 0);
+        var sizeLabel = '--';
+        if (isFinite(bytes) && bytes > 0) {
+          if (bytes < 1024) sizeLabel = bytes + ' B';
+          else if (bytes < 1024 * 1024) sizeLabel = (bytes / 1024).toFixed(1) + ' KB';
+          else sizeLabel = (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+        }
+        return sizeLabel + ' · ' + (file.mime || '未知类型') + ' · 只读预览';
+      }
+
+      function outputPreviewIsText(file) {
+        if (!file || file.content === undefined || file.content === null || file.content === '') return false;
+        var mime = String(file.mime || '').toLowerCase();
+        var name = String(file.name || '').toLowerCase();
+        if (/^image\//.test(mime)) return false;
+        if (/\.(png|jpe?g|gif|webp|svg)$/.test(name)) return false;
         return true;
       }
 
+      function downloadTaskOutputFile(file) {
+        if (window.AppShared && window.AppShared.downloadWorkspaceFile) {
+          window.AppShared.downloadWorkspaceFile(file);
+        }
+      }
+
+      function previousRunSummary(task) {
+        var runs = drawerTaskRuns(task);
+        var i;
+        for (i = 0; i < runs.length; i++) {
+          if (runs[i] && runs[i].outcome !== 'running' && runs[i].status !== 'running' && trimText(runs[i].summary)) {
+            return runs[i].summary;
+          }
+        }
+        return '';
+      }
+
+      function ensureProcessLogOpen(task) {
+        if (!task || !showProcessLog(task)) return;
+        var s = normalizeTaskStatus(task.status);
+        if (s !== 'running' && s !== 'blocked' && s !== 'review') return;
+        var map = Object.assign({}, logPanelVisible.value);
+        if (map[task.id]) return;
+        map[task.id] = true;
+        logPanelVisible.value = map;
+        if (!logTailContent.value[task.id]) {
+          var tailMap = Object.assign({}, logTailContent.value);
+          tailMap[task.id] = generateDemoLogTail(task.id);
+          logTailContent.value = tailMap;
+        }
+      }
+
       function taskDetailSubStatusLabel(task) {
+        if (isKickbackTriage(task)) return '';
         var sub = taskSubStatusLabel(task);
         if (!sub) return '';
         if (sub === taskStatusLabel(task.status)) return '';
@@ -445,6 +732,7 @@
       }
 
       var BLOCK_KIND_LABELS = {
+        block_loop_detected: '反复阻塞',
         needs_input: '需人工决策',
         capability: '能力/权限不足',
         transient: '临时故障',
@@ -594,6 +882,7 @@
 
       function isTaskActive(task) {
         if (!task) return false;
+        if (isKickbackTriage(task)) return true;
         var s = normalizeTaskStatus(task.status);
         return s === 'running' || s === 'blocked';
       }
@@ -635,12 +924,16 @@
 
       function statusBannerType(task) {
         if (!task) return '';
+        if (isKickbackTriage(task)) return 'kickback';
         var s = normalizeTaskStatus(task.status);
+        if (s === 'archived') return 'archived';
         if (s === 'blocked') return 'blocked';
         if (s === 'running') return 'running';
-        if (s === 'todo' || s === 'ready' || s === 'scheduled') return 'waiting';
-        if (s === 'done') return 'done';
         if (s === 'review') return 'review';
+        if (s === 'done') return 'done';
+        if (s === 'scheduled') return 'scheduled';
+        if (s === 'ready') return 'ready';
+        if (s === 'todo') return hasUnfinishedParentDependency(task) ? 'waiting' : 'enqueue';
         return '';
       }
 
@@ -665,12 +958,38 @@
       }
 
       function statusBannerWaitingText(task) {
-        if (!task) return '';
-        var s = normalizeTaskStatus(task.status);
-        if (s === 'scheduled') return '已排期，等待激活';
         var unfinished = unfinishedParentLabels(task);
-        if (unfinished.length) return '等待父任务：' + unfinished.join(', ');
-        return '待开始执行';
+        if (!unfinished.length) return '等待父任务完成后才能加入执行队列';
+        return '等待父任务：' + unfinished.join(', ');
+      }
+
+      function statusBannerEnqueueText() {
+        return '父依赖已满足，可加入执行队列';
+      }
+
+      function statusBannerScheduledText(task) {
+        var reason = (task && (task.blockedReason || task.scheduleReason || task.latestSummary)) || '';
+        return reason ? ('已排期 · ' + reason) : '已排期，等待激活';
+      }
+
+      function statusBannerReadyText(task) {
+        if (!taskHasAssignee(task)) return '可执行，等待调度。请先指派负责人，否则调度会跳过此任务。';
+        return '可执行，等待调度领取';
+      }
+
+      function statusBannerKickbackText(task) {
+        var times = (task && task.consecutiveFailures) || 2;
+        var kindLabel = task && task.blockKind ? blockKindLabel(task.blockKind) : '反复阻塞';
+        var reason = (task && task.blockedReason) || '同一类问题反复出现，再重启会空转';
+        return '类型：' + kindLabel + ' · 已出现 ' + times + ' 次 · ' + reason;
+      }
+
+      function statusBannerArchivedText() {
+        return '已归档 · 只读';
+      }
+
+      function taskHasAssignee(task) {
+        return !!(task && (task.expertId || task.assignee));
       }
 
       function statusBannerDoneText(task) {
@@ -685,8 +1004,86 @@
         return '系统自动评审中';
       }
 
-      function getDrawerPrimaryActions(task) {
-        return getDrawerActions(task).filter(function (act) { return act.key !== 'comment'; });
+      function getTaskFooterActions(task) {
+        if (!task) return [];
+        if (isKickbackTriage(task)) {
+          return [
+            { key: 'resumeFromLoop', label: '完善后继续', type: 'primary' },
+            { key: 'reassign', label: '转交', type: 'default' },
+            { key: 'archive', label: '归档', type: 'default' }
+          ];
+        }
+        var s = normalizeTaskStatus(task.status);
+        if (s === 'review') return [];
+        if (s === 'todo') {
+          var waiting = hasUnfinishedParentDependency(task);
+          return [
+            { key: 'enqueue', label: '加入执行队列', type: 'primary', disabled: waiting, tooltip: waiting ? ('等待父任务: ' + unfinishedParentLabels(task).join(', ')) : '' },
+            { key: 'assign', label: '分配负责人', type: 'default' },
+            { key: 'archive', label: '归档', type: 'default' }
+          ];
+        }
+        if (s === 'scheduled') {
+          return [
+            { key: 'activate', label: '激活', type: 'primary' },
+            { key: 'archive', label: '归档', type: 'default' }
+          ];
+        }
+        if (s === 'ready') {
+          if (!taskHasAssignee(task)) {
+            return [
+              { key: 'assign', label: '分配负责人', type: 'primary' },
+              { key: 'enqueue', label: '催促执行', type: 'default', disabled: true, tooltip: '请先指派负责人' },
+              { key: 'archive', label: '归档', type: 'default' }
+            ];
+          }
+          return [
+            { key: 'enqueue', label: '催促执行', type: 'primary' },
+            { key: 'reassign', label: '转交', type: 'default' },
+            { key: 'block', label: '标记阻塞', type: 'default' },
+            { key: 'archive', label: '归档', type: 'default' }
+          ];
+        }
+        if (s === 'running') {
+          return [
+            { key: 'complete', label: '完成', type: 'primary' },
+            { key: 'block', label: '标记阻塞', type: 'default' },
+            { key: 'reassign', label: '转交', type: 'default' },
+            { key: 'archive', label: '归档', type: 'default' }
+          ];
+        }
+        if (s === 'blocked') {
+          return [
+            { key: 'unblock', label: '重启', type: 'primary' },
+            { key: 'updateBlock', label: '更新阻塞说明', type: 'default' },
+            { key: 'reassign', label: '转交', type: 'default' },
+            { key: 'archive', label: '归档', type: 'default' }
+          ];
+        }
+        if (s === 'done') {
+          return [
+            { key: 'followup', label: '创建后续任务', type: 'primary' },
+            { key: 'editResult', label: '补录结果', type: 'default' },
+            { key: 'archive', label: '归档', type: 'default' }
+          ];
+        }
+        if (s === 'archived') {
+          return [{ key: 'delete', label: '永久删除', type: 'danger' }];
+        }
+        return [];
+      }
+
+      function getTaskFooterPrimary(task) {
+        var actions = getTaskFooterActions(task);
+        var i;
+        for (i = 0; i < actions.length; i++) {
+          if (actions[i].type === 'primary') return actions[i];
+        }
+        return null;
+      }
+
+      function getTaskFooterSecondary(task) {
+        return getTaskFooterActions(task).filter(function (act) { return act.type !== 'primary'; });
       }
 
       function taskStatusLabel(status) {
@@ -695,15 +1092,16 @@
 
       function taskSubStatusLabel(task) {
         if (!task) return '';
+        if (isKickbackTriage(task)) return '反复阻塞';
         var s = normalizeTaskStatus(task.status);
-        if (s === 'triage' && !task.isTriage) return '需人工拆解';
+        if (s === 'triage') return '反复阻塞';
         if (s === 'review') return '评审中';
         if (s === 'scheduled') return '已排期';
         if (s === 'ready') return '可执行';
         if (s === 'todo') {
           var unfinishedLabels = unfinishedParentLabels(task);
           if (unfinishedLabels.length) return '等待父任务: ' + unfinishedLabels.join(', ');
-          return '待开始';
+          return '';
         }
         if (s === 'running') return '执行中';
         if (s === 'blocked') return '需人工介入';
@@ -717,6 +1115,7 @@
       }
 
       function taskStatusClass(task) {
+        if (isKickbackTriage(task)) return 'status-blocked status-kickback';
         return 'status-' + normalizeTaskStatus(task && task.status);
       }
 
@@ -765,27 +1164,56 @@
         selectedProjectTaskId.value = task.id;
       }
 
+      function closeTaskOverlays(keep) {
+        keep = keep || {};
+        if (!keep.goal) {
+          showGoalDialog.value = false;
+          resetGoalForm();
+        }
+        if (!keep.history) closeHistoryDialog(true);
+        if (!keep.manual) showManualCreateDialog.value = false;
+        if (!keep.detail) {
+          drawerVisible.value = false;
+        }
+        if (!keep.action) closeTaskAction();
+        if (!keep.members) membersSidebarVisible.value = false;
+      }
+
       function openTaskDetail(task) {
         if (!task) return;
+        closeTaskOverlays({ detail: true });
         selectedProjectTaskId.value = task.id;
         drawerTaskId.value = task.id;
         drawerMode.value = 'taskDetail';
         drawerVisible.value = true;
+        detailPane.value = defaultDetailPane(task);
+        drawerCommentDraft.value = '';
+        ensureProcessLogOpen(task);
       }
 
       function openTaskFromEvent(event) {
         if (event && event.taskId) {
-          selectedProjectTaskId.value = event.taskId;
-          drawerTaskId.value = event.taskId;
-          drawerMode.value = 'taskDetail';
-          drawerVisible.value = true;
+          var found = projectTasks.value.find(function (t) { return sameTaskId(t.id, event.taskId); });
+          if (found) openTaskDetail(found);
+          else {
+            closeTaskOverlays({ detail: true });
+            selectedProjectTaskId.value = event.taskId;
+            drawerTaskId.value = event.taskId;
+            drawerMode.value = 'taskDetail';
+            drawerVisible.value = true;
+          }
         }
         activeTab.value = 'kanban';
       }
 
       function openMemberDrawer() {
-        membersSidebarVisible.value = !membersSidebarVisible.value;
-        if (membersSidebarVisible.value) historyPanelVisible.value = false;
+        var next = !membersSidebarVisible.value;
+        if (next) {
+          closeTaskOverlays({ members: true });
+          membersSidebarVisible.value = true;
+        } else {
+          membersSidebarVisible.value = false;
+        }
       }
 
       function closeMembersSidebar() {
@@ -794,6 +1222,7 @@
 
       function closeDrawer() {
         drawerVisible.value = false;
+        closeOutputPreview();
       }
 
       function unfinishedParents(task) {
@@ -813,128 +1242,6 @@
         return unfinishedParents(task).length > 0;
       }
 
-      function getCardQuickActions(task) {
-        var s = normalizeTaskStatus(task && task.status);
-        if (s === 'triage') return [{ key: 'decompose', label: '拆解' }];
-        if (s === 'scheduled') return [{ key: 'activate', label: '激活' }];
-        if (s === 'todo') {
-          if (hasUnfinishedParentDependency(task)) return [{ key: 'startExecute', label: '开始执行', disabled: true, tooltip: '等待父任务: ' + unfinishedParentLabels(task).join(', ') }];
-          return [{ key: 'startExecute', label: '开始执行' }];
-        }
-        if (s === 'ready') return [{ key: 'startExecute', label: '开始执行' }];
-        if (s === 'running') return [{ key: 'complete', label: '完成' }];
-        if (s === 'review') return [{ key: 'detail', label: '查看进度' }];
-        if (s === 'blocked') return [{ key: 'unblock', label: '重启' }];
-        if (s === 'done' || s === 'archived') return [{ key: 'detail', label: '查看' }];
-        return [];
-      }
-
-      function getCardMenuActions(task) {
-        var s = normalizeTaskStatus(task && task.status);
-        if (s === 'triage') return [
-          { key: 'detail', label: '查看详情' },
-          { key: 'comment', label: '添加评论' },
-          { key: 'decompose', label: '拆解' },
-          { key: 'assign', label: '分配协作专家' },
-          { key: 'archive', label: '归档' }
-        ];
-        if (s === 'scheduled') return [
-          { key: 'detail', label: '查看详情' },
-          { key: 'comment', label: '添加评论' },
-          { key: 'activate', label: '激活任务' },
-          { key: 'archive', label: '归档' }
-        ];
-        if (s === 'todo' || s === 'ready') return [
-          { key: 'detail', label: '查看详情' },
-          { key: 'comment', label: '添加评论' },
-          { key: 'assign', label: '分配负责人' },
-          { key: 'block', label: '标记阻塞' },
-          { key: 'archive', label: '归档' }
-        ];
-        if (s === 'running') return [
-          { key: 'detail', label: '查看详情' },
-          { key: 'comment', label: '添加评论' },
-          { key: 'viewRuns', label: '查看运行日志' },
-          { key: 'reassign', label: '转交' },
-          { key: 'block', label: '标记阻塞' }
-        ];
-        if (s === 'review') return [
-          { key: 'detail', label: '查看详情' },
-          { key: 'comment', label: '添加评论' }
-        ];
-        if (s === 'blocked') return [
-          { key: 'detail', label: '查看详情' },
-          { key: 'comment', label: '添加评论' },
-          { key: 'edit', label: '更新阻塞说明', patch: { editField: 'blockedReason' } },
-          { key: 'reassign', label: '转交' },
-          { key: 'archive', label: '关闭任务' }
-        ];
-        if (s === 'done') return [
-          { key: 'detail', label: '查看详情' },
-          { key: 'comment', label: '添加评论' },
-          { key: 'followup', label: '创建后续任务' },
-          { key: 'edit', label: '补录结果', patch: { editField: 'result' } },
-          { key: 'archive', label: '归档' }
-        ];
-        if (s === 'archived') return [
-          { key: 'detail', label: '查看详情' },
-          { key: 'delete', label: '永久删除' }
-        ];
-        return [
-          { key: 'detail', label: '查看详情' },
-          { key: 'comment', label: '添加评论' }
-        ];
-      }
-
-      function getDrawerActions(task) {
-        var s = normalizeTaskStatus(task && task.status);
-        var actions = [];
-        if (s === 'review') return actions;
-        actions.push({ key: 'comment', label: '添加评论', type: 'default' });
-        if (s === 'triage') {
-          actions.push({ key: 'decompose', label: '拆解', type: 'primary' });
-          actions.push({ key: 'assign', label: '分配协作专家', type: 'default' });
-          actions.push({ key: 'archive', label: '归档', type: 'default' });
-        } else if (s === 'scheduled') {
-          actions.push({ key: 'activate', label: '激活', type: 'primary' });
-          actions.push({ key: 'archive', label: '归档', type: 'default' });
-        } else if (s === 'todo') {
-          actions.push({ key: 'assign', label: '分配负责人', type: 'default' });
-          actions.push({ key: 'startExecute', label: '开始执行', type: 'primary' });
-          actions.push({ key: 'moveStatus', label: '移动状态', type: 'default' });
-          actions.push({ key: 'addDependency', label: '添加依赖', type: 'default' });
-          actions.push({ key: 'removeDependency', label: '移除依赖', type: 'default' });
-          actions.push({ key: 'schedule', label: '排期', type: 'default' });
-          actions.push({ key: 'block', label: '标记阻塞', type: 'default' });
-          actions.push({ key: 'archive', label: '归档', type: 'default' });
-        } else if (s === 'ready') {
-          actions.push({ key: 'startExecute', label: '开始执行', type: 'primary' });
-          actions.push({ key: 'moveStatus', label: '移动状态', type: 'default' });
-          actions.push({ key: 'reassign', label: '转交', type: 'default' });
-          actions.push({ key: 'block', label: '标记阻塞', type: 'default' });
-          actions.push({ key: 'archive', label: '归档', type: 'default' });
-        } else if (s === 'running') {
-          actions.push({ key: 'complete', label: '完成', type: 'primary' });
-          actions.push({ key: 'block', label: '标记阻塞', type: 'default' });
-          actions.push({ key: 'reassign', label: '转交', type: 'default' });
-          actions.push({ key: 'viewRuns', label: '查看运行记录', type: 'default' });
-          actions.push({ key: 'archive', label: '归档', type: 'default' });
-        } else if (s === 'blocked') {
-          actions.push({ key: 'unblock', label: '重启', type: 'primary' });
-          actions.push({ key: 'editBlock', label: '更新阻塞说明', type: 'default' });
-          actions.push({ key: 'reassign', label: '转交', type: 'default' });
-          actions.push({ key: 'archive', label: '归档', type: 'default' });
-        } else if (s === 'done') {
-          actions.push({ key: 'edit', label: '补录结果', type: 'default' });
-          actions.push({ key: 'followup', label: '创建后续任务', type: 'default' });
-          actions.push({ key: 'viewRuns', label: '查看运行记录', type: 'default' });
-          actions.push({ key: 'archive', label: '归档', type: 'default' });
-        } else if (s === 'archived') {
-          actions.push({ key: 'delete', label: '永久删除', type: 'danger' });
-        }
-        return actions;
-      }
-
       function getTaskStatusMoves(task) {
         var s = normalizeTaskStatus(task && task.status);
         return TASK_STATUS_MOVES[s] || [];
@@ -950,8 +1257,7 @@
       }
 
       function openGoalDialog() {
-        membersSidebarVisible.value = false;
-        historyPanelVisible.value = false;
+        closeTaskOverlays({ goal: true });
         showGoalDialog.value = true;
       }
 
@@ -989,14 +1295,18 @@
         }).catch(function () {});
       }
 
-      function openGoalHistoryFromDialog() {
-        function openHistory() {
-          showGoalDialog.value = false;
-          resetGoalForm();
-          membersSidebarVisible.value = false;
-          historyPanelVisible.value = true;
+      function openHistoryDialog() {
+        if (showHistoryDialog.value) {
+          closeHistoryDialog();
+          return;
         }
-        if (!goalFormDirty()) {
+        function openHistory() {
+          closeTaskOverlays({ history: true });
+          loadHistory();
+          selectDefaultHistoryItem();
+          showHistoryDialog.value = true;
+        }
+        if (!showGoalDialog.value || !goalFormDirty()) {
           openHistory();
           return;
         }
@@ -1005,6 +1315,69 @@
           '查看发起记录？',
           { confirmButtonText: '查看记录', cancelButtonText: '继续编辑', type: 'warning' }
         ).then(openHistory).catch(function () {});
+      }
+
+      function selectDefaultHistoryItem() {
+        var items = historyItems.value || [];
+        var current = historyDetailId.value;
+        if (current && items.some(function (item) { return item.id === current; })) return;
+        var preferred = items.find(function (item) { return item.requestStatus === 'decompose_failed'; })
+          || items.find(function (item) { return item.requestStatus === 'decomposing' || item.requestStatus === 'submitted'; })
+          || items[0];
+        historyDetailId.value = preferred ? preferred.id : null;
+        historySpecifyDraft.value = '';
+      }
+
+      function historyStatusChipClass(item) {
+        if (!item) return 'chip-muted';
+        if (item.requestStatus === 'decompose_failed') return 'chip-failed';
+        if (item.requestStatus === 'decomposing' || item.requestStatus === 'submitted') return 'chip-loading';
+        if (item.requestStatus === 'completed' || item.statusLabel === '已完成') return 'chip-done';
+        if (item.requestStatus === 'archived' || item.statusLabel === '已归档') return 'chip-muted';
+        return 'chip-running';
+      }
+
+      function closeHistoryDialog(silent) {
+        showHistoryDialog.value = false;
+        historyDetailId.value = null;
+        historySpecifyDraft.value = '';
+        historyRetrying.value = false;
+      }
+
+      function openHistoryDetail(item) {
+        if (!item) return;
+        historyDetailId.value = item.id;
+        historySpecifyDraft.value = '';
+      }
+
+      function backHistoryList() {
+        historyDetailId.value = null;
+        historySpecifyDraft.value = '';
+      }
+
+      function retryHistoryDecompose() {
+        var item = historyDetail.value;
+        if (!item) return;
+        historyRetrying.value = true;
+        try {
+          if (store.retryDecomposeProjectGoal) {
+            store.retryDecomposeProjectGoal(props.projectId, item.id, historySpecifyDraft.value);
+          } else {
+            store.decomposeProjectTask(props.projectId, item.id, { children: [] });
+          }
+          ElementPlus.ElMessage.success('已重新提交拆解');
+          historySpecifyDraft.value = '';
+          load();
+        } catch (e) {
+          ElementPlus.ElMessage.error('重试拆解失败');
+        }
+        historyRetrying.value = false;
+      }
+
+      function openHistoryChild(child) {
+        if (!child) return;
+        closeHistoryDialog();
+        openTaskDetail(child);
       }
 
       function resetManualForm(preset) {
@@ -1022,7 +1395,8 @@
       function resetTaskActionForm() {
         taskActionForm.value = {
           comment: '', assignee: '', result: '', blockedReason: '', unblockReason: '',
-          reassignReason: '', editTitle: '', editBody: '', editPriority: '', moveTarget: '', blockKind: 'dependency'
+          reassignReason: '', editTitle: '', editBody: '', editPriority: '', moveTarget: '', blockKind: 'dependency',
+          resumeSupplement: ''
         };
       }
 
@@ -1042,10 +1416,11 @@
           priority: 'medium',
           status: 'triage',
           isTriage: true,
+          goalRequestStatus: 'decomposing',
           decompositionModel: f.model || ''
         });
         selectedProjectTaskId.value = root.id;
-        ElementPlus.ElMessage.success('目标已提交，可在发起记录中查看进度');
+        ElementPlus.ElMessage.success('目标已提交，可在 Header「发起记录」中查看进度');
         if (project.value.autoDecomposeEnabled !== false) {
           try { store.decomposeProjectTask(props.projectId, root.id, { children: [], model: f.model || '' }); } catch (e) { /* noop */ }
         }
@@ -1057,6 +1432,7 @@
 
       function openManualCreateDialog(preset) {
         preset = preset || {};
+        closeTaskOverlays({ manual: true });
         resetManualForm(preset);
         showManualCreateDialog.value = true;
       }
@@ -1090,10 +1466,18 @@
         if (!task) return;
         resetTaskActionForm();
         taskAction.value = { type: type, taskId: task.id };
+        taskActionVisible.value = true;
         if (type === 'edit') {
           taskActionForm.value.editTitle = task.title || '';
           taskActionForm.value.editBody = task.body || '';
           taskActionForm.value.editPriority = task.priority || 'medium';
+        }
+        if (type === 'updateBlock') {
+          taskActionForm.value.blockedReason = task.blockedReason || '';
+          taskActionForm.value.blockKind = task.blockKind || 'needs_input';
+        }
+        if (type === 'editResult') {
+          taskActionForm.value.result = task.result || '';
         }
         if (type === 'reassign' || type === 'assign') {
           taskActionForm.value.assignee = task.expertId || '';
@@ -1101,6 +1485,7 @@
       }
 
       function closeTaskAction() {
+        taskActionVisible.value = false;
         taskAction.value = { type: '', taskId: null };
         resetTaskActionForm();
       }
@@ -1127,8 +1512,28 @@
           store.blockProjectTask(pid, tid, trimText(t.blockedReason), t.blockKind);
           ElementPlus.ElMessage.success('任务已标记为阻塞');
         } else if (type === 'unblock') {
-          store.unblockProjectTask(pid, tid, trimText(t.unblockReason));
+          try {
+            store.unblockProjectTask(pid, tid, trimText(t.unblockReason));
+          } catch (e) {
+            return ElementPlus.ElMessage.error('该任务不能重启，请使用「完善后继续」');
+          }
           ElementPlus.ElMessage.success('任务已重启');
+        } else if (type === 'updateBlock') {
+          if (!trimText(t.blockedReason)) return ElementPlus.ElMessage.warning('请填写阻塞说明');
+          store.editProjectTask(pid, tid, { blockedReason: trimText(t.blockedReason) });
+          ElementPlus.ElMessage.success('阻塞说明已更新');
+        } else if (type === 'editResult') {
+          if (!trimText(t.result)) return ElementPlus.ElMessage.warning('请填写完成结果');
+          store.editProjectTask(pid, tid, { result: trimText(t.result) });
+          ElementPlus.ElMessage.success('结果已补录');
+        } else if (type === 'resumeFromLoop') {
+          if (!trimText(t.resumeSupplement)) return ElementPlus.ElMessage.warning('请补充任务该怎么继续');
+          try {
+            store.resumeFromLoopProjectTask(pid, tid, trimText(t.resumeSupplement));
+          } catch (e) {
+            return ElementPlus.ElMessage.error('完善后继续失败');
+          }
+          ElementPlus.ElMessage.success('已提交补充说明，任务离开反复阻塞');
         } else if (type === 'edit') {
           store.editProjectTask(pid, tid, { title: trimText(t.editTitle), body: trimText(t.editBody), priority: t.editPriority });
           ElementPlus.ElMessage.success('任务已更新');
@@ -1147,9 +1552,6 @@
           store.deleteProjectTaskPermanently(pid, tid);
           ElementPlus.ElMessage.success('任务已永久删除');
           if (drawerTaskId.value === tid) closeDrawer();
-        } else if (type === 'decompose') {
-          try { store.decomposeProjectTask(pid, tid, { children: [] }); } catch (e) { /* noop */ }
-          ElementPlus.ElMessage.success('已下发拆解');
         } else if (type === 'followup') {
           closeTaskAction();
           openManualCreateDialog({ parentTaskId: tid });
@@ -1159,31 +1561,55 @@
         closeTaskAction();
       }
 
-      function handleCardMenuToggle(task) {
-        if (!task) { cardMenuTaskId.value = null; return; }
-        cardMenuTaskId.value = cardMenuTaskId.value === task.id ? null : task.id;
+      function enqueueOrNudgeTask(task) {
+        if (!task) return;
+        if (actionDisabledHint(task, 'enqueue')) {
+          ElementPlus.ElMessage.info(actionDisabledHint(task, 'enqueue'));
+          return;
+        }
+        var s = normalizeTaskStatus(task.status);
+        if (s === 'todo') {
+          try { store.promoteProjectTask(props.projectId, task.id); } catch (e) { /* noop */ }
+          ElementPlus.ElMessage.success('已加入执行队列');
+        } else if (s === 'ready') {
+          ElementPlus.ElMessage.success('已催促执行，任务仍在等待调度');
+        }
+        load();
       }
 
-      function handleCardMenuAction(action, task) {
-        cardMenuTaskId.value = null;
-        if (action.key === 'detail') { openTaskDetail(task); return; }
-        if (action.key === 'viewRuns') { openTaskDetail(task); toggleExecDetail('runs'); return; }
-        if (action.key === 'followup') { openManualCreateDialog({ parentTaskId: task.id }); return; }
-        if (action.key === 'startExecute') {
-          var s = normalizeTaskStatus(task.status);
-          if (s === 'scheduled') {
-            store.unblockProjectTask(props.projectId, task.id, '');
-          }
-          try { store.promoteProjectTask(props.projectId, task.id); } catch (e) { /* noop */ }
-          store.moveProjectTaskStatus(props.projectId, task.id, 'running');
-          ElementPlus.ElMessage.success('任务已开始执行');
-          load();
+      function actionDisabledHint(task, key) {
+        if (key === 'enqueue' && normalizeTaskStatus(task.status) === 'todo' && hasUnfinishedParentDependency(task)) {
+          return '等待父任务完成后才能加入执行队列';
+        }
+        if (key === 'enqueue' && normalizeTaskStatus(task.status) === 'ready' && !taskHasAssignee(task)) {
+          return '请先指派负责人';
+        }
+        return '';
+      }
+
+      function handleDrawerAction(action, task) {
+        if (!task || !action) return;
+        if (action.disabled) {
+          ElementPlus.ElMessage.info(action.tooltip || actionDisabledHint(task, action.key) || '当前不可执行');
+          return;
+        }
+        if (action.key === 'enqueue') {
+          enqueueOrNudgeTask(task);
           return;
         }
         if (action.key === 'activate') {
-          store.unblockProjectTask(props.projectId, task.id, '');
+          try {
+            store.unblockProjectTask(props.projectId, task.id, '');
+          } catch (e) {
+            ElementPlus.ElMessage.error('激活失败');
+            return;
+          }
           ElementPlus.ElMessage.success('任务已激活');
           load();
+          return;
+        }
+        if (action.key === 'followup') {
+          openManualCreateDialog({ parentTaskId: task.id });
           return;
         }
         if (action.key === 'archive') {
@@ -1203,80 +1629,7 @@
           }).catch(function () {});
           return;
         }
-        if (action.key === 'decompose') {
-          try { store.decomposeProjectTask(props.projectId, task.id, { children: [] }); } catch (e) { /* noop */ }
-          ElementPlus.ElMessage.success('已下发拆解');
-          load();
-          return;
-        }
         openTaskAction(action.key, task);
-      }
-
-      function handleQuickAction(action, task) {
-        if (action.disabled) {
-          if (action.key === 'startExecute') {
-            ElementPlus.ElMessage.info('等待父任务完成后才能开始执行');
-          }
-          return;
-        }
-        if (action.key === 'detail') { openTaskDetail(task); return; }
-        if (action.key === 'decompose') {
-          try { store.decomposeProjectTask(props.projectId, task.id, { children: [] }); } catch (e) { /* noop */ }
-          ElementPlus.ElMessage.success('已下发拆解');
-          load();
-          return;
-        }
-        if (action.key === 'activate') {
-          store.unblockProjectTask(props.projectId, task.id, '');
-          ElementPlus.ElMessage.success('任务已激活');
-          load();
-          return;
-        }
-        if (action.key === 'startExecute') {
-          var s = normalizeTaskStatus(task.status);
-          if (s === 'scheduled') {
-            store.unblockProjectTask(props.projectId, task.id, '');
-          }
-          try { store.promoteProjectTask(props.projectId, task.id); } catch (e) { /* noop */ }
-          store.moveProjectTaskStatus(props.projectId, task.id, 'running');
-          ElementPlus.ElMessage.success('任务已开始执行');
-          load();
-          return;
-        }
-        if (action.key === 'viewRuns') {
-          toggleExecDetail('runs');
-          return;
-        }
-        if (action.key === 'editBlock') {
-          openTaskAction('block', task);
-          return;
-        }
-        if (action.key === 'addDependency' || action.key === 'removeDependency') {
-          ElementPlus.ElMessage.info('依赖管理功能即将上线');
-          return;
-        }
-        if (action.key === 'schedule') {
-          ElementPlus.ElMessage.info('排期功能即将上线');
-          return;
-        }
-        openTaskAction(action.key, task);
-      }
-
-      function handleDrawerAction(action, task) {
-        if (!task || !action) return;
-        if (action.key === 'comment') {
-          openTaskAction('comment', task);
-          return;
-        }
-        if (action.key === 'followup') {
-          openManualCreateDialog({ parentTaskId: task.id });
-          return;
-        }
-        if (action.key === 'viewRuns') {
-          toggleExecDetail('runs');
-          return;
-        }
-        handleCardMenuAction(action, task);
       }
 
       function submitDrawerComment() {
@@ -1289,22 +1642,12 @@
         load();
       }
 
-      function toggleHistoryPanel() {
-        historyPanelVisible.value = !historyPanelVisible.value;
-        if (historyPanelVisible.value) membersSidebarVisible.value = false;
-      }
-
-      function closeHistorySidebar() {
-        historyPanelVisible.value = false;
-        historyExpandedId.value = null;
-      }
-
       function historyItemProgress(item) {
         if (!item) return '';
-        if (!item.childCount) {
-          if (item.statusLabel === '待拆解') return '未拆解';
-          return item.statusLabel;
-        }
+        if (item.requestStatus === 'decompose_failed') return '需补充说明';
+        if (item.requestStatus === 'decomposing') return '正在拆解';
+        if (item.requestStatus === 'submitted') return '未拆解';
+        if (!item.childCount) return item.statusLabel;
         return item.doneCount + '/' + item.childCount + ' 子任务完成';
       }
 
@@ -1314,22 +1657,7 @@
       }
 
       function toggleHistoryExpand(item) {
-        if (!item) return;
-        historyExpandedId.value = historyExpandedId.value === item.id ? null : item.id;
-      }
-
-      function openHistoryComment(taskId) {
-        historyCommentDraft.value = { taskId: taskId, text: '' };
-        showHistoryCommentDialog.value = true;
-      }
-
-      function submitHistoryComment() {
-        var d = historyCommentDraft.value;
-        if (!trimText(d.text)) return ElementPlus.ElMessage.warning('请填写补充说明');
-        store.commentProjectTask(props.projectId, d.taskId, trimText(d.text));
-        ElementPlus.ElMessage.success('补充说明已添加');
-        showHistoryCommentDialog.value = false;
-        loadHistory();
+        openHistoryDetail(item);
       }
 
       function saveOrchestration() {
@@ -1346,16 +1674,6 @@
 
       function openOrchestrationDialog() {
         showOrchestrationDialog.value = true;
-      }
-
-      function copyWorkdir() {
-        var path = trimText(project.value && project.value.defaultWorkdir);
-        if (!path) return;
-        if (navigator.clipboard && navigator.clipboard.writeText) {
-          navigator.clipboard.writeText(path).then(function () {
-            ElementPlus.ElMessage.success('路径已复制');
-          }).catch(function () { ElementPlus.ElMessage.info(path); });
-        } else { ElementPlus.ElMessage.info(path); }
       }
 
       function workspaceFileTypeClass(file) { return 'type-' + ((file && file.type) || 'document'); }
@@ -1499,11 +1817,14 @@
       }
       function removeMember(memberId) { store.removeProjectMember(memberId); load(); }
       function getMemberTaskStats(expertId) {
-        var tasks = projectTasks.value.filter(function (task) { return task.expertId === expertId || task.assignee === expertId; });
+        var tasks = projectTasks.value.filter(function (task) {
+          if (isGoalRoot(task)) return false;
+          return task.expertId === expertId || task.assignee === expertId;
+        });
         return {
           total: tasks.length,
           done: tasks.filter(function (task) { return normalizeTaskStatus(task.status) === 'done'; }).length,
-          blocked: tasks.filter(function (task) { return normalizeTaskStatus(task.status) === 'blocked'; }).length
+          blocked: tasks.filter(function (task) { return normalizeTaskStatus(task.status) === 'blocked' || isKickbackTriage(task); }).length
         };
       }
       function createTaskForMember(member) {
@@ -1556,11 +1877,16 @@
         manualForm: manualForm,
         showManualCreateDialog: showManualCreateDialog,
         historyItems: historyItems,
-        historyExpandedId: historyExpandedId,
-        historyPanelVisible: historyPanelVisible,
-        showHistoryCommentDialog: showHistoryCommentDialog,
-        historyCommentDraft: historyCommentDraft,
+        historyDetail: historyDetail,
+        historyDetailId: historyDetailId,
+        showHistoryDialog: showHistoryDialog,
+        historySpecifyDraft: historySpecifyDraft,
+        historyRetrying: historyRetrying,
+        historyBadgeKind: historyBadgeKind,
+        historyDetailCanSpecify: historyDetailCanSpecify,
+        formParentTasks: formParentTasks,
         taskAction: taskAction,
+        taskActionVisible: taskActionVisible,
         taskActionForm: taskActionForm,
         taskActionTask: taskActionTask,
         taskActionTitle: taskActionTitle,
@@ -1592,10 +1918,35 @@
         taskBody: taskBody,
         taskDescriptionText: taskDescriptionText,
         shouldShowTaskSummary: shouldShowTaskSummary,
+        shouldShowOutputSummary: shouldShowOutputSummary,
+        taskOutputFiles: taskOutputFiles,
+        taskStructuredFacts: taskStructuredFacts,
+        taskChildOutputs: taskChildOutputs,
+        hasOutputPane: hasOutputPane,
+        detailPane: detailPane,
+        detailPaneTabs: detailPaneTabs,
+        setDetailPane: setDetailPane,
+        hasProcessHistory: hasProcessHistory,
+        showProcessLog: showProcessLog,
+        isDetailRunning: isDetailRunning,
+        isDetailArchived: isDetailArchived,
+        leadTaskPaneWithDeps: leadTaskPaneWithDeps,
+        copyTaskId: copyTaskId,
+        previewTaskOutputFile: previewTaskOutputFile,
+        downloadTaskOutputFile: downloadTaskOutputFile,
+        previousRunSummary: previousRunSummary,
+        outputPreviewVisible: outputPreviewVisible,
+        outputPreviewFile: outputPreviewFile,
+        closeOutputPreview: closeOutputPreview,
+        outputPreviewMeta: outputPreviewMeta,
+        outputPreviewIsText: outputPreviewIsText,
         taskStatusLabel: taskStatusLabel,
         taskSubStatusLabel: taskSubStatusLabel,
         taskDetailSubStatusLabel: taskDetailSubStatusLabel,
-        getDrawerPrimaryActions: getDrawerPrimaryActions,
+        getTaskFooterPrimary: getTaskFooterPrimary,
+        getTaskFooterSecondary: getTaskFooterSecondary,
+        isKickbackTriage: isKickbackTriage,
+        unfinishedParents: unfinishedParents,
         statusTimeLabel: statusTimeLabel,
         hasUnfinishedParentDependency: hasUnfinishedParentDependency,
         taskStatusType: taskStatusType,
@@ -1610,20 +1961,13 @@
         openMemberDrawer: openMemberDrawer,
         closeMembersSidebar: closeMembersSidebar,
         closeDrawer: closeDrawer,
-        getCardQuickActions: getCardQuickActions,
-        getCardMenuActions: getCardMenuActions,
-        getDrawerActions: getDrawerActions,
         getTaskStatusMoves: getTaskStatusMoves,
-        handleCardMenuToggle: handleCardMenuToggle,
-        handleCardMenuAction: handleCardMenuAction,
-        handleQuickAction: handleQuickAction,
         handleDrawerAction: handleDrawerAction,
         submitDrawerComment: submitDrawerComment,
         drawerCommentDraft: drawerCommentDraft,
         openGoalDialog: openGoalDialog,
         closeGoalDialog: closeGoalDialog,
         handleGoalDialogBeforeClose: handleGoalDialogBeforeClose,
-        openGoalHistoryFromDialog: openGoalHistoryFromDialog,
         submitGoal: submitGoal,
         openManualCreateDialog: openManualCreateDialog,
         closeManualCreateDialog: closeManualCreateDialog,
@@ -1631,16 +1975,18 @@
         openTaskAction: openTaskAction,
         closeTaskAction: closeTaskAction,
         submitTaskAction: submitTaskAction,
-        toggleHistoryPanel: toggleHistoryPanel,
-        closeHistorySidebar: closeHistorySidebar,
+        openHistoryDialog: openHistoryDialog,
+        closeHistoryDialog: closeHistoryDialog,
+        openHistoryDetail: openHistoryDetail,
+        backHistoryList: backHistoryList,
+        retryHistoryDecompose: retryHistoryDecompose,
+        openHistoryChild: openHistoryChild,
         historyItemProgress: historyItemProgress,
         historyItemMetaLine: historyItemMetaLine,
+        historyStatusChipClass: historyStatusChipClass,
         toggleHistoryExpand: toggleHistoryExpand,
-        openHistoryComment: openHistoryComment,
-        submitHistoryComment: submitHistoryComment,
         saveOrchestration: saveOrchestration,
         openOrchestrationDialog: openOrchestrationDialog,
-        copyWorkdir: copyWorkdir,
         workspaceFileTypeClass: workspaceFileTypeClass,
         workspaceFileIcon: workspaceFileIcon,
         workspaceFileMeta: workspaceFileMeta,
@@ -1695,6 +2041,11 @@
         statusBannerWaitingText: statusBannerWaitingText,
         statusBannerDoneText: statusBannerDoneText,
         statusBannerReviewText: statusBannerReviewText,
+        statusBannerEnqueueText: statusBannerEnqueueText,
+        statusBannerScheduledText: statusBannerScheduledText,
+        statusBannerReadyText: statusBannerReadyText,
+        statusBannerKickbackText: statusBannerKickbackText,
+        statusBannerArchivedText: statusBannerArchivedText,
         expandedRunIds: expandedRunIds,
         toggleRunExpanded: toggleRunExpanded,
         execDetailExpanded: execDetailExpanded,
@@ -1713,7 +2064,7 @@
     return [
       '<div class="project-detail-shell" v-if="project">',
       headerTemplate(),
-      '<div class="project-detail-body" :class="{ \'with-members-sidebar\': membersSidebarVisible, \'with-history-sidebar\': historyPanelVisible }">',
+      '<div class="project-detail-body" :class="{ \'with-members-sidebar\': membersSidebarVisible }">',
         '<div class="project-detail-primary">',
           tabsTemplate(),
           '<div class="project-detail-content">',
@@ -1722,14 +2073,14 @@
             '</div>',
           '</div>',
         '</div>',
-        historySidebarTemplate(),
         membersSidebarTemplate(),
       '</div>',
       drawerTemplate(),
       goalDialogTemplate(),
+      historyDialogTemplate(),
       manualCreateDialogTemplate(),
       taskActionDialogTemplate(),
-      historyCommentDialogTemplate(),
+      outputPreviewDialogTemplate(),
       orchestrationDialogTemplate(),
       workspaceFolderDialogTemplate(),
       addMemberDialogTemplate(),
@@ -1751,16 +2102,21 @@
             '<div class="project-title-text">',
               '<div class="project-title-row">',
                 '<h1>{{ project.name }}</h1>',
-                '<span class="project-status-pill">进行中</span>',
+                '<span class="project-progress-pill">{{ todoStats.done }}/{{ todoStats.total }}</span>',
               '</div>',
             '</div>',
           '</div>',
         '</div>',
         '<div class="project-header-summary project-header-summary-compact">',
-          '<span class="project-progress-pill">{{ todoStats.done }}/{{ todoStats.total }} 已完成</span>',
           '<button type="button" class="project-header-action-btn project-header-goal-btn" @click="openGoalDialog">',
             '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 2L11 13"/><path d="M22 2l-7 20-4-9-9-4 20-7z"/></svg>',
             '<span>发起目标</span>',
+          '</button>',
+          '<button type="button" class="project-header-action-btn project-header-records-btn" :class="{ \'is-failed\': historyBadgeKind === \'failed\', \'is-loading\': historyBadgeKind === \'loading\', active: showHistoryDialog }" title="发起记录" aria-label="发起记录" @click="openHistoryDialog">',
+            '<svg v-if="historyBadgeKind === \'failed\'" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>',
+            '<svg v-else-if="historyBadgeKind === \'loading\'" class="project-records-spin" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a10 10 0 1 0 10 10"/></svg>',
+            '<svg v-else viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>',
+            '<span>记录</span>',
           '</button>',
           '<button type="button" class="project-header-action-btn" :class="{ active: membersSidebarVisible }" @click="openMemberDrawer">',
             '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">',
@@ -1813,7 +2169,7 @@
         '<section v-for="col in statusColumns" :key="col.key" class="project-kanban-column" :class="\'column-\' + col.key">',
           '<header>',
             '<span>{{ col.title }}</span><em>{{ col.tasks.length }}</em>',
-            '<button v-if="col.key === \'todo\'" type="button" class="project-kanban-column-add" title="创建任务" @click="openManualCreateDialog({ status: col.statuses[0] })">+</button>',
+            '<button v-if="col.key === \'todo\'" type="button" class="project-kanban-column-add" title="创建任务" @click="openManualCreateDialog({ status: \'todo\' })">+</button>',
           '</header>',
           '<div class="project-kanban-column-body">',
             taskCardTemplate(true, 'col.tasks'),
@@ -1826,36 +2182,19 @@
 
   function taskCardTemplate(showMeta, vForSource) {
     var source = vForSource || 'col.tasks';
-    var meta = showMeta ? '\u003cdiv class="project-task-card-meta"\u003e\u003cspan class="project-task-card-assignee"\u003e@{{ task.assigneeLabel || expertName(task.expertId) }}\u003c/span\u003e\u003cspan v-if="statusTimeLabel(task)" class="project-task-card-time"\u003e{{ statusTimeLabel(task) }}\u003c/span\u003e\u003c/div\u003e' : '';
     return [
-      '\u003carticle v-for="task in ' + source + '" :key="task.id" class="project-task-card" :class="[{ active: selectedProjectTaskId === task.id, \'highlight-by-expert\': highlightExpertId \u0026\u0026 (task.expertId === highlightExpertId || task.assignee === highlightExpertId) }, taskStatusClass(task), \'priority-\' + (task.priority || \'medium\')]" :data-assignee="task.expertId || task.assignee || \'\'" @click="openTaskDetail(task)"\u003e',
-        '\u003cdiv class="project-task-card-head"\u003e',
-          '\u003cdiv class="project-task-card-title-row"\u003e',
-            '\u003cspan class="project-task-card-priority-dot" aria-hidden="true"\u003e\u003c/span\u003e',
-            '\u003ch3 class="project-task-card-title" @click.stop\u003e{{ taskDisplayTitle(task) }}\u003c/h3\u003e',
-          '\u003c/div\u003e',
-          '\u003cspan v-if="taskSubStatusLabel(task)" class="project-task-card-substatus" :class="taskStatusClass(task)"\u003e{{ taskSubStatusLabel(task) }}\u003c/span\u003e',
-        '\u003c/div\u003e',
-        meta,
-        '\u003cdiv class="project-task-card-footer" @click.stop\u003e',
-          '\u003cspan class="project-task-card-comments"\u003e💬 {{ task.commentCount || 0 }}\u003c/span\u003e',
-          '\u003cdiv class="project-task-card-actions-right"\u003e',
-            '\u003cel-tooltip v-for="qa in getCardQuickActions(task)" :key="qa.key" :disabled="!qa.disabled || !qa.tooltip" :content="qa.tooltip || \'\'" placement="top"\u003e',
-              '\u003cspan\u003e',
-                '\u003cbutton type="button" class="project-task-quick-btn" :class="{ disabled: qa.disabled }" :disabled="qa.disabled" @click="handleQuickAction(qa, task)"\u003e{{ qa.label }}\u003c/button\u003e',
-              '\u003c/span\u003e',
-            '\u003c/el-tooltip\u003e',
-            '\u003cel-dropdown trigger="click" placement="bottom-end" @command="(cmd) =\u003e handleCardMenuAction(cmd, task)"\u003e',
-              '\u003cbutton type="button" class="project-task-menu-btn" @click.stop title="更多操作"\u003e⋯\u003c/button\u003e',
-              '\u003ctemplate #dropdown\u003e',
-                '\u003cel-dropdown-menu\u003e',
-                  '\u003cel-dropdown-item v-for="ma in getCardMenuActions(task)" :key="ma.key" :command="ma"\u003e{{ ma.label }}\u003c/el-dropdown-item\u003e',
-                '\u003c/el-dropdown-menu\u003e',
-              '\u003c/template\u003e',
-            '\u003c/el-dropdown\u003e',
-          '\u003c/div\u003e',
-        '\u003c/div\u003e',
-      '\u003c/article\u003e'
+      '<article v-for="task in ' + source + '" :key="task.id" class="project-task-card" :class="[{ active: selectedProjectTaskId === task.id, \'highlight-by-expert\': highlightExpertId && (task.expertId === highlightExpertId || task.assignee === highlightExpertId) }, taskStatusClass(task), \'priority-\' + (task.priority || \'medium\')]" :data-assignee="task.expertId || task.assignee || \'\'" @click="openTaskDetail(task)">',
+        '<div class="project-task-card-head">',
+          '<div class="project-task-card-title-row">',
+            '<span class="project-task-card-priority-dot" :title="priorityLabel(task.priority) + \'优先级\'"></span>',
+            '<h3 class="project-task-card-title">{{ taskDisplayTitle(task) }}</h3>',
+          '</div>',
+        '</div>',
+        '<div v-if="' + (showMeta ? 'true' : 'false') + '" class="project-task-card-meta">',
+          '<span class="project-task-card-assignee">@{{ task.assigneeLabel || expertName(task.expertId) }}</span>',
+          '<span v-if="taskSubStatusLabel(task)" class="project-task-card-substatus" :class="taskStatusClass(task)">{{ taskSubStatusLabel(task) }}</span>',
+        '</div>',
+      '</article>'
     ].join('');
   }
   function timelineTabTemplate() {
@@ -1897,12 +2236,6 @@
             '<el-button size="small" @click="openCreateWorkspaceFolderDialog">新建文件夹</el-button>',
             '<el-button type="primary" size="small" @click="openMaterialUpload">上传文件</el-button>',
           '</div>',
-        '</div>',
-        '<div class="project-workdir-inline-card">',
-          '<span class="project-workdir-inline-label">系统工作空间</span>',
-          '<code class="project-workdir-inline-path">{{ project.defaultWorkdir }}</code>',
-          '<span class="project-workdir-managed-badge">系统默认</span>',
-          '<el-button @click="copyWorkdir">复制路径</el-button>',
         '</div>',
         '<div class="workspace-list-panel project-workspace-list-panel">',
           workspaceEmptyTemplate(),
@@ -1954,16 +2287,7 @@
 
   function goalDialogTemplate() {
     return [
-      '<el-dialog v-model="showGoalDialog" width="640px" class="project-goal-dialog" :close-on-click-modal="false" :before-close="handleGoalDialogBeforeClose" append-to-body>',
-        '<template #header>',
-          '<div class="project-goal-dialog-header">',
-            '<strong>发起目标</strong>',
-            '<button type="button" class="project-goal-history-link" @click="openGoalHistoryFromDialog">',
-              '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v5h5"/><path d="M3.5 8a9 9 0 1 1-1 6"/><path d="M12 7v5l3 2"/></svg>',
-              '<span>发起记录</span>',
-            '</button>',
-          '\u003c/div\u003e',
-        '</template>',
+      '<el-dialog v-model="showGoalDialog" title="发起目标" width="640px" class="project-goal-dialog" :close-on-click-modal="false" :before-close="handleGoalDialogBeforeClose" append-to-body>',
         '<div class="project-goal-dialog-tip">💡 描述你的项目目标，系统会自动拆解为具体任务并分配给相关专家。</div>',
         '<el-form label-position="top" class="project-goal-dialog-form">',
           '<el-form-item label="目标标题" required>',
@@ -1990,56 +2314,93 @@
 
   function drawerTemplate() {
     return [
-      '<el-drawer v-model="drawerVisible" direction="rtl" size="480px" class="project-unified-drawer project-task-detail-drawer" :show-header="false" append-to-body>',
+      '<el-dialog v-model="drawerVisible" width="800px" top="6vh" class="project-task-detail-dialog" :show-close="false" append-to-body @closed="closeDrawer">',
         '<div class="project-drawer-body">',
           drawerTaskDetailTemplate(),
         '</div>',
-      '</el-drawer>'
+      '</el-dialog>'
     ].join('');
   }
 
-  function historySidebarTemplate() {
+  function historyDialogTemplate() {
     return [
-      '\u003caside v-if="historyPanelVisible" class="project-history-sidebar"\u003e',
-        '\u003cdiv class="project-history-sidebar-head"\u003e',
-          '\u003cdiv class="project-history-sidebar-title"\u003e',
-            '\u003csvg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"\u003e',
-              '\u003cpath d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>',
-              '\u003cpolyline points="14 2 14 8 20 8"/>',
-              '\u003cline x1="16" y1="13" x2="8" y2="13"/>',
-              '\u003cline x1="16" y1="17" x2="8" y2="17"/>',
-            '\u003c/svg\u003e',
-            '\u003cspan\u003e发起记录\u003c/span\u003e',
-            '\u003cem\u003e{{ historyItems.length }}\u003c/em\u003e',
-          '\u003c/div\u003e',
-          '\u003cbutton type="button" class="project-history-sidebar-close" @click="closeHistorySidebar" title="收起"\u003e',
-            '\u003csvg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"\u003e\u003cline x1="18" y1="6" x2="6" y2="18"/>\u003cline x1="6" y1="6" x2="18" y2="18"/>\u003c/svg\u003e',
-          '\u003c/button\u003e',
-        '\u003c/div\u003e',
-        '\u003cdiv v-if="!historyItems.length" class="project-history-inline-empty"\u003e暂无历史目标\u003c/div\u003e',
-        '\u003cdiv v-else class="project-history-inline-list"\u003e',
-          '\u003carticle v-for="item in historyItems" :key="item.id" class="project-history-inline-card" :class="{ expanded: historyExpandedId === item.id }"\u003e',
-            '\u003cdiv class="project-history-inline-card-head" @click="toggleHistoryExpand(item)"\u003e',
-              '\u003cstrong\u003e{{ item.title }}\u003c/strong\u003e',
-              '\u003cspan class="project-history-inline-card-meta"\u003e{{ historyItemMetaLine(item) }}\u003c/span\u003e',
-            '\u003c/div\u003e',
-            '\u003cdiv v-if="historyExpandedId === item.id" class="project-history-inline-card-body"\u003e',
-              '\u003cp class="project-history-inline-card-desc"\u003e{{ item.body || "暂无描述" }}\u003c/p\u003e',
-              '\u003cdiv v-if="item.children && item.children.length" class="project-history-inline-children"\u003e',
-                '\u003cdiv v-for="child in item.children" :key="child.id" class="project-history-inline-child"\u003e',
-                  '\u003cspan class="project-history-inline-child-title"\u003e{{ taskDisplayTitle(child) }}\u003c/span\u003e',
-                  '\u003cspan class="project-history-inline-child-assignee"\u003e@{{ expertName(child.expertId) }}\u003c/span\u003e',
-                  '\u003cspan class="project-history-inline-child-status" :class="taskStatusClass(child)"\u003e{{ taskSubStatusLabel(child) || taskStatusLabel(child.status) }}\u003c/span\u003e',
-                '\u003c/div\u003e',
-              '\u003c/div\u003e',
-              '\u003cdiv v-else class="project-history-inline-empty-child"\u003e暂无子任务\u003c/div\u003e',
-              '\u003cdiv class="project-history-inline-card-actions"\u003e',
-                '\u003cel-button size="small" @click.stop="openHistoryComment(item.id)"\u003e补充说明\u003c/el-button\u003e',
-              '\u003c/div\u003e',
-            '\u003c/div\u003e',
-          '\u003c/article\u003e',
-        '\u003c/div\u003e',
-      '\u003c/aside\u003e'
+      '<el-dialog v-model="showHistoryDialog" width="960px" top="8vh" class="project-history-dialog" :close-on-click-modal="false" append-to-body @closed="closeHistoryDialog(true)">',
+        '<template #header>',
+          '<div class="project-history-dialog-header">',
+            '<div class="project-history-dialog-header-title">',
+              '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>',
+              '<strong>发起记录</strong>',
+            '</div>',
+            '<em v-if="historyItems.length">{{ historyItems.length }} 条</em>',
+          '</div>',
+        '</template>',
+        '<div class="project-history-split">',
+          '<aside class="project-history-pane-list">',
+            '<div class="project-history-pane-list-head">全部记录</div>',
+            '<div v-if="!historyItems.length" class="project-history-inline-empty">暂无发起记录</div>',
+            '<div v-else class="project-history-dialog-list">',
+              '<button v-for="item in historyItems" :key="item.id" type="button" class="project-history-dialog-item" :class="[\'kind-\' + item.iconKind, { selected: historyDetailId === item.id }]" @click="openHistoryDetail(item)">',
+                '<span class="project-history-dialog-icon" :class="item.iconKind">',
+                  '<span v-if="item.iconKind === \'failed\'">!</span>',
+                  '<span v-else-if="item.iconKind === \'loading\'" class="project-records-spin-dot"></span>',
+                  '<span v-else>✓</span>',
+                '</span>',
+                '<div class="project-history-dialog-item-body">',
+                  '<div class="project-history-dialog-item-top">',
+                    '<strong>{{ item.title }}</strong>',
+                    '<span class="project-history-status-chip" :class="historyStatusChipClass(item)">{{ item.statusLabel }}</span>',
+                  '</div>',
+                  '<span class="project-history-dialog-item-time">{{ formatTaskTime(item.createdAt) }}</span>',
+                '</div>',
+              '</button>',
+            '</div>',
+          '</aside>',
+          '<section class="project-history-pane-detail">',
+            '<div v-if="!historyDetail" class="project-history-detail-blank">',
+              '<div class="project-history-detail-blank-icon">📄</div>',
+              '<p>选择左侧记录，查看拆解结果或补充说明</p>',
+            '</div>',
+            '<div v-else class="project-history-detail">',
+              '<div class="project-history-detail-head">',
+                '<h3>{{ historyDetail.title }}</h3>',
+                '<div class="project-history-detail-head-meta">',
+                  '<span class="project-history-status-chip" :class="historyStatusChipClass(historyDetail)">{{ historyDetail.statusLabel }}</span>',
+                  '<span>{{ formatTaskTime(historyDetail.createdAt) }}</span>',
+                  '<span v-if="historyDetail.childCount">{{ historyItemProgress(historyDetail) }}</span>',
+                '</div>',
+              '</div>',
+              '<div class="project-history-detail-section">',
+                '<div class="project-history-detail-section-title">目标描述</div>',
+                '<div class="project-history-detail-section-body">{{ historyDetail.body || \'暂无描述\' }}</div>',
+              '</div>',
+              '<div v-if="historyDetail.requestStatus === \'decomposing\'" class="project-history-detail-pending">',
+                '<span class="project-records-spin-dot"></span>',
+                '<span>系统正在拆解，完成后会在这里列出生成的任务。</span>',
+              '</div>',
+              '<div v-if="historyDetail.requestStatus === \'submitted\' && !historyDetailCanSpecify" class="project-history-detail-pending">目标已提交，等待开始拆解。</div>',
+              '<div v-if="historyDetailCanSpecify" class="project-history-specify">',
+                '<div class="project-history-specify-title">{{ historyDetail.requestStatus === \'decompose_failed\' ? \'拆解失败，请补充说明后重试\' : \'补充说明后提交拆解\' }}</div>',
+                '<div v-if="historyDetail.decomposeError" class="project-history-specify-error">{{ historyDetail.decomposeError }}</div>',
+                '<el-input v-model="historySpecifyDraft" type="textarea" :rows="4" placeholder="用自然语言补充目标范围、约束或验收标准" />',
+                '<div class="project-history-specify-actions">',
+                  '<el-button type="primary" :loading="historyRetrying" @click="retryHistoryDecompose">重试拆解</el-button>',
+                '</div>',
+              '</div>',
+              '<div class="project-history-detail-section">',
+                '<div class="project-history-detail-section-title">拆解出的任务</div>',
+                '<div v-if="historyDetail.children && historyDetail.children.length" class="project-history-detail-children">',
+                  '<button v-for="child in historyDetail.children" :key="child.id" type="button" class="project-history-detail-child" @click="openHistoryChild(child)">',
+                    '<span class="project-history-detail-child-title">{{ taskDisplayTitle(child) }}</span>',
+                    '<span class="project-history-detail-child-assignee">@{{ expertName(child.expertId) }}</span>',
+                    '<span class="project-history-detail-child-status" :class="taskStatusClass(child)">{{ taskSubStatusLabel(child) || taskStatusLabel(child.status) }}</span>',
+                  '</button>',
+                '</div>',
+                '<div v-else class="project-history-detail-empty">{{ historyDetail.requestStatus === \'decomposing\' ? \'拆解完成后将在这里展示子任务\' : \'暂无子任务\' }}</div>',
+              '</div>',
+            '</div>',
+          '</section>',
+        '</div>',
+      '</el-dialog>'
     ].join('');
   }
 
@@ -2083,31 +2444,32 @@
     return [
       '<template v-if="drawerMode === \'taskDetail\'">',
         '<div v-if="drawerTask" class="project-task-detail" :class="taskStatusClass(drawerTask)">',
-          '<div class="project-task-detail-scroll">',
-            '<div class="project-task-detail-hero">',
-              '<button type="button" class="project-task-detail-close" title="关闭" @click="closeDrawer">',
-                '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>',
-              '</button>',
-              '<div class="project-task-detail-badges">',
-                '<span class="project-task-detail-status-pill" :class="taskStatusClass(drawerTask)">{{ taskStatusLabel(drawerTask.status) }}</span>',
-                '<span v-if="taskDetailSubStatusLabel(drawerTask)" class="project-task-detail-substatus-pill" :class="taskStatusClass(drawerTask)">{{ taskDetailSubStatusLabel(drawerTask) }}</span>',
-              '</div>',
-              '<h3 class="project-task-detail-title">{{ taskDisplayTitle(drawerTask) }}</h3>',
-              '<div class="project-task-detail-header-meta">',
-                '<div class="project-task-detail-assignee-inline">',
-                  '<div class="project-task-detail-assignee-avatar">',
-                    '<img v-if="drawerTask.expertId" :src="(expertById(drawerTask.expertId) || {}).avatar" :alt="expertName(drawerTask.expertId)">',
-                    '<span v-else class="project-task-detail-assignee-placeholder">未</span>',
-                  '</div>',
-                  '<span class="project-task-detail-assignee-name">{{ drawerTask.assigneeLabel || expertName(drawerTask.expertId) }}</span>',
-                '</div>',
-                '<span class="project-task-detail-chip project-task-detail-chip-priority" :class="\'priority-\' + (drawerTask.priority || \'medium\')">',
-                  '<span class="priority-dot"></span>{{ priorityLabel(drawerTask.priority) }}优先级',
-                '</span>',
+          '<div class="project-task-detail-hero">',
+            '<div class="project-task-detail-hero-top">',
+              '<h3 class="project-task-detail-title" :title="taskDisplayTitle(drawerTask)">{{ taskDisplayTitle(drawerTask) }}</h3>',
+              '<div class="project-task-detail-hero-actions">',
+                '<button type="button" class="project-task-detail-copy" title="复制任务 ID" @click.stop="copyTaskId(drawerTask)">复制ID</button>',
+                '<button type="button" class="project-task-detail-close" title="关闭" @click.stop="closeDrawer">',
+                  '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>',
+                '</button>',
               '</div>',
             '</div>',
+            '<div class="project-task-detail-header-meta">',
+              '<span class="project-task-detail-status-pill" :class="taskStatusClass(drawerTask)">{{ isKickbackTriage(drawerTask) ? \'反复阻塞\' : taskStatusLabel(drawerTask.status) }}</span>',
+              '<div class="project-task-detail-assignee-inline">',
+                '<div class="project-task-detail-assignee-avatar">',
+                  '<img v-if="drawerTask.expertId" :src="(expertById(drawerTask.expertId) || {}).avatar" :alt="expertName(drawerTask.expertId)">',
+                  '<span v-else class="project-task-detail-assignee-placeholder">未</span>',
+                '</div>',
+                '<span class="project-task-detail-assignee-name">{{ drawerTask.expertId ? \'@\' + (drawerTask.assigneeLabel || expertName(drawerTask.expertId)) : \'未指派\' }}</span>',
+              '</div>',
+              '<span class="project-task-detail-chip project-task-detail-chip-priority" :class="\'priority-\' + (drawerTask.priority || \'medium\')">',
+                '<span class="priority-dot"></span>{{ priorityLabel(drawerTask.priority) }}',
+              '</span>',
+            '</div>',
+          '</div>',
 
-            '<div v-if="statusBannerType(drawerTask)" class="project-task-detail-status-banner" :class="\'banner-\' + statusBannerType(drawerTask)">',
+          '<div v-if="statusBannerType(drawerTask)" class="project-task-detail-status-banner" :class="\'banner-\' + statusBannerType(drawerTask)">',
               '<template v-if="statusBannerType(drawerTask) === \'blocked\'">',
                 '<div class="status-banner-icon">⚠</div>',
                 '<div class="status-banner-content">',
@@ -2126,6 +2488,40 @@
                 '<div class="status-banner-icon">⏳</div>',
                 '<div class="status-banner-content">',
                   '<div class="status-banner-title">{{ statusBannerWaitingText(drawerTask) }}</div>',
+                  '<div class="status-banner-sub">',
+                    '<button v-for="parent in unfinishedParents(drawerTask)" :key="parent.id" type="button" class="project-task-detail-parent-link" @click="openTaskDetail(parent)">{{ taskDisplayTitle(parent) }}</button>',
+                  '</div>',
+                '</div>',
+              '</template>',
+              '<template v-if="statusBannerType(drawerTask) === \'enqueue\'">',
+                '<div class="status-banner-icon">ℹ</div>',
+                '<div class="status-banner-content">',
+                  '<div class="status-banner-title">{{ statusBannerEnqueueText() }}</div>',
+                '</div>',
+              '</template>',
+              '<template v-if="statusBannerType(drawerTask) === \'scheduled\'">',
+                '<div class="status-banner-icon">📅</div>',
+                '<div class="status-banner-content">',
+                  '<div class="status-banner-title">{{ statusBannerScheduledText(drawerTask) }}</div>',
+                '</div>',
+              '</template>',
+              '<template v-if="statusBannerType(drawerTask) === \'ready\'">',
+                '<div class="status-banner-icon">▶</div>',
+                '<div class="status-banner-content">',
+                  '<div class="status-banner-title">{{ statusBannerReadyText(drawerTask) }}</div>',
+                '</div>',
+              '</template>',
+              '<template v-if="statusBannerType(drawerTask) === \'kickback\'">',
+                '<div class="status-banner-icon">⚠</div>',
+                '<div class="status-banner-content">',
+                  '<div class="status-banner-title">反复阻塞：再重启会空转</div>',
+                  '<div class="status-banner-sub">{{ statusBannerKickbackText(drawerTask) }}</div>',
+                '</div>',
+              '</template>',
+              '<template v-if="statusBannerType(drawerTask) === \'archived\'">',
+                '<div class="status-banner-icon">📦</div>',
+                '<div class="status-banner-content">',
+                  '<div class="status-banner-title">{{ statusBannerArchivedText() }}</div>',
                 '</div>',
               '</template>',
               '<template v-if="statusBannerType(drawerTask) === \'done\'">',
@@ -2150,154 +2546,245 @@
               '</div>',
             '</div>',
 
-            '<div v-if="shouldShowTaskSummary(drawerTask)" class="project-task-detail-section project-task-detail-section-summary">',
-              '<div class="project-task-detail-section-title">最新产出</div>',
-              '<div class="project-task-detail-section-body">{{ drawerTask.latestSummary }}</div>',
-            '</div>',
-
-            '<div v-if="drawerTask.result && drawerTask.status === \'done\'" class="project-task-detail-section project-task-detail-section-result">',
-              '<div class="project-task-detail-section-title">完成说明</div>',
-              '<div class="project-task-detail-section-body">{{ drawerTask.result }}</div>',
-            '</div>',
-
-            '<div class="project-task-detail-collapsible" :class="{ expanded: isTaskActive(drawerTask) || execDetailExpanded.runs }">',
-              '<button type="button" class="collapsible-header" @click="toggleExecDetail(\'runs\')">',
-                '<span class="collapsible-arrow">{{ execDetailExpanded.runs ? \'▾\' : \'▸\' }}</span>',
-                '<span class="collapsible-title">执行详情</span>',
-                '<span v-if="drawerTaskRuns(drawerTask).length" class="collapsible-count">{{ drawerTaskRuns(drawerTask).length }}</span>',
+            '<div class="project-task-detail-tabs" role="tablist">',
+              '<button v-for="tab in detailPaneTabs(drawerTask)" :key="tab.key" type="button" class="project-task-detail-tab" :class="{ active: detailPane === tab.key }" role="tab" @click="setDetailPane(tab.key)">',
+                '<span>{{ tab.label }}</span>',
+                '<em v-if="tab.key === \'comments\'">{{ tab.count }}</em>',
               '</button>',
-              '<div v-show="isTaskActive(drawerTask) || execDetailExpanded.runs" class="collapsible-body">',
-
-                '<div v-if="drawerTaskRuns(drawerTask).length" class="exec-runs">',
-                  '<div class="exec-runs-label">运行记录</div>',
-                  '<div v-for="run in drawerTaskRuns(drawerTask)" :key="run.id" class="run-item" :class="\'run-\' + (run.outcome || run.status)">',
-                    '<div class="run-summary-row" @click="toggleRunExpanded(run.id)">',
-                      '<span class="run-dot" :class="\'dot-\' + (run.outcome || run.status)">',
-                        '<span v-if="run.outcome === \'running\'" class="run-dot-pulse"></span>',
-                      '</span>',
-                      '<span class="run-id">{{ run.id }}</span>',
-                      '<span class="run-outcome" :class="\'outcome-\' + (run.outcome || run.status)">{{ runOutcomeLabel(run.outcome || run.status) }}</span>',
-                      '<span class="run-duration">{{ runDuration(run) }}</span>',
-                      '<span class="run-expand-icon">{{ (expandedRunIds[run.id] !== undefined ? expandedRunIds[run.id] : runExpandedDefault(drawerTask, run)) ? \'▾\' : \'▸\' }}</span>',
-                    '</div>',
-                    '<div v-if="run.summary && ((expandedRunIds[run.id] !== undefined ? expandedRunIds[run.id] : runExpandedDefault(drawerTask, run)))" class="run-detail">',
-                      '<div v-if="run.summary" class="run-detail-row"><span class="run-detail-label">摘要</span><span class="run-detail-value">{{ run.summary }}</span></div>',
-                      '<div v-if="runErrorDisplay(run)" class="run-detail-row run-detail-error"><span class="run-detail-label">错误</span><span class="run-detail-value">{{ runErrorDisplay(run) }}</span></div>',
-                      '<div v-if="run.startedAt" class="run-detail-row"><span class="run-detail-label">开始</span><span class="run-detail-value">{{ formatTaskTime(run.startedAt) }}</span></div>',
-                      '<div v-if="run.endedAt" class="run-detail-row"><span class="run-detail-label">结束</span><span class="run-detail-value">{{ formatTaskTime(run.endedAt) }}</span></div>',
-                      '<div v-if="runMetadataDisplay(run)" class="run-detail-row run-detail-meta"><span class="run-detail-label">元数据</span><pre class="run-detail-metadata">{{ runMetadataDisplay(run) }}</pre></div>',
-                    '</div>',
-                  '</div>',
-                '</div>',
-                '<div v-else class="exec-empty">暂无运行记录</div>',
-
-                '<div v-if="drawerTaskEvents(drawerTask).length" class="exec-events">',
-                  '<div class="exec-events-label">执行事件</div>',
-                  '<div class="events-timeline">',
-                    '<div v-for="ev in drawerTaskEvents(drawerTask)" :key="ev.id" class="event-item">',
-                      '<span class="event-time">{{ formatTaskTime(ev.createdAt) }}</span>',
-                      '<span class="event-dot" :class="\'ev-\' + ev.kind"></span>',
-                      '<span class="event-label">{{ eventKindLabel(ev.kind) }}</span>',
-                      '<span v-if="eventPayloadSummary(ev)" class="event-payload">{{ eventPayloadSummary(ev) }}</span>',
-                    '</div>',
-                  '</div>',
-                '</div>',
-
-                '<div class="exec-log-panel">',
-                  '<div class="exec-log-header">',
-                    '<span class="exec-log-title">运行日志</span>',
-                    '<button type="button" class="exec-log-toggle" @click="toggleLogPanel(drawerTask.id)">',
-                      '{{ logPanelVisible[drawerTask.id] ? \'收起\' : \'展开\' }}',
-                    '</button>',
-                    '<button v-if="logPanelVisible[drawerTask.id]" type="button" class="exec-log-refresh" @click="toggleLogPanel(drawerTask.id)">刷新</button>',
-                  '</div>',
-                  '<div v-if="logPanelVisible[drawerTask.id]" class="exec-log-body">',
-                    '<pre v-if="logTailContent[drawerTask.id]" class="log-tail">{{ logTailContent[drawerTask.id] }}</pre>',
-                    '<div v-else class="exec-log-empty">暂无运行日志</div>',
-                  '</div>',
-                '</div>',
-              '</div>',
             '</div>',
 
-            '<div class="project-task-detail-collapsible" :class="{ expanded: contextSectionExpanded }">',
-              '<button type="button" class="collapsible-header" @click="toggleContextSection">',
-                '<span class="collapsible-arrow">{{ contextSectionExpanded ? \'▾\' : \'▸\' }}</span>',
-                '<span class="collapsible-title">任务上下文</span>',
-              '</button>',
-              '<div v-show="contextSectionExpanded" class="collapsible-body">',
+            '<div class="project-task-detail-scroll">',
 
-                '<div class="project-task-detail-section">',
-                  '<div class="project-task-detail-section-title">任务说明</div>',
-                  '<div class="project-task-detail-section-body">{{ taskDescriptionText(drawerTask) }}</div>',
+            '<div v-show="detailPane === \'task\'" class="project-task-detail-pane">',
+              '<div v-if="leadTaskPaneWithDeps(drawerTask) && (taskParentTask(drawerTask.parentTaskId) || hasChildren(drawerTask))" class="project-task-detail-section project-task-detail-section-link">',
+                '<div class="project-task-detail-section-title">依赖关系</div>',
+                '<div v-if="taskParentTask(drawerTask.parentTaskId)" class="context-dep-row">',
+                  '<span class="context-dep-label">父任务</span>',
+                  '<span v-if="hasUnfinishedParentDependency(drawerTask)" class="dep-wait">⏳</span>',
+                  '<button type="button" class="project-task-detail-parent-link" @click="openTaskDetail(taskParentTask(drawerTask.parentTaskId))">',
+                    '<span class="project-task-detail-parent-link-title">{{ taskDisplayTitle(taskParentTask(drawerTask.parentTaskId)) }}</span>',
+                  '</button>',
                 '</div>',
-
-                '<div v-if="taskParentTask(drawerTask.parentTaskId) || hasChildren(drawerTask)" class="project-task-detail-section project-task-detail-section-link">',
-                  '<div class="project-task-detail-section-title">依赖关系</div>',
-                  '<div v-if="taskParentTask(drawerTask.parentTaskId)" class="context-dep-row">',
-                    '<span class="context-dep-label">父任务</span>',
-                    '<button type="button" class="project-task-detail-parent-link" @click="openTaskDetail(taskParentTask(drawerTask.parentTaskId))">',
-                      '<span class="project-task-detail-parent-link-title">{{ taskDisplayTitle(taskParentTask(drawerTask.parentTaskId)) }}</span>',
-                    '</button>',
-                  '</div>',
-                  '<div v-if="hasChildren(drawerTask)" class="context-dep-row">',
+                '<div v-if="hasChildren(drawerTask)" class="context-dep-children">',
+                  '<div class="context-dep-row">',
                     '<span class="context-dep-label">子任务</span>',
                     '<span class="context-dep-progress">{{ childTaskProgress(drawerTask) }}</span>',
                   '</div>',
+                  '<button v-for="child in drawerChildTasks(drawerTask)" :key="child.id" type="button" class="project-task-detail-parent-link" @click="openTaskDetail(child)">{{ taskDisplayTitle(child) }}</button>',
                 '</div>',
-
-                '<div v-if="workspacePathLabel(drawerTask)" class="project-task-detail-section">',
-                  '<div class="project-task-detail-section-title">工作目录</div>',
-                  '<div class="project-task-detail-section-body workspace-path">{{ workspacePathLabel(drawerTask) }}</div>',
+              '</div>',
+              '<div class="project-task-detail-section">',
+                '<div class="project-task-detail-section-title">任务说明</div>',
+                '<div class="project-task-detail-section-body">{{ taskDescriptionText(drawerTask) }}</div>',
+              '</div>',
+              '<div v-if="!leadTaskPaneWithDeps(drawerTask) && (taskParentTask(drawerTask.parentTaskId) || hasChildren(drawerTask))" class="project-task-detail-section project-task-detail-section-link">',
+                '<div class="project-task-detail-section-title">依赖关系</div>',
+                '<div v-if="taskParentTask(drawerTask.parentTaskId)" class="context-dep-row">',
+                  '<span class="context-dep-label">父任务</span>',
+                  '<button type="button" class="project-task-detail-parent-link" @click="openTaskDetail(taskParentTask(drawerTask.parentTaskId))">',
+                    '<span class="project-task-detail-parent-link-title">{{ taskDisplayTitle(taskParentTask(drawerTask.parentTaskId)) }}</span>',
+                  '</button>',
                 '</div>',
-
-                '<div class="project-task-detail-section project-task-detail-meta-grid">',
-                  '<div class="project-task-detail-section-title">配置元数据</div>',
-                  '<div class="meta-grid">',
-                    '<div class="meta-row"><span class="meta-label">创建者</span><span class="meta-value">{{ expertName(drawerTask.expertId) || \'系统\' }}</span></div>',
-                    '<div class="meta-row"><span class="meta-label">创建时间</span><span class="meta-value">{{ formatTaskTime(drawerTask.createdAt) }}</span></div>',
-                    '<div v-if="drawerTask.startedAt" class="meta-row"><span class="meta-label">开始时间</span><span class="meta-value">{{ formatTaskTime(drawerTask.startedAt) }}</span></div>',
-                    '<div v-if="drawerTask.completedAt" class="meta-row"><span class="meta-label">完成时间</span><span class="meta-value">{{ formatTaskTime(drawerTask.completedAt) }}</span></div>',
-                    '<div v-if="drawerTask.startedAt" class="meta-row"><span class="meta-label">总耗时</span><span class="meta-value">{{ taskElapsedLabel(drawerTask) }}</span></div>',
-                    '<div v-if="taskSkillsLabel(drawerTask)" class="meta-row"><span class="meta-label">Skills</span><span class="meta-value">{{ taskSkillsLabel(drawerTask) }}</span></div>',
-                    '<div v-if="drawerTask.consecutiveFailures > 0" class="meta-row meta-row-warn"><span class="meta-label">连续失败</span><span class="meta-value">{{ drawerTask.consecutiveFailures }} 次</span></div>',
-                    '<div v-if="drawerTask.lastFailureError" class="meta-row meta-row-warn"><span class="meta-label">最近错误</span><span class="meta-value">{{ drawerTask.lastFailureError }}</span></div>',
-                  '</div>',
+                '<div v-if="hasChildren(drawerTask)" class="context-dep-row">',
+                  '<span class="context-dep-label">子任务</span>',
+                  '<span class="context-dep-progress">{{ childTaskProgress(drawerTask) }}</span>',
                 '</div>',
-
-                '<div v-if="drawerTask.status === \'review\'" class="project-task-detail-section project-task-detail-section-review">',
-                  '<div class="project-task-detail-section-title">评审信息</div>',
-                  '<div class="project-task-detail-section-body">系统自动评审中。评审通过后自动转为已完成；不通过则回到执行中。</div>',
+              '</div>',
+              '<div v-if="workspacePathLabel(drawerTask)" class="project-task-detail-section">',
+                '<div class="project-task-detail-section-title">工作目录</div>',
+                '<div class="project-task-detail-section-body workspace-path">{{ workspacePathLabel(drawerTask) }}</div>',
+              '</div>',
+              '<div class="project-task-detail-section project-task-detail-meta-grid">',
+                '<div class="project-task-detail-section-title">配置元数据</div>',
+                '<div class="meta-grid">',
+                  '<div class="meta-row"><span class="meta-label">创建者</span><span class="meta-value">{{ expertName(drawerTask.expertId) || \'系统\' }}</span></div>',
+                  '<div class="meta-row"><span class="meta-label">创建时间</span><span class="meta-value">{{ formatTaskTime(drawerTask.createdAt) }}</span></div>',
+                  '<div v-if="drawerTask.startedAt" class="meta-row"><span class="meta-label">开始时间</span><span class="meta-value">{{ formatTaskTime(drawerTask.startedAt) }}</span></div>',
+                  '<div v-if="drawerTask.completedAt" class="meta-row"><span class="meta-label">完成时间</span><span class="meta-value">{{ formatTaskTime(drawerTask.completedAt) }}</span></div>',
+                  '<div v-if="drawerTask.startedAt" class="meta-row"><span class="meta-label">总耗时</span><span class="meta-value">{{ taskElapsedLabel(drawerTask) }}</span></div>',
+                  '<div v-if="taskSkillsLabel(drawerTask)" class="meta-row"><span class="meta-label">Skills</span><span class="meta-value">{{ taskSkillsLabel(drawerTask) }}</span></div>',
+                  '<div v-if="drawerTask.consecutiveFailures > 0" class="meta-row meta-row-warn"><span class="meta-label">连续失败</span><span class="meta-value">{{ drawerTask.consecutiveFailures }} 次</span></div>',
+                  '<div v-if="drawerTask.lastFailureError" class="meta-row meta-row-warn"><span class="meta-label">最近错误</span><span class="meta-value">{{ drawerTask.lastFailureError }}</span></div>',
                 '</div>',
-
+              '</div>',
+              '<div v-if="drawerTask.status === \'review\'" class="project-task-detail-section project-task-detail-section-review">',
+                '<div class="project-task-detail-section-title">评审信息</div>',
+                '<div class="project-task-detail-section-body">系统自动评审中。评审通过后自动转为已完成；不通过则回到执行中。</div>',
               '</div>',
             '</div>',
 
-            '<div v-if="drawerTaskComments(drawerTask).length" class="project-task-detail-comments">',
-              '<div class="comments-header">评论</div>',
-              '<div class="comment-list">',
-                '<div v-for="cm in drawerTaskComments(drawerTask)" :key="cm.id" class="comment-item">',
-                  '<div class="comment-author-row">',
-                    '<span class="comment-author">{{ cm.author }}</span>',
-                    '<span class="comment-time">{{ formatTaskTime(cm.createdAt) }}</span>',
+            '<div v-show="detailPane === \'process\'" class="project-task-detail-pane">',
+              '<div v-if="isDetailRunning(drawerTask) && showProcessLog(drawerTask)" class="exec-log-panel">',
+                '<div class="exec-log-header">',
+                  '<span class="exec-log-title">运行日志</span>',
+                  '<button type="button" class="exec-log-toggle" @click="toggleLogPanel(drawerTask.id)">{{ logPanelVisible[drawerTask.id] ? \'收起\' : \'展开\' }}</button>',
+                  '<button v-if="logPanelVisible[drawerTask.id]" type="button" class="exec-log-refresh" @click="toggleLogPanel(drawerTask.id)">刷新</button>',
+                '</div>',
+                '<div v-if="logPanelVisible[drawerTask.id]" class="exec-log-body">',
+                  '<pre v-if="logTailContent[drawerTask.id]" class="log-tail">{{ logTailContent[drawerTask.id] }}</pre>',
+                  '<div v-else class="exec-log-empty">暂无运行日志</div>',
+                '</div>',
+              '</div>',
+              '<div v-if="hasProcessHistory(drawerTask)" class="exec-runs">',
+                '<div class="exec-runs-label">运行记录</div>',
+                '<div v-for="run in drawerTaskRuns(drawerTask)" :key="run.id" class="run-item" :class="\'run-\' + (run.outcome || run.status)">',
+                  '<div class="run-summary-row" @click="toggleRunExpanded(run.id)">',
+                    '<span class="run-dot" :class="\'dot-\' + (run.outcome || run.status)">',
+                      '<span v-if="run.outcome === \'running\'" class="run-dot-pulse"></span>',
+                    '</span>',
+                    '<span class="run-id">{{ run.id }}</span>',
+                    '<span class="run-outcome" :class="\'outcome-\' + (run.outcome || run.status)">{{ runOutcomeLabel(run.outcome || run.status) }}</span>',
+                    '<span class="run-duration">{{ runDuration(run) }}</span>',
+                    '<span class="run-expand-icon">{{ (expandedRunIds[run.id] !== undefined ? expandedRunIds[run.id] : runExpandedDefault(drawerTask, run)) ? \'▾\' : \'▸\' }}</span>',
                   '</div>',
-                  '<div class="comment-body">{{ cm.body }}</div>',
+                  '<div v-if="(expandedRunIds[run.id] !== undefined ? expandedRunIds[run.id] : runExpandedDefault(drawerTask, run))" class="run-detail">',
+                    '<div v-if="run.summary" class="run-detail-row"><span class="run-detail-label">摘要</span><span class="run-detail-value">{{ run.summary }}</span></div>',
+                    '<div v-if="runErrorDisplay(run)" class="run-detail-row run-detail-error"><span class="run-detail-label">错误</span><span class="run-detail-value">{{ runErrorDisplay(run) }}</span></div>',
+                    '<div v-if="run.startedAt" class="run-detail-row"><span class="run-detail-label">开始</span><span class="run-detail-value">{{ formatTaskTime(run.startedAt) }}</span></div>',
+                    '<div v-if="run.endedAt" class="run-detail-row"><span class="run-detail-label">结束</span><span class="run-detail-value">{{ formatTaskTime(run.endedAt) }}</span></div>',
+                  '</div>',
+                '</div>',
+              '</div>',
+              '<div v-else-if="!isDetailRunning(drawerTask)" class="exec-empty">尚未执行</div>',
+              '<div v-if="!isDetailRunning(drawerTask) && showProcessLog(drawerTask)" class="exec-log-panel">',
+                '<div class="exec-log-header">',
+                  '<span class="exec-log-title">运行日志</span>',
+                  '<button type="button" class="exec-log-toggle" @click="toggleLogPanel(drawerTask.id)">{{ logPanelVisible[drawerTask.id] ? \'收起\' : \'展开\' }}</button>',
+                  '<button v-if="logPanelVisible[drawerTask.id]" type="button" class="exec-log-refresh" @click="toggleLogPanel(drawerTask.id)">刷新</button>',
+                '</div>',
+                '<div v-if="logPanelVisible[drawerTask.id]" class="exec-log-body">',
+                  '<pre v-if="logTailContent[drawerTask.id]" class="log-tail">{{ logTailContent[drawerTask.id] }}</pre>',
+                  '<div v-else class="exec-log-empty">暂无运行日志</div>',
+                '</div>',
+              '</div>',
+              '<div v-if="drawerTaskEvents(drawerTask).length" class="exec-events">',
+                '<div class="exec-events-label">执行事件</div>',
+                '<div class="events-timeline">',
+                  '<div v-for="ev in drawerTaskEvents(drawerTask)" :key="ev.id" class="event-item">',
+                    '<span class="event-time">{{ formatTaskTime(ev.createdAt) }}</span>',
+                    '<span class="event-dot" :class="\'ev-\' + ev.kind"></span>',
+                    '<span class="event-label">{{ eventKindLabel(ev.kind) }}</span>',
+                    '<span v-if="eventPayloadSummary(ev)" class="event-payload">{{ eventPayloadSummary(ev) }}</span>',
+                  '</div>',
                 '</div>',
               '</div>',
             '</div>',
+
+            '<div v-show="detailPane === \'output\'" class="project-task-detail-pane">',
+              '<div v-if="isDetailRunning(drawerTask) && !shouldShowOutputSummary(drawerTask) && !taskOutputFiles(drawerTask).length" class="project-task-detail-section">',
+                '<div class="project-task-detail-section-body">完成后将在此展示执行摘要与产出文件</div>',
+              '</div>',
+              '<div v-if="shouldShowOutputSummary(drawerTask)" class="project-task-detail-section project-task-detail-section-summary">',
+                '<div class="project-task-detail-section-title">执行摘要</div>',
+                '<div class="project-task-detail-section-body">{{ isDetailRunning(drawerTask) && previousRunSummary(drawerTask) ? previousRunSummary(drawerTask) : drawerTask.latestSummary }}</div>',
+              '</div>',
+              '<div v-if="taskOutputFiles(drawerTask).length" class="project-task-detail-section">',
+                '<div class="project-task-detail-section-title">产出文件</div>',
+                '<div class="project-task-output-files">',
+                  '<generated-file-card v-for="file in taskOutputFiles(drawerTask)" :key="file.id || file.name" :file="file" @preview="previewTaskOutputFile" @download="downloadTaskOutputFile" />',
+                '</div>',
+              '</div>',
+              '<div v-if="taskStructuredFacts(drawerTask)" class="project-task-detail-section">',
+                '<div class="project-task-detail-section-title">结构化事实</div>',
+                '<div class="project-task-facts">',
+                  '<a v-if="taskStructuredFacts(drawerTask).publishedPr" class="project-task-fact-pr" href="javascript:void(0)">{{ taskStructuredFacts(drawerTask).publishedPr }}</a>',
+                  '<div v-if="taskStructuredFacts(drawerTask).changedFiles.length" class="project-task-fact-files">改了 {{ taskStructuredFacts(drawerTask).changedFiles.length }} 个文件 · {{ taskStructuredFacts(drawerTask).changedFiles.join(\'、\') }}</div>',
+                  '<div v-for="item in taskStructuredFacts(drawerTask).findings" :key="item" class="project-task-fact-finding">{{ item }}</div>',
+                '</div>',
+              '</div>',
+              '<div v-if="drawerTask.result" class="project-task-detail-section project-task-detail-section-result">',
+                '<div class="project-task-detail-section-title">完成说明</div>',
+                '<div class="project-task-detail-section-body">{{ drawerTask.result }}</div>',
+              '</div>',
+              '<div v-if="taskChildOutputs(drawerTask).length" class="project-task-detail-section">',
+                '<div class="project-task-detail-section-title">子任务产出</div>',
+                '<button v-for="child in taskChildOutputs(drawerTask)" :key="child.id" type="button" class="project-task-child-output" @click="openTaskDetail(child)">',
+                  '<strong>{{ taskDisplayTitle(child) }}</strong>',
+                  '<span>{{ child.latestSummary || child.result }}</span>',
+                '</button>',
+              '</div>',
+            '</div>',
+
+            '<div v-show="detailPane === \'comments\'" class="project-task-detail-pane project-task-detail-pane-comments">',
+              '<div v-if="drawerTaskComments(drawerTask).length" class="project-task-detail-comments">',
+                '<div class="comment-list">',
+                  '<div v-for="cm in drawerTaskComments(drawerTask)" :key="cm.id" class="comment-item">',
+                    '<div class="comment-author-row">',
+                      '<span class="comment-author">{{ cm.author }}</span>',
+                      '<span class="comment-time">{{ formatTaskTime(cm.createdAt) }}</span>',
+                    '</div>',
+                    '<div class="comment-body">{{ cm.body }}</div>',
+                  '</div>',
+                '</div>',
+              '</div>',
+              '<div v-else class="exec-empty">暂无评论</div>',
+              '<div v-if="!isDetailArchived(drawerTask)" class="project-task-detail-comment-row">',
+                '<el-input v-model="drawerCommentDraft" type="textarea" :rows="2" placeholder="添加评论..." />',
+                '<el-button type="primary" plain size="small" @click="submitDrawerComment">发送</el-button>',
+              '</div>',
+              '<div v-else class="project-task-comments-readonly">评论只读</div>',
+            '</div>',
+
           '</div>',
 
           '<div class="project-task-detail-actions-fixed">',
-            '<div class="project-task-detail-comment-row">',
-              '<el-input v-model="drawerCommentDraft" type="textarea" :rows="2" placeholder="添加评论..." />',
-              '<el-button type="primary" plain size="small" @click="submitDrawerComment">发送</el-button>',
-            '</div>',
-            '<div v-if="getDrawerPrimaryActions(drawerTask).length" class="project-task-detail-action-buttons">',
-              '<el-button v-for="act in getDrawerPrimaryActions(drawerTask)" :key="act.key" :type="act.type || \'default\'" size="small" @click="handleDrawerAction(act, drawerTask)">{{ act.label }}</el-button>',
+            '<div v-if="getTaskFooterPrimary(drawerTask) || getTaskFooterSecondary(drawerTask).length" class="project-task-detail-action-buttons">',
+              '<div class="project-task-detail-action-secondary">',
+                '<el-tooltip v-for="act in getTaskFooterSecondary(drawerTask)" :key="act.key" :disabled="!act.disabled || !act.tooltip" :content="act.tooltip || \'\'" placement="top">',
+                  '<span>',
+                    '<el-button :type="act.type || \'default\'" size="small" :disabled="act.disabled" @click="handleDrawerAction(act, drawerTask)">{{ act.label }}</el-button>',
+                  '</span>',
+                '</el-tooltip>',
+              '</div>',
+              '<div v-if="getTaskFooterPrimary(drawerTask)" class="project-task-detail-action-primary">',
+                '<el-tooltip :disabled="!getTaskFooterPrimary(drawerTask).disabled || !getTaskFooterPrimary(drawerTask).tooltip" :content="(getTaskFooterPrimary(drawerTask) && getTaskFooterPrimary(drawerTask).tooltip) || \'\'" placement="top">',
+                  '<span>',
+                    '<el-button type="primary" size="small" :disabled="getTaskFooterPrimary(drawerTask).disabled" @click="handleDrawerAction(getTaskFooterPrimary(drawerTask), drawerTask)">{{ getTaskFooterPrimary(drawerTask).label }}</el-button>',
+                  '</span>',
+                '</el-tooltip>',
+              '</div>',
             '</div>',
           '</div>',
         '</div>',
         '<div v-else class="project-empty-panel">未选择任务</div>',
       '</template>'
+    ].join('');
+  }
+
+  function outputPreviewDialogTemplate() {
+    return [
+      '<el-dialog v-model="outputPreviewVisible" width="720px" class="form-dialog ws-preview-dialog" append-to-body @closed="closeOutputPreview">',
+        '<template #header>',
+          '<div class="dialog-header-custom dialog-header-workspace">',
+            '<div class="dialog-header-icon dialog-header-icon-workspace">',
+              '<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">',
+                '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>',
+                '<polyline points="14 2 14 8 20 8"/>',
+              '</svg>',
+            '</div>',
+            '<div class="dialog-header-text">',
+              '<div class="dialog-header-title">{{ outputPreviewFile ? outputPreviewFile.name : \'\' }}</div>',
+              '<div class="dialog-header-sub">{{ outputPreviewMeta(outputPreviewFile) }}</div>',
+            '</div>',
+          '</div>',
+        '</template>',
+        '<div v-if="outputPreviewFile" class="ws-preview-body">',
+          '<pre v-if="outputPreviewIsText(outputPreviewFile)" class="ws-preview-text" readonly>{{ outputPreviewFile.content }}</pre>',
+          '<div v-else class="ws-preview-binary">',
+            '<span class="ws-preview-binary-icon">📄</span>',
+            '<span class="ws-preview-binary-name">{{ outputPreviewFile.name }}</span>',
+            '<span class="ws-preview-binary-info">该文件类型暂不支持预览，可下载后查看</span>',
+          '</div>',
+        '</div>',
+        '<template #footer>',
+          '<div class="dialog-footer-custom dialog-footer-wizard">',
+            '<div class="dialog-footer-actions">',
+              '<el-button class="wizard-btn wizard-btn-cancel" @click="closeOutputPreview">关闭</el-button>',
+              '<el-button type="primary" class="wizard-btn wizard-btn-submit" @click="downloadTaskOutputFile(outputPreviewFile)">下载</el-button>',
+            '</div>',
+          '</div>',
+        '</template>',
+      '</el-dialog>'
     ].join('');
   }
 
@@ -2328,7 +2815,7 @@
           '</el-form-item>',
           '<el-form-item label="父任务">',
             '<el-select v-model="manualForm.parentTaskId" placeholder="可选，选择已有任务作为依赖" filterable clearable>',
-              '<el-option v-for="task in projectTasks" :key="task.id" :label="taskDisplayTitle(task)" :value="task.id" />',
+              '<el-option v-for="task in formParentTasks" :key="task.id" :label="taskDisplayTitle(task)" :value="task.id" />',
             '</el-select>',
           '</el-form-item>',
         '</el-form>',
@@ -2342,7 +2829,7 @@
 
   function taskActionDialogTemplate() {
     return [
-      '<el-dialog :model-value="!!taskAction.type" :title="taskActionTitle" width="460px" :close-on-click-modal="false" append-to-body @update:model-value="closeTaskAction">',
+      '<el-dialog v-model="taskActionVisible" :title="taskActionTitle" width="460px" :close-on-click-modal="false" destroy-on-close append-to-body @closed="closeTaskAction">',
         '<div v-if="taskActionTask" class="project-task-action-target">目标任务：<strong>{{ taskDisplayTitle(taskActionTask) }}</strong></div>',
         '<el-form label-position="top">',
           commentActionTemplate(),
@@ -2350,12 +2837,14 @@
           completeActionTemplate(),
           blockActionTemplate(),
           unblockActionTemplate(),
+          updateBlockActionTemplate(),
+          editResultActionTemplate(),
+          resumeFromLoopActionTemplate(),
           editActionTemplate(),
           reassignActionTemplate(),
           moveStatusActionTemplate(),
           archiveActionTemplate(),
           deleteActionTemplate(),
-          decomposeActionTemplate(),
         '</el-form>',
         '<template #footer>',
           '<el-button @click="closeTaskAction">取消</el-button>',
@@ -2385,6 +2874,15 @@
   function unblockActionTemplate() {
     return '<el-form-item v-if="taskAction.type === \'unblock\'" label="重启说明"><el-input v-model="taskActionForm.unblockReason" type="textarea" :rows="2" placeholder="重启说明（可选）" /></el-form-item>';
   }
+  function updateBlockActionTemplate() {
+    return '<el-form-item v-if="taskAction.type === \'updateBlock\'" label="阻塞说明" required><el-input v-model="taskActionForm.blockedReason" type="textarea" :rows="3" placeholder="更新阻塞原因" /></el-form-item>';
+  }
+  function editResultActionTemplate() {
+    return '<el-form-item v-if="taskAction.type === \'editResult\'" label="完成结果" required><el-input v-model="taskActionForm.result" type="textarea" :rows="3" placeholder="补录完成说明" /></el-form-item>';
+  }
+  function resumeFromLoopActionTemplate() {
+    return '<el-form-item v-if="taskAction.type === \'resumeFromLoop\'" label="补充说明" required><el-input v-model="taskActionForm.resumeSupplement" type="textarea" :rows="4" placeholder="用自然语言补充任务该怎么继续（不必指派专家）" /></el-form-item>';
+  }
   function editActionTemplate() {
     return [
       '<div v-if="taskAction.type === \'edit\'">',
@@ -2406,29 +2904,10 @@
     return '<el-form-item v-if="taskAction.type === \'moveStatus\'" label="目标状态" required><el-select v-model="taskActionForm.moveTarget" placeholder="选择目标状态"><el-option v-for="m in getTaskStatusMoves(taskActionTask)" :key="m.key" :label="m.label" :value="m.key" /></el-select></el-form-item>';
   }
   function archiveActionTemplate() {
-    return '<div v-if="taskAction.type === \'archive\'" class="project-task-action-tip">归档后任务将移至「已归档」列，默认隐藏。可在卡片菜单中查看。</div>';
+    return '<div v-if="taskAction.type === \'archive\'" class="project-task-action-tip">归档后任务将在 Done 列以已归档子状态展示。</div>';
   }
   function deleteActionTemplate() {
     return '<div v-if="taskAction.type === \'delete\'" class="project-task-action-tip project-task-action-warn">永久删除不可恢复，任务将从此项目中彻底移除。确定继续？</div>';
-  }
-  function decomposeActionTemplate() {
-    return '<div v-if="taskAction.type === \'decompose\'" class="project-task-action-tip">提交后协作专家将自动拆解目标任务为子任务并派发给项目成员。</div>';
-  }
-
-  function historyCommentDialogTemplate() {
-    return [
-      '<el-dialog v-model="showHistoryCommentDialog" title="补充说明" width="440px" :close-on-click-modal="false" append-to-body>',
-        '<el-form label-position="top">',
-          '<el-form-item label="补充说明" required>',
-            '<el-input v-model="historyCommentDraft.text" type="textarea" :rows="4" placeholder="对已发起的目标追加说明，协作专家在后续拆解/调度时会读取" />',
-          '</el-form-item>',
-        '</el-form>',
-        '<template #footer>',
-          '<el-button @click="showHistoryCommentDialog = false">取消</el-button>',
-          '<el-button type="primary" @click="submitHistoryComment">提交</el-button>',
-        '</template>',
-      '</el-dialog>'
-    ].join('');
   }
 
   function orchestrationDialogTemplate() {
