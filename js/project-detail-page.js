@@ -6,13 +6,13 @@
   var expertMatchesSearch = window.AppShared.expertMatchesSearch;
 
   var STATUS_TEXT = {
-    triage: '需人工介入',
+    triage: '反复阻塞',
     todo: '待开始',
     scheduled: '已排期',
     ready: '可执行',
     queued: '可执行',
     running: '执行中',
-    blocked: '需人工介入',
+    blocked: '待介入',
     review: '评审中',
     done: '已完成',
     archived: '已归档'
@@ -32,10 +32,10 @@
   };
 
   var STATUS_COLUMNS = [
-    { key: 'todo', title: 'Todo', statuses: ['todo', 'scheduled', 'ready'] },
-    { key: 'running', title: 'Running', statuses: ['running', 'review'] },
-    { key: 'blocked', title: 'Blocked', statuses: ['blocked'] },
-    { key: 'done', title: 'Done', statuses: ['done', 'archived'] }
+    { key: 'todo', title: '待办', statuses: ['todo', 'scheduled', 'ready'] },
+    { key: 'running', title: '进行中', statuses: ['running', 'review'] },
+    { key: 'blocked', title: '暂停', statuses: ['blocked'] },
+    { key: 'done', title: '已完成', statuses: ['done', 'archived'] }
   ];
 
   var EVENT_FILTERS = [
@@ -49,8 +49,7 @@
   var PRIORITY_OPTIONS = [
     { key: 'low', label: '低' },
     { key: 'medium', label: '中' },
-    { key: 'high', label: '高' },
-    { key: 'urgent', label: '紧急' }
+    { key: 'high', label: '高' }
   ];
 
   var DRAWER_MODES = {
@@ -1090,24 +1089,14 @@
         return STATUS_TEXT[normalizeTaskStatus(status)] || '待开始';
       }
 
-      function taskSubStatusLabel(task) {
-        if (!task) return '';
+      function taskCardStatusLabel(task) {
+        if (!task) return '待开始';
         if (isKickbackTriage(task)) return '反复阻塞';
-        var s = normalizeTaskStatus(task.status);
-        if (s === 'triage') return '反复阻塞';
-        if (s === 'review') return '评审中';
-        if (s === 'scheduled') return '已排期';
-        if (s === 'ready') return '可执行';
-        if (s === 'todo') {
-          var unfinishedLabels = unfinishedParentLabels(task);
-          if (unfinishedLabels.length) return '等待父任务: ' + unfinishedLabels.join(', ');
-          return '';
-        }
-        if (s === 'running') return '执行中';
-        if (s === 'blocked') return '需人工介入';
-        if (s === 'done') return '已完成';
-        if (s === 'archived') return '已归档';
-        return '';
+        return taskStatusLabel(task.status);
+      }
+
+      function taskSubStatusLabel(task) {
+        return taskCardStatusLabel(task);
       }
 
       function taskStatusType(status) {
@@ -1119,16 +1108,144 @@
         return 'status-' + normalizeTaskStatus(task && task.status);
       }
 
+      function normalizePriority(priority) {
+        var raw = priority;
+        if (raw === undefined || raw === null || raw === '') return 'medium';
+        if (typeof raw === 'number' || /^-?\d+$/.test(String(raw))) {
+          var n = Number(raw);
+          if (n >= 3) return 'high';
+          if (n === 2 || n === 0) return 'medium';
+          return 'low';
+        }
+        var p = String(raw);
+        if (p === 'urgent' || p === 'high') return 'high';
+        if (p === 'low') return 'low';
+        return 'medium';
+      }
+
       function priorityLabel(priority) {
-        var p = String(priority || 'medium');
-        var map = { low: '低', medium: '中', high: '高', urgent: '紧急' };
-        return map[p] || '中';
+        var map = { low: '低', medium: '中', high: '高' };
+        return map[normalizePriority(priority)] || '中';
+      }
+
+      function priorityTone(priority) {
+        return normalizePriority(priority);
       }
 
       function priorityType(priority) {
-        var p = String(priority || 'medium');
-        var map = { low: 'info', medium: '', high: 'warning', urgent: 'danger' };
-        return map[p] || '';
+        var map = { low: 'info', medium: '', high: 'warning' };
+        return map[normalizePriority(priority)] || '';
+      }
+
+      function taskCardAssigneeLabel(task) {
+        if (!taskHasAssignee(task)) return '未指派';
+        var name = (task && (task.assigneeLabel || expertName(task.expertId || task.assignee))) || '';
+        if (!name || name === '未指派') return '未指派';
+        return '@' + name;
+      }
+
+      function truncateCardSummary(text) {
+        var s = String(text || '').replace(/\s+/g, ' ').trim();
+        if (!s) return '';
+        if (s.length <= 22) return s;
+        return s.slice(0, 21) + '…';
+      }
+
+      function firstSummarySentence(text) {
+        var s = String(text || '').trim();
+        if (!s) return '';
+        return s.split(/\n/)[0];
+      }
+
+      function blockKindShortLabel(kind) {
+        var map = {
+          needs_input: '缺信息',
+          capability: '缺能力',
+          transient: '临时故障',
+          dependency: '等待依赖'
+        };
+        return map[kind] || '需处理';
+      }
+
+      function lastStatusReasonOf(task, kinds) {
+        if (task && task.lastStatusReason) return String(task.lastStatusReason).trim();
+        var events = Array.isArray(task && task.taskEvents) ? task.taskEvents.slice() : [];
+        events.sort(function (a, b) {
+          return String((b && b.createdAt) || '').localeCompare(String((a && a.createdAt) || ''));
+        });
+        var i;
+        var ev;
+        for (i = 0; i < events.length; i++) {
+          ev = events[i];
+          if (!ev || kinds.indexOf(ev.kind) === -1) continue;
+          if (ev.payload && ev.payload.reason) return String(ev.payload.reason).trim();
+        }
+        return '';
+      }
+
+      function cardHasStrandedReady(task) {
+        var diags = Array.isArray(task && task.diagnostics) ? task.diagnostics : [];
+        return diags.some(function (d) { return d && d.kind === 'stranded_in_ready'; });
+      }
+
+      function cardRunningElapsed(task) {
+        if (!task) return '';
+        var start = task.startedAt || task.createdAt;
+        if (!start) return '';
+        var ms = Date.now() - new Date(String(start).replace(/([+-]\d{2}):?(\d{2})$/, '$1:$2')).getTime();
+        if (isNaN(ms) || ms < 0) return '';
+        var sec = Math.floor(ms / 1000);
+        if (sec < 60) return '已运行 ' + sec + ' 秒';
+        var min = Math.floor(sec / 60);
+        if (min < 60) return '已运行 ' + min + ' 分';
+        var hr = Math.floor(min / 60);
+        var minRem = min % 60;
+        return '已运行 ' + hr + ' 小时' + (minRem ? ' ' + minRem + ' 分' : '');
+      }
+
+      function taskCardSummary(task) {
+        if (!task) return '';
+        var s = normalizeTaskStatus(task.status);
+        var reason;
+        var kind;
+        var n;
+        var parents;
+        if (s === 'todo') {
+          parents = unfinishedParents(task);
+          if (parents.length === 1) return truncateCardSummary('等待「' + taskDisplayTitle(parents[0]) + '」');
+          if (parents.length === 2) {
+            return truncateCardSummary('等待「' + taskDisplayTitle(parents[0]) + '」「' + taskDisplayTitle(parents[1]) + '」');
+          }
+          if (parents.length >= 3) return truncateCardSummary('等待 ' + parents.length + ' 个父任务');
+          return '';
+        }
+        if (s === 'ready') {
+          if (!taskHasAssignee(task)) return '需先指派负责人';
+          if (cardHasStrandedReady(task)) return '调度未领取，请检查执行器';
+          return '等待调度领取';
+        }
+        if (s === 'scheduled') {
+          reason = lastStatusReasonOf(task, ['scheduled']);
+          if (!reason) return '等待时间窗口';
+          reason = reason.replace(/^等[:：]?/, '');
+          return truncateCardSummary('等：' + reason);
+        }
+        if (s === 'running') return cardRunningElapsed(task) || '已运行';
+        if (s === 'review') return '通过后将自动完成';
+        if (isKickbackTriage(task)) {
+          n = Number(task.blockRecurrences || task.consecutiveFailures || 0) || 0;
+          reason = lastStatusReasonOf(task, ['block_loop_detected', 'blocked']) || String(task.blockedReason || '').trim();
+          kind = n > 0 ? ('同一原因已反复 ' + n + ' 次') : '同一原因已反复多次';
+          return truncateCardSummary(reason ? (kind + '：' + reason) : kind);
+        }
+        if (s === 'blocked') {
+          kind = blockKindShortLabel(task.blockKind);
+          reason = lastStatusReasonOf(task, ['blocked']) || String(task.blockedReason || '').trim();
+          if (!reason && task.blockKind === 'transient') reason = String(task.lastFailureError || '').trim();
+          return truncateCardSummary(reason ? (kind + '：' + reason) : kind);
+        }
+        if (s === 'done') return truncateCardSummary(firstSummarySentence(task.latestSummary));
+        return '';
       }
 
       function formatTaskTime(value) {
@@ -1228,7 +1345,7 @@
       function unfinishedParents(task) {
         if (!task || !task.parentTaskId) return [];
         var parent = taskParentTask(task.parentTaskId);
-        if (!parent) return [];
+        if (!parent || isGoalRoot(parent)) return [];
         var s = normalizeTaskStatus(parent.status);
         if (s !== 'done' && s !== 'archived') return [parent];
         return [];
@@ -1470,7 +1587,7 @@
         if (type === 'edit') {
           taskActionForm.value.editTitle = task.title || '';
           taskActionForm.value.editBody = task.body || '';
-          taskActionForm.value.editPriority = task.priority || 'medium';
+          taskActionForm.value.editPriority = normalizePriority(task.priority);
         }
         if (type === 'updateBlock') {
           taskActionForm.value.blockedReason = task.blockedReason || '';
@@ -1941,17 +2058,22 @@
         outputPreviewMeta: outputPreviewMeta,
         outputPreviewIsText: outputPreviewIsText,
         taskStatusLabel: taskStatusLabel,
+        taskCardStatusLabel: taskCardStatusLabel,
+        taskCardSummary: taskCardSummary,
+        taskCardAssigneeLabel: taskCardAssigneeLabel,
         taskSubStatusLabel: taskSubStatusLabel,
         taskDetailSubStatusLabel: taskDetailSubStatusLabel,
         getTaskFooterPrimary: getTaskFooterPrimary,
         getTaskFooterSecondary: getTaskFooterSecondary,
         isKickbackTriage: isKickbackTriage,
+        taskHasAssignee: taskHasAssignee,
         unfinishedParents: unfinishedParents,
         statusTimeLabel: statusTimeLabel,
         hasUnfinishedParentDependency: hasUnfinishedParentDependency,
         taskStatusType: taskStatusType,
         taskStatusClass: taskStatusClass,
         priorityLabel: priorityLabel,
+        priorityTone: priorityTone,
         priorityType: priorityType,
         formatTaskTime: formatTaskTime,
         taskParentTask: taskParentTask,
@@ -2183,17 +2305,16 @@
   function taskCardTemplate(showMeta, vForSource) {
     var source = vForSource || 'col.tasks';
     return [
-      '<article v-for="task in ' + source + '" :key="task.id" class="project-task-card" :class="[{ active: selectedProjectTaskId === task.id, \'highlight-by-expert\': highlightExpertId && (task.expertId === highlightExpertId || task.assignee === highlightExpertId) }, taskStatusClass(task), \'priority-\' + (task.priority || \'medium\')]" :data-assignee="task.expertId || task.assignee || \'\'" @click="openTaskDetail(task)">',
-        '<div class="project-task-card-head">',
-          '<div class="project-task-card-title-row">',
-            '<span class="project-task-card-priority-dot" :title="priorityLabel(task.priority) + \'优先级\'"></span>',
-            '<h3 class="project-task-card-title">{{ taskDisplayTitle(task) }}</h3>',
-          '</div>',
+      '<article v-for="task in ' + source + '" :key="task.id" class="project-task-card" :class="[{ active: selectedProjectTaskId === task.id, \'highlight-by-expert\': highlightExpertId && (task.expertId === highlightExpertId || task.assignee === highlightExpertId) }, taskStatusClass(task), \'priority-\' + priorityTone(task.priority)]" :data-assignee="task.expertId || task.assignee || \'\'" @click="openTaskDetail(task)">',
+        '<div class="project-task-card-row project-task-card-row-title">',
+          '<h3 class="project-task-card-title">{{ taskDisplayTitle(task) }}</h3>',
+          '<span class="project-task-card-status" :class="taskStatusClass(task)">{{ taskCardStatusLabel(task) }}</span>',
         '</div>',
-        '<div v-if="' + (showMeta ? 'true' : 'false') + '" class="project-task-card-meta">',
-          '<span class="project-task-card-assignee">@{{ task.assigneeLabel || expertName(task.expertId) }}</span>',
-          '<span v-if="taskSubStatusLabel(task)" class="project-task-card-substatus" :class="taskStatusClass(task)">{{ taskSubStatusLabel(task) }}</span>',
+        '<div v-if="' + (showMeta ? 'true' : 'false') + '" class="project-task-card-row project-task-card-row-meta">',
+          '<span class="project-task-card-assignee" :class="{ \'is-unassigned\': !taskHasAssignee(task) }">{{ taskCardAssigneeLabel(task) }}</span>',
+          '<span class="project-task-card-priority" :class="\'priority-\' + priorityTone(task.priority)" :title="priorityLabel(task.priority) + \'优先级\'">{{ priorityLabel(task.priority) }}</span>',
         '</div>',
+        '<p v-if="' + (showMeta ? 'true' : 'false') + ' && taskCardSummary(task)" class="project-task-card-row project-task-card-row-summary">{{ taskCardSummary(task) }}</p>',
       '</article>'
     ].join('');
   }
@@ -2392,7 +2513,7 @@
                   '<button v-for="child in historyDetail.children" :key="child.id" type="button" class="project-history-detail-child" @click="openHistoryChild(child)">',
                     '<span class="project-history-detail-child-title">{{ taskDisplayTitle(child) }}</span>',
                     '<span class="project-history-detail-child-assignee">@{{ expertName(child.expertId) }}</span>',
-                    '<span class="project-history-detail-child-status" :class="taskStatusClass(child)">{{ taskSubStatusLabel(child) || taskStatusLabel(child.status) }}</span>',
+                    '<span class="project-history-detail-child-status" :class="taskStatusClass(child)">{{ taskCardStatusLabel(child) }}</span>',
                   '</button>',
                 '</div>',
                 '<div v-else class="project-history-detail-empty">{{ historyDetail.requestStatus === \'decomposing\' ? \'拆解完成后将在这里展示子任务\' : \'暂无子任务\' }}</div>',
@@ -2455,7 +2576,7 @@
               '</div>',
             '</div>',
             '<div class="project-task-detail-header-meta">',
-              '<span class="project-task-detail-status-pill" :class="taskStatusClass(drawerTask)">{{ isKickbackTriage(drawerTask) ? \'反复阻塞\' : taskStatusLabel(drawerTask.status) }}</span>',
+              '<span class="project-task-detail-status-pill" :class="taskStatusClass(drawerTask)">{{ taskCardStatusLabel(drawerTask) }}</span>',
               '<div class="project-task-detail-assignee-inline">',
                 '<div class="project-task-detail-assignee-avatar">',
                   '<img v-if="drawerTask.expertId" :src="(expertById(drawerTask.expertId) || {}).avatar" :alt="expertName(drawerTask.expertId)">',
@@ -2463,7 +2584,7 @@
                 '</div>',
                 '<span class="project-task-detail-assignee-name">{{ drawerTask.expertId ? \'@\' + (drawerTask.assigneeLabel || expertName(drawerTask.expertId)) : \'未指派\' }}</span>',
               '</div>',
-              '<span class="project-task-detail-chip project-task-detail-chip-priority" :class="\'priority-\' + (drawerTask.priority || \'medium\')">',
+              '<span class="project-task-detail-chip project-task-detail-chip-priority" :class="\'priority-\' + priorityTone(drawerTask.priority)">',
                 '<span class="priority-dot"></span>{{ priorityLabel(drawerTask.priority) }}',
               '</span>',
             '</div>',

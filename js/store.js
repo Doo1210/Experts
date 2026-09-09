@@ -1996,7 +1996,12 @@
         expertId: quality.expertId,
         sortOrder: 21,
         priority: 'medium',
+        lastStatusReason: '夜班窗口',
         body: '参数回标后安排下周 SPC 复测，验证良率恢复情况。',
+        taskEvents: [
+          { id: uid(), kind: 'scheduled', label: '排期', author: quality.expertId, payload: { reason: '夜班窗口' }, createdAt: minutesAgoIso(150) },
+          { id: uid(), kind: 'created', label: '创建', author: lead.expertId, payload: {}, createdAt: minutesAgoIso(150) }
+        ],
         createdAt: minutesAgoIso(150),
         updatedAt: minutesAgoIso(150)
       }),
@@ -2097,7 +2102,7 @@
         status: 'blocked',
         expertId: device.expertId,
         sortOrder: 27,
-        priority: 'urgent',
+        priority: 'high',
         body: '对接 MES 良率原始数据接口，拉取近 4 周各站点数据。',
         latestSummary: 'MES API 权限待 IT 开通，无法继续拉取数据。',
         blockedReason: 'MES API 权限待 IT 开通，无法继续拉取数据。',
@@ -2418,7 +2423,7 @@
         status: 'blocked',
         expertId: digital.expertId,
         sortOrder: 23,
-        priority: 'urgent',
+        priority: 'high',
         body: '对接供应商协同平台 API，获取实时交付数据。',
         latestSummary: '供应商平台 API 密钥待采购部门审批。',
         blockedReason: '供应商平台 API 密钥待采购部门审批',
@@ -2654,6 +2659,7 @@
     if (!t.assignee && t.expertId) { t.assignee = t.expertId; changed = true; }
     if (!t.expertId && t.assignee) { t.expertId = t.assignee; changed = true; }
     if (!t.priority) { t.priority = 'medium'; changed = true; }
+    if (t.priority === 'urgent') { t.priority = 'high'; changed = true; }
     if (t.commentCount == null) { t.commentCount = 0; changed = true; }
     if (t.parentTaskId === undefined) { t.parentTaskId = null; changed = true; }
     if (t.isTriage === undefined) { t.isTriage = false; changed = true; }
@@ -2778,6 +2784,62 @@
         }];
       }
       applyDemoTaskOutputs(t);
+    });
+    state.projectTaskSchemaVersion = SCHEMA;
+    persist();
+  }
+
+  function migrateCardLayoutFields() {
+    var SCHEMA = 11;
+    if ((state.projectTaskSchemaVersion || 0) >= SCHEMA) return;
+    (state.projectTasks || []).forEach(function (t) {
+      if (!t) return;
+      if (t.priority === 'urgent') t.priority = 'high';
+      if (t.title === '下周 SPC 复测计划') {
+        t.lastStatusReason = t.lastStatusReason || '夜班窗口';
+        if (t.lastStatusReason === '等夜班窗口') t.lastStatusReason = '夜班窗口';
+        if (!Array.isArray(t.taskEvents)) t.taskEvents = [];
+        var hasScheduled = t.taskEvents.some(function (ev) { return ev && ev.kind === 'scheduled'; });
+        if (!hasScheduled) {
+          t.taskEvents.push({
+            id: uid(),
+            kind: 'scheduled',
+            label: '排期',
+            author: t.expertId,
+            payload: { reason: '夜班窗口' },
+            createdAt: t.createdAt || minutesAgoIso(150)
+          });
+        }
+      }
+    });
+    state.projectTaskSchemaVersion = SCHEMA;
+    persist();
+  }
+
+  function migrateKickbackDemoCards() {
+    var SCHEMA = 12;
+    if ((state.projectTaskSchemaVersion || 0) >= SCHEMA) return;
+    (state.projectTasks || []).forEach(function (t) {
+      if (!t || t.isTriage === true) return;
+      if (t.title === 'chamber 参数漂移复盘') {
+        t.status = 'triage';
+        t.blockKind = 'block_loop_detected';
+        t.consecutiveFailures = t.consecutiveFailures || 3;
+        t.blockedReason = t.blockedReason || '反复阻塞已达上限，需人工介入';
+        t.latestSummary = t.latestSummary || '反复 block/unblock 已达上限，需人工介入。';
+      }
+      if (t.title === 'MES 数据接口对接' && t.status !== 'blocked') {
+        t.status = 'blocked';
+        t.blockKind = t.blockKind || 'capability';
+        t.blockedReason = t.blockedReason || 'MES API 权限待 IT 开通，无法继续拉取数据。';
+        t.consecutiveFailures = t.consecutiveFailures || 2;
+      }
+      if (t.title === '下周 SPC 复测计划') {
+        if (!t.lastStatusReason || t.lastStatusReason === '等夜班窗口') t.lastStatusReason = '夜班窗口';
+      }
+      if (t.title === '光刻 overlay 偏差复核' && t.status === 'blocked' && !t.blockKind) {
+        t.blockKind = 'needs_input';
+      }
     });
     state.projectTaskSchemaVersion = SCHEMA;
     persist();
@@ -3214,6 +3276,8 @@
       migrateGoalRequestAndKickback();
       migrateTaskOutputDemo();
       migrateTaskProcessDemo();
+      migrateCardLayoutFields();
+      migrateKickbackDemoCards();
       migrateDialogueTaskLastActivity();
       migrateProjectFiles();
       migrateProjectMessageTypes();
