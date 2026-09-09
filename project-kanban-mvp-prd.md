@@ -7,6 +7,12 @@ Status: feasible with P0 product-adapter work Author: product draft Target: Herm
 
 | 日期         | 修改区域          | 修改内容                                                                                          |
 | ---------- | ------------- | --------------------------------------------------------------------------------------------- |
+| 2026-09-09 | 动态 Tab 只记人协作  | 第 9 节：动态 = 项目级人与人交互（创建/指派/评论/人工完成阻塞归档/成员/发起目标）。自动流转（claim/spawn/评审/失败）只进任务详情「过程」Tab。Hermes 无 board 事件表，成员类须产品层 `project_events` |
+| 2026-09-09 | 详情 Footer 收口  | 12.2.3：对照 Hermes mutator 重锁各状态 Footer。只留改命运的按钮；拿掉排期/移动状态/添加依赖/更新阻塞说明。review 空栏。权威与 12.2.2.3 D、12.8.1 对齐 |
+| 2026-09-09 | 详情首屏同卡片三行    | 12.2.2.3：详情固区 A 复用卡片三行（标题+标签 / 专家+优先级 / 简要说明）；去掉顶栏「复制 ID」。完整 ID 与复制放在任务 Tab 第一块 |
+| 2026-09-09 | 已完成列已归档开关    | 8.3.2：已完成列头「已归档 n」为列内开关，默认关只显示 `done`；打开后 archived 出现在本列下方（灰）。不用独立弹窗。点卡仍走任务详情 |
+| 2026-09-09 | 已完成列详情盘点      | 12.2.2.5：对照 `complete_task` / `archive_task` / `edit_completed_task_result` 盘点 `done` 与 `archived` 详情。二者在**已完成列**，不在暂停列。踢回 triage 改为后续 12.2.2.6 |
+| 2026-09-09 | 暂停列 blocked 详情盘点 | 12.2.2.4：对照 `block_task` / 熔断 `gave_up` 盘点暂停列 `blocked` 详情字段。与踢回 triage 拆开。沿用 12.2.2.3 骨架 |
 | 2026-09-09 | 任务卡片三行排版      | 12.2.1：卡片固定三行（标题+状态标签 / 专家+优先级圆标 / 当前状况简要说明）；去掉左侧优先级色条与评论数。简要说明模板与 Hermes 字段对照见 12.2.1.1 |
 | 2026-09-09 | 卡片右上角状态标签     | 卡片右上角固定展示底层 status 中文标签（待开始 / 已排期 / 可执行 / 执行中 / 评审中 / 待介入 / 已完成 / 已归档）；踢回 triage 为「反复阻塞」。权威表见 8.3.1 / 14 |
 | 2026-09-09 | 详情弹窗固区与 Tab   | 12.2.2：身份+状况+Footer 固定；Tab 从左到右固定为 任务 → 过程 → 产出 → 评论（不随状态换位）；产出可隐藏；默认选中按状态 |
@@ -188,7 +194,7 @@ Status: feasible with P0 product-adapter work Author: product draft Target: Herm
 | 任务            | kanban task                                   | 复用 Kanban tasks                             |
 | 任务负责人         | task assignee                                 | `--assignee <profile>`                      |
 | 任务状态          | task status                                   | 状态视图展示                                      |
-| 项目动态          | task events/comments/runs                     | 首版主要使用 `task_events`                        |
+| 项目动态          | `task_events` allowlist + 产品 `project_events` | 人协作时间线；自动流转进详情过程 Tab（第 9 节） |
 | 目标式下发         | 产品目标记录 + triage/root task + decompose adapter | 标题、描述和可选模型；限定项目成员 roster 后自动拆解并派发；root 不进看板 |
 | 发起记录          | `project_goals`                               | Header 汇总徽章 + 记录弹窗；失败时自然语言 specify          |
 | specify（失败补救） | `hermes kanban specify` / 受限 adapter          | 只收自然语言补充，不创建任务、不指派专家                        |
@@ -236,6 +242,7 @@ Status: feasible with P0 product-adapter work Author: product draft Target: Herm
 │              看板区（按状态分栏）                             │
 │                                                              │
 │       待办列列头右上角 + 唤起「创建任务」                  │
+│       已完成列列头「已归档 n」开关，打开后灰卡出现在本列   │
 └──────────────────────────────────────────────────────────────┘
 ```
 
@@ -480,7 +487,7 @@ MVP 阶段不再为「创建任务」单设顶部按钮——该入口由待办�
 | **待办** | Todo | `todo`、`scheduled`、`ready` |
 | **进行中** | Running | `running`、`review` |
 | **暂停** | Blocked | `blocked`；系统踢回的底层 `triage`（映射展示） |
-| **已完成** | Done | `done`、`archived` |
+| **已完成** | Done | 默认 `done`；`archived` 由列头开关显隐 |
 
 文档后文写「待办列 / 进行中列 / 暂停列 / 已完成列」均指上述列头。底层 status、CLI、API 仍用英文。每个状态列内部按底层 Hermes status 细分，不同底层状态的任务可展示不同内容和操作。
 
@@ -508,7 +515,7 @@ Hermes 底层仍可能把反复 block/unblock 达到 `BLOCK_RECURRENCE_LIMIT`（
 | 待办    | todo、scheduled、ready         | 右上角标签区分底层 status；第三行写卡点（等待父任务标题 / 排期 / 调度） | 尚未开始执行的任务（含子任务与表单创建任务） |
 | 进行中 | running、review               | 右上角「执行中」vs「评审中」；第三行写时长或「通过后将自动完成」 | 正在执行或评审中的任务            |
 | 暂停 | blocked；系统踢回的底层 triage（映射展示） | 右上角「待介入」vs「反复阻塞」；第三行写 kind 与原因截断 | 两类底层状态操作不同，见 12.6 |
-| 已完成    | done、archived                | 右上角「已完成」vs「已归档」；done 第三行可截摘要 | 已完成或已归档的任务             |
+| 已完成    | 默认 done；开关打开后加 archived | 右上角「已完成」vs「已归档」；done 第三行可截摘要 | 已完成任务；已归档默认不占列，见 8.3.2 |
 
 
 子状态说明：
@@ -525,8 +532,8 @@ Hermes 底层仍可能把反复 block/unblock 达到 `BLOCK_RECURRENCE_LIMIT`（
   - `blocked`：普通人工介入。`dependency` 类型的阻塞实际停在 `todo`（走父任务门控），不进此列；`needs_input`/`capability`/`transient` 以及 dispatcher 连续失败自动阻塞进入此列。主操作「重启」。
   - 系统踢回的底层 `triage`：产品映射为本列并标「反复阻塞」。主操作「完善后继续」，**不是**「重启」。不按发起目标处理、不进发起记录。
 - **已完成列**：
-  - `done`：已完成（终态）。
-  - `archived`：已归档（软删除终态），默认折叠/灰色展示。
+  - `done`：已完成（终态）。列默认只显示这类卡。
+  - `archived`：已归档（软删除终态）。**不**默认画在列里，也不单独弹窗。列头「已归档 n」打开后，灰卡出现在本列 `done` 下方（见 8.3.2）。
 
 #### 8.3.1 卡片右上角状态标签
 
@@ -537,9 +544,9 @@ Hermes 底层仍可能把反复 block/unblock 达到 `BLOCK_RECURRENCE_LIMIT`（
 | `todo` | **待开始** | 待办 | 还不能交给调度。有未完成父任务时标签仍是「待开始」，第二行另写「等待父任务」 |
 | `scheduled` | **已排期** | 待办 | 时间或窗口未到，不是普通待办 |
 | `ready` | **可执行** | 待办 | 父依赖已清，等 dispatcher 领取。无负责人时第二行另写「需指派」 |
-| `running` | **执行中** | 进行中 | 列名已是「进行中」，卡片用「执行中」和评审区分 |
-| `review` | **评审中** | 进行中 | 系统自动评审，用户不能点完成 |
-| `blocked` | **待介入** | 暂停 | 列名已是「暂停」；「需人工介入」留给详情 Banner，卡片用短标签 |
+| `running` | **执行中** | 进行中 | 列名已是「进行中」，卡片用「执行中」和评审区分。若当前 run 的 `claimed.source_status=review`，标签改为 **评审中**（见 12.2.2.2） |
+| `review` | **评审中** | 进行中 | 系统自动评审，用户不能点完成。评审 worker 领取后底层会变成 running，标签仍用本行 |
+| `blocked` | **待介入** | 暂停 | 列名已是「暂停」；详情第三行写 `{kind}：{原因}`，卡片用短标签 |
 | `done` | **已完成** | 已完成 | 与「已归档」成对 |
 | `archived` | **已归档** | 已完成 | 软删除，灰色标签 |
 | 系统踢回 `triage` | **反复阻塞** | 暂停 | 不是发起目标。禁止用「待介入」，避免和 `blocked` 混 |
@@ -550,9 +557,47 @@ Hermes 底层仍可能把反复 block/unblock 达到 `BLOCK_RECURRENCE_LIMIT`（
 2. 分配专家 + 优先级圆标（高 / 中 / 低）
 3. 当前状况简要说明（无内容则整行折叠；模板见 12.2.1.1）
 
-待办列的列头右上角提供 `+` 按钮，点击后唤起「创建任务」弹窗（见 8.5）。MVP 阶段不在看板 Tab 顶部工具栏额外提供「+ 创建任务」按钮。
+待办列的列头右上角提供 `+` 按钮，点击后唤起「创建任务」弹窗（见 8.5）。已完成列的列头右上角提供「已归档」开关（见 8.3.2）。MVP 阶段不在看板 Tab 顶部工具栏额外提供「+ 创建任务」按钮。
 
 任务卡片**不提供**悬停快捷按钮，也**不提供** `⋯` 菜单。点击卡片任意处打开任务详情弹窗，推进、转交、完成、阻塞、归档等全部在弹窗 Footer 操作（见 12.2.3 / 12.8.1）。
+
+#### 8.3.2 已完成列：「已归档」用列内开关，不用弹窗
+
+**结论：点按钮后，archived 出现在已完成列里。不要为 archived 再做一张列表弹窗。**
+
+弹窗留给「不是看板卡」的东西（发起目标、发起记录、创建任务、任务详情）。archived 仍是同一张 Kanban 卡：同一套三行卡片、同一套 L2 详情、Footer 只有永久删除。再做弹窗会变成第二套列表，点进去还要叠/替换任务详情，和「同一时刻一个全屏级弹窗」冲突。
+
+发起记录用弹窗，是因为目标 root **不进看板**。archived **属于**已完成列，只是默认藏起来，避免和真正的 `done` 抢高度。
+
+```text
+┌ 已完成                    [已归档 3] ┐     开关关：只画 done
+│  报表导出            [已完成]         │
+│  权限开通            [已完成]         │
+└──────────────────────────────────────┘
+
+┌ 已完成                    [已归档 3] ┐     开关开：done 在上，archived 在下
+│  报表导出            [已完成]         │
+│  权限开通            [已完成]         │
+│  ── 已归档 ──────────────────────── │
+│  旧版采集脚本        [已归档]  （灰） │
+│  过期巡检            [已归档]  （灰） │
+└──────────────────────────────────────┘
+```
+
+| 规则 | 做法 |
+|---|---|
+| 入口 | **已完成列头右侧**，文案「已归档」；有条数时带数字（`0` 仍显示按钮，点开空态「没有已归档任务」） |
+| 默认 | **关**。列里只有 `done`。不占 Header，不占第五列 |
+| 打开 | 本列 `done` 卡片下方加分隔「已归档」，再画 archived 卡（灰色标签，第三行常空） |
+| 点卡 | 与其它卡相同：打开任务详情弹窗（12.2.2.5） |
+| 关掉 | archived 卡从列里收起，done 不动 |
+| 刚归档 | 卡从原列消失；若当前正在已完成且开关为关，只看到「已归档」数字 +1。不自动弹窗、不强制打开开关 |
+| 会话 | 开关记住当前项目本次浏览即可，刷新可回到默认关 |
+| 进度 | 仍不把 archived 算进完成率（8.1） |
+
+**不要：** 已归档独立弹窗/抽屉；Header 再放一个「回收站」；默认把 archived 和 done 混在一列里（即使用灰色）；第五列「已归档」。
+
+数据：默认看板可以不带 `include_archived`（与 Hermes `GET /board` 默认一致）。列头数字需要 archived 条数（board `counts.archived` 或等价）。打开开关后再把 archived 卡画进列（可补 `include_archived=true`，或把 Hermes 的 `columns.archived` 并进已完成列下半）。
 
 ### 8.4 按专家视图
 
@@ -628,186 +673,155 @@ POST /api/plugins/kanban/dispatch?board=<project_slug>&max=8
 
 ## 9. 动态 Tab
 
-
-
 ### 9.1 定位
 
-动态 Tab 用于展示项目发生了什么，不承担自由聊天能力。
+动态 Tab 是 **项目级、人与人协作的时间线**。回答「这个项目里，人刚做了什么」。
 
-动态来源：
+**进动态：** 人在产品里点的操作（创建任务、转交、评论、手动完成/阻塞/重启/归档、发起目标、改成员）。
 
-- Kanban task events
-- Kanban task comments
-- Kanban task runs
+**不进动态：** 调度和 worker 的自动流转（领取、spawn、心跳、自动 promote、系统评审、崩溃/超时/熔断）。这些只出现在 **该任务详情的「过程」Tab**（12.2.2.3）。
 
-MVP 首版主要使用 `task_events`，并通过 `task_id` 补充任务标题。
+不是群聊。评论正文仍在任务详情「评论」Tab；动态只记「谁评论了哪条任务」。
+
+```text
+项目动态 Tab          任务详情 · 过程 Tab
+人做了什么               这条任务怎么被系统跑的
+创建 / 转交 / 评论        claimed / spawned / 心跳
+发起目标 / 改成员          review_requested / 失败 run
+人工完成、阻塞、重启        自动 promote、gave_up
+```
 
 ### 9.2 展示形式
 
-采用时间线样式。
-
-示例：
+时间线，按日分组，新的在上。点一条打开对应任务详情（默认停在任务 Tab；评论类可停评论 Tab）。项目级条目（成员、设置）打开成员抽屉或设置，不打开任务详情。
 
 ```text
 今天 15:20
-  创建任务「设备关联分析」
-  负责人：设备运维总监
+  张三 创建了任务「设备关联分析」· 负责人 @设备运维总监
 
 今天 15:18
-  首席工艺专家完成了「良率根因分析」
+  李四 完成了「良率根因分析」
 
 今天 15:05
-  质量体系建设顾问评论了「SPC 数据分析」
+  王五 评论了「SPC 数据分析」
 
 今天 14:50
   项目创建，成员 3 人
 ```
 
+不要出现：「已被调度领取」「worker 已启动」「系统自动评审中」「heartbeat」。
 
+### 9.3 MVP 展示类型
 
-### 9.3 动态类型
+| 类型 | 谁触发 | 点进去 |
+|---|---|---|
+| 项目创建 | 产品层 | — |
+| 成员加入 / 移出 | 产品层 | 成员抽屉 |
+| 发起目标 | 产品层 | 发起记录该条 |
+| 创建任务 | 人点「创建任务 / 创建后续」 | 任务详情 |
+| 转交 / 指派 | Footer 转交 | 任务详情 |
+| 评论 | 评论 Tab | 任务详情 · 评论 |
+| 完成 | Footer「完成」（人点的） | 任务详情 · 产出 |
+| 阻塞 | Footer「标记阻塞」 | 任务详情 |
+| 重启 | Footer「重启」 | 任务详情 |
+| 完善后继续 | Footer 踢回 triage | 任务详情 |
+| 归档 | Footer 归档 | 任务详情（已归档开关可能要打开） |
 
-MVP 展示以下动态类型：
+**默认不展示：** `claimed` `spawned` `promoted` `review_requested` `changes_requested` `heartbeat` `crashed` `timed_out` `gave_up` `stale` `reconciled` `claim_rejected` `reclaim_deferred` `respawn_guarded` `rate_limited` `protocol_violation` `pr_acceptance`，以及 decomposer 批量 `created` 子任务（发起记录里已经有「拆解成功」）。
 
-- 项目创建
-- 任务创建
-- 任务指派
-- 任务评论
-- 任务完成
-- 任务阻塞
-- 任务解除阻塞
-- 执行失败
-- 执行超时
+筛选 MVP：全部 / 任务协作 / 项目与成员。不要「执行 / 异常」——那是过程 Tab。
 
-其他事件可归入「其他任务事件」或暂不展示。
+### 9.4 Hermes 有什么、缺什么
 
-### 9.4 交互
+底座仍是 board 的 `task_events`（append-only）+ `task_comments`。**没有** board / 项目级事件表，也 **没有**「只给人看的动态」过滤。
 
-- 点击动态，定位到对应任务。
-- 动态可按类型筛选：全部 / 任务 / 评论 / 执行 / 异常。
-- 新事件实时追加到顶部。
+| 能力 | Hermes | 给动态 Tab | 缺口 |
+|---|---|---|---|
+| 任务事件 | `task_events.kind` + `payload` + `created_at` | 人操作对应的那几类 kind | 同一张表混了自动流转；产品必须 **allowlist**，不能把 WS 全量铺到动态 |
+| 实时流 | WebSocket `GET /api/plugins/kanban/events?board=&since=` | 可复用，**客户端/适配层丢掉非 allowlist** | 流是全量 kind，0.3s 轮询 |
+| 历史列表 | **无** REST 时间线 | 需 `GET /projects/{slug}/timeline` | 产品层补；SQL 在后端 join `tasks.title` |
+| 评论 | `task_comments`；事件 `commented` payload 只有 `author`/`len` | 动态写「谁评论了哪条」 | 正文不在事件里；要点进详情。MVP 不在时间线展开正文 |
+| 操作者 | 多数事件 **没有 actor** | 文案尽量用人名 | `assigned.payload` 是新负责人不是操作者；`created` 操作者在 `tasks.created_by`；`completed` 无 actor。产品层写入动态时应记下「谁点的」；纯 Hermes 回放只能近似（assignee / created_by） |
+| 项目创建 / 成员 | **无** | 必须产品层 `project_events` | 不要把项目事件伪装成 task comment（9.6.4 仍成立） |
+| 发起目标 | `project_goals`（产品表）+ 目标 root 的 `decomposed`/`specified` | 动态一条「发起了目标」；拆解细节在发起记录 | 不要把 decomposer 的每张子任务 `created` 刷进动态 |
+| 执行失败 / 超时 | `crashed` `timed_out` `gave_up` 等 | **不进动态** | 详情过程 Tab 用 `runs[]` + `events[]` + `/log` |
+| CLI | `hermes kanban watch --kinds` | 调试用 | 不是产品 UI |
 
+**结论：** 实时管道能复用；**语义过滤、历史 REST、项目/成员/发起目标、操作者** 都要产品适配。不改 Kanban task schema。
 
+### 9.5 实现
 
-### 9.5 Hermes 能力映射
+#### 9.5.1 实时
 
-动态 Tab 的任务级数据底座是 Hermes Kanban 的 append-only `task_events` 表。Hermes 已具备的能力：
+仍连 `GET /api/plugins/kanban/events?board=<slug>&since=<id>`。适配层只把 9.7 允许的 kind 追加到动态；其余丢弃（详情过程 Tab 打开任务时再读全量 `events[]`）。
 
-
-| 能力      | Hermes 现状                                                                | 动态 Tab 用途                         |
-| ------- | ------------------------------------------------------------------------ | --------------------------------- |
-| 事件持久化   | `task_events` 表（append-only，WAL 模式）                                      | 动态数据的唯一权威来源                       |
-| 实时事件流   | WebSocket `GET /api/plugins/kanban/events?board=<slug>&since=<event_id>` | 新事件实时追加到时间线顶部                     |
-| 单任务事件列表 | `GET /api/plugins/kanban/tasks/{task_id}` 返回含 `events` 字段                | 点击动态跳转任务详情时的补充信息                  |
-| 任务评论    | `task_comments` 表 + `comment` 命令                                         | 「任务评论」动态类型                        |
-| 执行记录    | `task_runs` 表 + `runs` 命令                                                | 「执行失败 / 超时」动态类型                   |
-| 任务详情    | `GET /api/plugins/kanban/tasks/{task_id}` + `/log`                       | 详情弹窗 runs/events/诊断/日志（见 12.2.2） |
-| CLI 实时流 | `hermes kanban watch --kinds ...`                                        | 调试与命令行查看（非产品功能）                   |
-
-
-结论：实时任务事件链路可直接复用；历史时间线 REST 列表和项目级事件仍需产品适配层补齐，无需修改 Kanban task schema。
-
-### 9.6 实现方案
-
-动态数据获取分三层：
-
-#### 9.6.1 实时事件流（直接复用）
-
-前端直接连接已有的 WebSocket：
+#### 9.5.2 历史 REST（产品层）
 
 ```text
-GET /api/plugins/kanban/events?board=<project_slug>&since=<event_id>
+GET /projects/{slug}/timeline?limit=50&cursor=&types=task,project
 ```
 
-- 每 0.3s 轮询 `task_events`，WAL 模式下几乎零开销。
-- 返回增量事件 + `cursor`，前端以 `cursor` 作为下次 `since` 参数。
-- 支持 `?board=` 板级过滤，天然对应项目级动态。
-- 鉴权复用 dashboard 的 `_SESSION_TOKEN`（WebSocket 通过 query string 传递）。
+后端：`task_events` allowlist + join `tasks.title` / `created_by` / `assignee`，**合并** `project_events`。禁止浏览器直连 SQLite。
 
-返回结构：
+#### 9.5.3 项目级事件（产品层，Hermes 没有）
 
-```json
-{
-  "events": [
-    {
-      "id": 123,
-      "task_id": "T12",
-      "run_id": null,
-      "kind": "assigned",
-      "payload": {"assignee": "equipment-director"},
-      "created_at": 1234567890
-    }
-  ],
-  "cursor": 123
-}
-```
+写入 `project_events`（或等价表），至少：
 
+| kind | 何时 |
+|---|---|
+| `project_created` | 新建项目 |
+| `member_added` / `member_removed` | 项目成员抽屉 |
+| `goal_submitted` | 点「发起目标」提交 |
+| `settings_changed` | 改工作目录等（可 v1.1） |
 
+降级：没有表时，时间线第一条用 board `created_at` 合成「项目创建」。
 
-#### 9.6.2 时间线 REST 列表（产品层补充）
+### 9.6 过程 Tab 承接自动流转（对照）
 
-PRD 13.5 节建议的 `GET /projects/{project_slug}/timeline?limit=50` 目前 Hermes 不存在——`/events` 是 WebSocket 流，不是 REST 列表。MVP 在产品/Kanban plugin 适配层新增只读路由：
+任务详情 **过程** Tab 四块不变（当前执行 / 日志 / 历史 run / 事件）。事件块 **要展示** 动态 Tab 丢掉的 kind：
 
-```sql
-SELECT e.id, e.task_id, t.title AS task_title,
-       e.kind, e.payload, e.created_at
-FROM task_events e
-LEFT JOIN tasks t ON e.task_id = t.id
-ORDER BY e.created_at DESC, e.id DESC
-LIMIT ?;
-```
+`claimed` `spawned` `promoted` `review_requested` `changes_requested` `crashed` `timed_out` `gave_up` `stale` `heartbeat`（合成「心跳 n 次」）等。
 
-每个 board 是独立 DB 文件，查询天然是 board 级。前端不得直接访问 SQLite；SQL、
-board slug 校验、游标分页和事件 payload 解析封装在后端路由中，避免把数据库路径和
-schema 耦合泄漏到浏览器。
+同一条 `task_events` 行：人操作 → 动态；自动流转 → 过程。不要在两个地方各画一遍「已被领取」。
 
-#### 9.6.3 事件语义化翻译（产品层做）
+### 9.7 kind 去哪
 
-`task_events.kind` 是面向机器的标识（如 `gave_up`、`protocol_violation`）。产品层维护一张映射表，翻译为用户友好文案。完整映射见 9.7 节。
+| Hermes `task_events.kind` | 动态 Tab | 过程 Tab | 说明 |
+|---|---|---|---|
+| `created` | **条件进** | 可折 | 仅表单/创建后续。`creator_task_id` 来自 decomposer 的批量子卡 **不进动态** |
+| `assigned` | **进** | 可折 | Footer 转交。payload.`assignee` 是新负责人 |
+| `commented` | **进** | 不重复 | payload 无正文；点进评论 Tab |
+| `completed` | **进** | 事件里可有 | 人关心的里程碑；worker/评审自动完成也记一条「完成了」，不记领取过程 |
+| `blocked` | **进** | 也要 | 人工 `block_task`。熔断是 `gave_up`，只进过程 |
+| `unblocked` | **进** | 也要 | Footer 重启 / 激活 |
+| `archived` | **进** | 可折 | Footer 归档 |
+| `specified` | **进** | — | 完善后继续 / specify |
+| `linked` / `unlinked` | **进**（弱） | — | 人在任务 Tab 改依赖；MVP 可并进「任务协作」 |
+| `edited` | **进**（弱） | — | 改标题/说明/补录结果 |
+| `attached` / `attachment_removed` | 可不进 | 产出 Tab | 完成时 worker 挂附件偏自动 |
+| `block_loop_detected` | **进** | 也要 | 人要去暂停列处理；过程里保留原因 |
+| `decomposed` | **不进** | 不进看板详情 | 发起记录看拆解 |
+| `claimed` `spawned` `promoted` `promoted_manual` `review_requested` `changes_requested` | **不进** | **进** | 自动流转 |
+| `crashed` `timed_out` `gave_up` `stale` `reconciled` `claim_rejected` `reclaimed` `reclaim_deferred` `respawn_guarded` `rate_limited` `protocol_violation` | **不进** | **进** | 执行异常与回收 |
+| `scheduled` `status` `heartbeat` `pr_acceptance` | **不进** | 按需 | 排期/直写/心跳 |
 
-#### 9.6.4 「项目创建」动态（产品层合成）
+未知 kind：动态默认丢弃；过程 Tab 归入「其他事件」折叠。
 
-Hermes 没有 board 级事件表，`task_events` 只记录 task 级事件。「项目创建，成员 N 人」这类动态需产品层合成：
+文案（动态，有操作者则用操作者，否则用负责人/创建人）：
 
-- 推荐：创建项目时由产品适配层在项目事件表写入「项目创建」事件。
-- 降级：从 board 的 `created_at` 字段推导时间线首条「项目创建于 {时间}」展示，不依赖事件表。
-
-不得把项目级事件伪装成特殊 task comment；评论必须始终关联真实 task。
-
-### 9.7 动态事件 kind 与文案映射表
-
-下表是 `task_events.kind` 到 PRD 9.3 节动态类型的完整映射。`payload` JSON 中已携带所需字段，`task_title` 通过 join `tasks` 表补充。
-
-
-| Hermes 事件 kind                                                             | PRD 动态类型 | payload 关键字段                    | 展示文案模板                                   |
-| -------------------------------------------------------------------------- | -------- | ------------------------------- | ---------------------------------------- |
-| `created`                                                                  | 任务创建     | `assignee`, `status`, `parents` | 创建任务「{task_title}」                       |
-| `assigned`                                                                 | 任务指派     | `assignee`                      | {assignee} 被指派到「{task_title}」            |
-| `commented`                                                                | 任务评论     | `author`, `len`                 | {author} 评论了「{task_title}」               |
-| `completed`                                                                | 任务完成     | `summary`, `artifacts`          | {assignee} 完成了「{task_title}」             |
-| `blocked`                                                                  | 任务阻塞     | `reason`, `kind`, `recurrences` | 「{task_title}」被阻塞：{reason}               |
-| `unblocked`                                                                | 任务解除阻塞   | `status`                        | 「{task_title}」解除阻塞                       |
-| `crashed`                                                                  | 执行失败     | `pid`, `exit_code`              | 执行失败「{task_title}」                       |
-| `gave_up`                                                                  | 执行失败     | `recurrences`                   | 执行失败「{task_title}」（已放弃）                  |
-| `protocol_violation`                                                       | 执行失败     | `pid`, `exit_code`              | 执行异常「{task_title}」                       |
-| `timed_out`                                                                | 执行超时     | `run_id`                        | 执行超时「{task_title}」                       |
-| `rate_limited`                                                             | 执行异常     | `pid`, `exit_code`              | 「{task_title}」触发限流，已重新排队                 |
-| `decomposed`                                                               | 拆解（扩展）   | `child_ids`, `root_assignee`    | 「{task_title}」已拆解为 {len(child_ids)} 个子任务 |
-| `specified`                                                                | 补充说明（扩展） | -                               | 「{task_title}」补充了说明                      |
-| `promoted` / `reclaimed` / `scheduled` / `spawned` / `linked` / `archived` | 其他任务事件   | 各异                              | 归入「其他」或暂不展示                              |
-
-
-说明：
-
-- MVP 首版仅展示前 10 行（对应 PRD 9.3 节列出的动态类型），`decomposed`/`specified` 作为「其他任务事件」或暂不展示。
-- `commented` 事件的 payload 只含 `{"author", "len"}`，不含评论正文。MVP 展示「X 评论了任务 Y」即可；评论正文需点击跳转任务详情查看 `task_comments` 表。PRD v1.1 才要求「动态时间线支持评论正文」。
-- `completed` payload 不含 assignee；模板中的 `{assignee}` 与 `task_title` 一样从
-  `tasks` join 获取，不能直接从事件 payload 读取。
-- 异常类（`crashed`/`gave_up`/`protocol_violation`）在 UI 上可统一归为「执行失败」，`rate_limited`/`timed_out` 归为「执行异常」，细节通过 payload 展示。
-
-
-
-## 10. 工作空间 Tab
+| kind | 模板 |
+|---|---|
+| `created` | {actor} 创建了任务「{title}」 |
+| `assigned` | {actor} 把「{title}」转交给 @{assignee} |
+| `commented` | {actor} 评论了「{title}」 |
+| `completed` | {actor} 完成了「{title}」 |
+| `blocked` | {actor} 标记「{title}」需介入：{reason} |
+| `unblocked` | {actor} 重启了「{title}」 |
+| `archived` | {actor} 归档了「{title}」 |
+| `specified` | {actor} 完善后继续了「{title}」 |
+| `project_created` | 项目创建，成员 {n} 人 |
+| `member_added` | {actor} 将 @{profile} 加入项目 |
+| `goal_submitted` | {actor} 发起了目标「{goal_title}」 |
 
 
 
@@ -1236,6 +1250,8 @@ ready 且已指派（第三行仍有内容）：
 
 不要画：悬停按钮、`⋯`、评论数、`💬`、左侧优先级色条。评论进详情「评论」Tab。
 
+详情弹窗首屏（固区 A）**复用这三行**，规则与上表相同；只多弹窗关闭。不要在首屏再排一套「标题两行 + 徽章行」。见 12.2.2.3。
+
 **优先级圆标（Hermes `tasks.priority` 为整数，越大越优先）：**
 
 产品创建只写 3 / 2 / 1。展示按下表读：
@@ -1254,7 +1270,7 @@ ready 且已指派（第三行仍有内容）：
 
 ##### 12.2.1.1 第三行：当前状况简要说明
 
-第三行是 **一句卡点**，不是 Banner 全文、不是诊断英文 title。
+第三行是 **一句卡点**，不是加粗 Banner 全文、不是诊断英文 title。详情第三行与卡片同一套模板，可比卡片略长但仍单行截断。
 
 写法：
 
@@ -1290,7 +1306,7 @@ ready 且已指派（第三行仍有内容）：
 | `dependency` | 等待依赖（此类通常停在待办，不进暂停列） |
 | 空 / 未知 | 需处理 |
 
-第三行 **不要** 用 Hermes `diagnostics[].title`（英文、偏运维）。诊断进详情 Banner。例外只有表中第 3 行：用 `kind=stranded_in_ready` 判断，文案仍用产品中文。
+第三行 **不要** 用 Hermes `diagnostics[].title`（英文、偏运维）。诊断有则贴在详情三行之下。例外只有表中第 3 行：用 `kind=stranded_in_ready` 判断，文案仍用产品中文。
 
 **适配层一次补齐（P0，看板列表用）：**
 
@@ -1317,15 +1333,673 @@ Hermes 已提供批量 graph（`task_graph_contexts`）和事件表，不必新�
 2. **单任务视角**——弹窗展示该任务的 runs / events / 日志；不复刻项目动态 Tab 的全局时间线。
 3. **渐进披露**——Above-the-fold 放摘要与告警；执行详情默认可折叠，Running / Blocked 状态默认展开。
 4. **Hermes 原生数据优先**——不新增后端字段；复用 `show` / Kanban dashboard API 已有 payload。
-5. **一副骨架、十态换皮**——Header / Banner / 滚动区 / Footer 槽位固定；各底层 status 只改 Banner 文案、② 默认展开、Footer 主按钮（见下文分状态原型）。
+5. **一副骨架、十态换皮**——首屏三行 / 滚动区 / Footer 槽位固定；各底层 status 只改第三行文案、过程空满、Footer 主按钮（见下文分状态原型）。不要在首屏再排一套标题+徽章，也不要顶栏复制 ID。
+
+##### 12.2.2.0 待办列三态：Hermes 能给详情什么（盘点）
+
+数据入口只有 `GET /tasks/{id}`（`task` + `comments` + `events` + `attachments` + `links` + `child_results` + `runs`）和按需 `GET /tasks/{id}/log`。详情 **不要** 直连 DB。看板 `GET /board` 不够画详情（父任务只有个数、没有标题和原因原文）。
+
+**三态共用：接口里一定有、产品详情可以画的**
+
+| 块 | 字段 | 待办三态实情 |
+|---|---|---|
+| 身份 | `task.title` `status` `assignee` `priority` `id` | 产品创建时负责人必填；Hermes 仍允许 `assignee=null`（ready 时调度会跳过） |
+| 定义 | `task.body` | 可空。空则不画「任务说明」大框 |
+| 定义 | `task.created_at` `created_by` | 创建即有 |
+| 定义 | `task.workspace_kind` `workspace_path` | 产品默认继承项目工作目录 |
+| 依赖 | `links.parents` / `links.children` | **只有 id 列表**。子任务另有 `child_results[]`（id/title/status/latest_summary/result）。**父任务没有对等数组**，适配层要用 `task_graph_context` 或再查父任务补 title/status |
+| 协作 | `comments[]` | 可空；待办可写 |
+| 过程 | `events[]` | 至少有 `created`。payload 含初始 `status`、`assignee`、`parents` |
+| 诊断 | `task.diagnostics[]` | 可空。待办偶发 `repeated_failures` / `stranded_in_ready`（仅 ready）等 |
+
+**三态共用：处女卡（从未被 claim）几乎一定空，不要画空骨架**
+
+| 字段 | 为什么空 |
+|---|---|
+| `task.started_at` `completed_at` `result` `current_run_id` `last_heartbeat_at` `worker_pid` `claim_lock` | 只在 claim / complete 后才有 |
+| `task.latest_summary` | 来自 `task_runs.summary`，没 run 就是 `null` |
+| `runs[]` | 空数组。不要请求 `/log`（从未 spawn 时 `exists=false`） |
+| 产出 Tab | 整类隐藏（与既有规则一致） |
+
+例外：从 running / blocked **退回** 待办（收回、重启、激活后父依赖仍未清）时，`runs[]`、`latest_summary`、`last_failure_error`、`consecutive_failures` **可以有历史**。有则在「过程」里折叠展示，不当成当前正在执行。
+
+产品创建表单已去掉的字段（`skills` `goal_mode` `model_override` `max_retries` 等）接口里仍可能有（CLI/worker 写入）。MVP 详情放进默认折叠的「高级信息」，不进首屏。
+
+---
+
+**A. `todo`（待开始）**
+
+怎么进来：创建时有未完成父任务（`initial_task_state`：任一父 status ≠ `done` → `todo`）；或 `unblock` / `reopen_review` 时父依赖未清，落回 `todo`；或 `block_kind=dependency` 的 `dependency_wait`（**不进暂停列**，仍是 todo）。
+
+| 详情该突出 | Hermes 来源 | 够不够 |
+|---|---|---|
+| 在等哪些父任务、它们现在什么状态 | 父任务 `id+title+status`；未完成 = status 不是 `done`/`archived` | 接口只有 parent id。**适配必补** `waiting_parents` |
+| 已完成的父任务（可选） | 同上，status 已终态 | 可折起来，并链到父详情 |
+| 为何还不能入队 | 派生：存在未完成父任务。无单独「blocked_reason」列 | 不要写成「需人工介入」 |
+| `block_kind=dependency` | `task.block_kind` + 最近 `dependency_wait` 事件 `payload.reason` | kind 在 task 上；原因在事件里 |
+
+典型事件：`created`（payload.parents）、`assigned`、`linked` / `unlinked`、`dependency_wait`、`reclaimed`/`unblocked`（退回时）。父任务全部完成后 dispatcher 会 `promoted` → `ready`，本卡离开 todo。
+
+产品「加入执行队列」= `PATCH ready`（`promote_task`，父未完成会 409，产品不用 force）。有未完成父时按钮置灰，原因写在 Banner，不要假装能入队。
+
+不要画：已运行时长、心跳、完成说明、空日志框、空执行摘要。
+
+---
+
+**B. `scheduled`（已排期）**
+
+怎么进来：`schedule_task` 从 todo/ready/running/blocked 把 status 改成 `scheduled`。**任务表没有 `scheduled_at`、没有 `schedule_reason` 列。** 原因和时间只在最近一条 `scheduled` 事件：`payload.reason`、`created_at`。若当时有 in-flight run，会先关掉，run.outcome 可能是 `scheduled`。
+
+| 详情该突出 | Hermes 来源 | 够不够 |
+|---|---|---|
+| 已排期、何时标的 | 最近 `scheduled` 事件的 `created_at` | 事件在 `events[]` 里，**够** |
+| 为什么排期 | 该事件 `payload.reason` | **够**（详情有完整 events）。空则只写「等待时间窗口」 |
+| 会不会自己开始 | 不会。必须 `unblock`（产品「激活」）后按父依赖落到 ready 或 todo | 不要画催促执行 / dispatch |
+| 排期前是否跑过 | `runs[]` 历史 | 有才在过程里折起来 |
+
+MVP 创建表单不暴露排期。看板上的 scheduled 来自 CLI/worker。激活后若父任务未完成会变成 todo，不是 ready。
+
+不要画：等待调度领取（那是 ready）、心跳、把排期当成阻塞「待介入」。
+
+---
+
+**C. `ready`（可执行）**
+
+怎么进来：创建时无未完成父任务；或 todo 父依赖清了之后 `promoted`；或 scheduled/blocked `unblocked` 且父依赖已满足。assigned + ready 会被 gateway dispatcher **自动 claim**，通常很快变成 running。所以详情要表达「正在等调度」，不要做成草稿。
+
+| 详情该突出 | Hermes 来源 | 够不够 |
+|---|---|---|
+| 已可执行、等 dispatcher 领取 | `status=ready` 且无 `claim_lock` | **够** |
+| 没人就不跑 | `assignee` 空 | **够**。产品创建必填，仍可能被转成交空 |
+| 等太久没被领 | `diagnostics` 含 `stranded_in_ready`（默认约 30 分钟） | **够**。用产品中文，不用英文 title |
+| 催促 | `POST /dispatch` 是 **board 级 nudge**，不保证先领这张卡 | Banner 可写「已催促调度」，不要写「已开始执行」 |
+| 退回 ready 的历史失败 | `consecutive_failures` `last_failure_error` `runs[]` | 有才展示；处女 ready 这些是 0/null |
+
+典型事件：`created`（payload.status=ready）、`promoted` / `promoted_manual`、`unblocked`、`assigned`。一旦被领会有 `claimed`/`spawned`，卡离开待办列。
+
+禁止：`PATCH status=running`、UI 调 `claim`。完成按钮不放 ready（Hermes `complete_task` 虽允许 ready，产品收窄到 running）。
+
+不要画：已运行时长（`started_at` 仍应为空，除非数据异常）、实时日志、系统评审文案。
+
+---
+
+**待办三态打开详情时看见什么（首屏 ≠ Tab）**
+
+排版以 **12.2.2.3** 为准。首屏 = **卡片同款三行** + 可选诊断 + **任务** Tab 上半截。四个 Tab 始终都在。顶栏不要复制 ID。
+
+| | 第三行 | 默认 Tab | 过程 | 产出 |
+|---|---|---|---|---|
+| todo 等父 | 等待父任务短名单 | **任务** | 四块空态 | 「暂无产出」 |
+| todo 可入队 | 可以加入执行队列 | **任务** | 同上 | 同上 |
+| scheduled | 排期原因 + 时间 | **任务** | 突出 scheduled | 有历史摘要才有块 |
+| ready | 等待调度 / 需指派 | **任务** | 有历史 runs 再填 | 同 scheduled |
+
+##### 12.2.2.2 进行中列两态：Hermes 能给详情什么（盘点）
+
+接口与待办相同：`GET /tasks/{id}` + 按需 `/log`。任务 Tab 字段仍按 12.2.2.1。本节省的是 **Banner / 过程 / 产出** 在执行期真正有什么。
+
+**先分清两个 Hermes 事实（产品必须当成三种画面）：**
+
+| 画面 | 底层 `task.status` | 怎么判断 | 卡片标签 | 用户在干什么 |
+|---|---|---|---|---|
+| 专家执行中 | `running` | 当前 run 的 `claimed` **没有** `source_status=review` | **执行中** | 实施专家的 worker 在跑 |
+| 等待评审领取 | `review` | status 就是 review；`claim_lock` 为空 | **评审中** | 实施已交卷，评审 agent 还没被 dispatcher claim |
+| 评审 agent 正在跑 | `running` | 当前 run 的 `claimed.payload.source_status == "review"` | 仍标 **评审中** | `claim_review_task` 把 review **改成了 running** |
+
+`GET /board` 按 `task.status` 分列，第三种会进 Hermes 的 running 桶。详情有 `events[]`，**必须**用当前 `task.current_run_id` 对应的 `claimed` 事件区分，不能只看 status，否则完成按钮会出现在评审 worker 上。看板卡片没有 events：适配层对 running 任务批量读最新 `claimed`（或详情打开后再校正标签）。
+
+`block_task` / 产品「完成」只针对实施中的 running。评审中（含评审 worker running）Footer **不**放完成、打回、阻塞；评论可写。
+
+---
+
+**E. 实施中的 `running`**
+
+怎么进来：dispatcher `claim_task`（ready→running）开一条 `task_runs`，发 `claimed`，随后 `spawned`（带 pid）。`started_at` 用 `COALESCE`，**第一次** claim 写入后不再改；重试时长看 **当前 run** 的 `started_at`，不要用 `task.started_at` 或 `age.started_age_seconds`（那是首次开始至今）。
+
+| 详情该突出 | Hermes 来源 | 够不够 |
+|---|---|---|
+| 已运行多久（本次） | 当前 run：`runs[]` 里 `id == current_run_id` 的 `started_at` | **够** |
+| Run 编号 | `task.current_run_id` / 该 run 的 `id` | **够** |
+| 心跳 | `task.last_heartbeat_at`（run 上也有一份） | **够**。没有心跳时写「尚无心跳」，不要假装在跑进度条 |
+| 实时日志 | `GET .../log` 的 `content`，`exists` | **够**。这是 running **唯一持续增长的正文**。默认过程 Tab 展开 tail |
+| 当前 run 摘要 | 当前 run 的 `summary` | 通常 **空**。不要为当前 run 画空「执行摘要」大卡 |
+| 上一次尝试 | 更早的 `runs[]`（收回、失败、排期） | 有才折在当前 run 下面 |
+| 是否活着 | `claim_lock`、`claim_expires`、`worker_pid` | 详情默认进高级信息。PID 不能证明没卡住 |
+
+典型事件：`claimed`、`spawned`、`heartbeat`（很密，时间线要折叠/抽样，不要一条条占满）、偶尔 `reclaim_deferred`。
+
+过程 Tab 顺序：日志（默认展开）→ 当前 run 高亮 → 历史 runs → 事件（heartbeat 折叠）。
+
+产出 Tab：有上次摘要/附件则出块，否则一行「暂无产出」（Tab 仍在）。打开默认 **任务** Tab，日志走过程（第三行「查看过程」）。
+
+不要画：完成说明 `result`、评审通过/打回、把当前 run 当成已交付、用 `task.started_at` 当本次耗时。禁止 `PATCH running`（已经是 running）。完成走 `complete_task`（L3）；转交必须 reclaim。
+
+---
+
+**F. `review`（等待评审领取）**
+
+怎么进来：实施 worker `request_review`：running/ready → `review`，关掉实施 run（outcome=`review_requested`），事件 `review_requested`（`implementer`、`reviewer`、`summary` 首行）。`claim_lock` / `worker_pid` / `current_run_id` 被清空。`assignee` 可能改成 reviewer。
+
+| 详情该突出 | Hermes 来源 | 够不够 |
+|---|---|---|
+| 系统正在自动评审、用户不用点通过 | `status=review` + 固定文案 | **够** |
+| 实施交了什么 | `task.latest_summary`；或 `review_requested.payload.summary` | **够**。产出 Tab 主阅读 |
+| 谁实施、谁评审 | 最近 `review_requested` 的 `implementer` / `reviewer` | **够**（在 events 里） |
+| 实施那次 run | `runs[]` 中 outcome=`review_requested`（或最近一次已结束的实施 run） | **够** |
+| 实时评审日志 | 此时还没有新 run，`/log` 仍是 **实施 worker** 的旧日志 | 可折开展示「实施日志」，不要写成正在评审的 live tail |
+| 会不会自己结束 | 会。dispatcher `claim_review_task` → 变成「评审 agent 正在跑」；通过则 `complete_task` → done；不通过 `request_changes` → ready/todo | 用户不能 promote / 完成 / 打回 |
+
+`block_task` **不接受** review。`complete_task` Hermes 允许 review→done，产品 **不**放完成按钮。
+
+打开默认 **任务** Tab（与待办相同）。实施摘要在产出 Tab。Footer 空，评论可写。
+
+不要画：已运行时长（这次还没 claim）、心跳、催促执行、完成、打回、阻塞、「需人工介入」。
+
+---
+
+**F2. 评审 agent 正在跑（底层已是 `running`）**
+
+怎么进来：dispatcher 对 review 列调用 `claim_review_task`（review→running），新 run，`claimed` 带 `source_status: "review"`。日志开始变成 **评审 worker** 的 stdout（同一 `{task_id}.log` 文件会继续写）。
+
+| 详情该突出 | Hermes 来源 | 够不够 |
+|---|---|---|
+| 仍是评审中，不是实施执行中 | 当前 run 的 `claimed.payload.source_status == "review"` | **够**（详情）；看板要适配补 |
+| 评审跑了多久 | 当前评审 run 的 `started_at` | **够** |
+| 评审日志 | `/log` tail | **够**。过程 Tab 可看；默认仍以产出（实施摘要）+ Banner「系统正在评审」为主 |
+| 实施摘要 | 上一 run 的 summary / `latest_summary` | **够** |
+
+产品表现与 F 相同：标签 **评审中**，无完成/打回/阻塞。不要用实施 running 的 Footer。
+
+---
+
+**进行中打开详情时看见什么**
+
+| | 第三行（固区） | 默认 Tab | 过程 Tab | 产出 Tab |
+|---|---|---|---|---|
+| 实施 running | `已运行 {时长}`；行末查看过程 | **任务**（与待办相同） | 四块骨架；日志默认展开 | 有上次摘要才有块，否则「暂无产出」 |
+| 等待 review | `通过后将自动完成` | **任务** | 「等待评审领取」+ 可折旧日志 | 通常有实施摘要 |
+| 评审 worker running | 评审已运行时长；行末查看过程 | **任务** | 评审日志 + 实施历史 | 实施摘要 |
+
+已完成列 `done` / `archived` 见 12.2.2.5。暂停列踢回 `triage`（反复阻塞）见后续 12.2.2.6。
+
+##### 12.2.2.4 暂停列 `blocked`：Hermes 能给详情什么（盘点）
+
+沿用 **12.2.2.3** 骨架（卡片三行 + 四 Tab + Footer）。默认仍停 **任务** Tab。原因在第三行（12.2.1.1），失败 run / 日志在过程。
+
+**本态只覆盖 `task.status == "blocked"`。** 不要和同列的系统踢回 `triage`（反复阻塞）混用：那种卡禁止 `unblock`，见后续 12.2.2.6。`block_kind=dependency` 也不会进暂停列（停在待办 todo）。
+
+---
+
+**怎么进来（两条 Hermes 路径）**
+
+| 路径 | 怎么发生 | 停在 blocked 的事件 | 任务表上还能读到 |
+|---|---|---|---|
+| **人工/专家阻塞** | `block_task`（仅 running/ready）kind 为 `needs_input` / `capability` / `transient` / 空 | `events.kind=blocked`，payload：`reason`, `kind`, `recurrences`, `source_status` | `block_kind`、`block_recurrences`；claim / pid / `current_run_id` 被清掉 |
+| **调度熔断** | 连续 spawn/crash/timeout 达到上限（默认 `DEFAULT_FAILURE_LIMIT=2`，可被 `max_retries` 覆盖） | `events.kind=gave_up`（**不是** `blocked`），payload：`error`, `failures`, `effective_limit`, `trigger_outcome` | `consecutive_failures`、`last_failure_error`；`block_kind` 常常仍是旧值或空 |
+
+同一 `block_kind` 经历 blocked → unblock → 再 block，次数到 `BLOCK_RECURRENCE_LIMIT`（2）会变成 **triage** + `block_loop_detected`，离开本态。
+
+`_has_sticky_block`：最近一条 `blocked`/`unblocked` 若是 `blocked`，则 `recompute_ready` **不会**自动拉回 ready。熔断走 `gave_up`，不是 sticky；但失败次数已达上限时同样不会自动恢复，必须人点重启。
+
+重启 = `unblock_task`：只接受 blocked/scheduled。落地 `ready` 或 `todo`（父依赖未清），若 `source_status` 曾是 review 则可能回 `review`。`block_kind` / `block_recurrences` **保留**；`consecutive_failures` 和 `last_failure_error` **清零**。
+
+Hermes `complete_task` 允许 blocked→done，产品 **不**放完成。已是 blocked 不能再 `block_task`。
+
+---
+
+**详情各区块（同一骨架上换皮）**
+
+**A 首屏：** 与卡片相同的三行。状态标签 **待介入**（8.3.1）。`current_run_id` 一般为 null，不要画成执行中。无复制 ID。
+
+**第三行 + 诊断（原 Banner 槽，不再单独加粗一块）**
+
+| 槽 | 人工阻塞 | 熔断 `gave_up` | 字段 |
+|---|---|---|---|
+| 第三行 | `{kind}：{reason}`（12.2.1.1） | 连续失败已停止 | 最近 `blocked` 的 `payload.reason`；没有则最近 run 的 `summary`。熔断用 `gave_up.payload.error` 或 `task.last_failure_error` |
+| 可加长仍单行 | 同类第 {n} 次 | 已失败 {failures}/{limit} 次 | `block_recurrences`；熔断用 `gave_up` 的 `failures` / `effective_limit` |
+| 诊断 | `stuck_in_blocked` 或 `block_unblock_cycling` | `repeated_failures` 等 | `task.diagnostics[]`，产品中文，不用英文 title |
+| 查看过程 | **不加** | 同左 | 无活 worker |
+
+kind 短文案同卡片第三行：`needs_input` 缺信息、`capability` 缺能力、`transient` 临时故障、空 需处理。
+
+不要把日志、完整 stack、完整依赖表塞进第三行。reason 没有时第三行只写 kind 短文案或「需处理」，不要编造。
+
+**任务 Tab：** 顺序与 12.2.2.3 完全相同。失败块在 blocked 上 **常显**（`consecutive_failures > 0` 或有 `last_failure_error`）。无「本次开始」（没有 current run）。
+
+**过程 Tab：** 仍是四块，没有活日志刷新。
+
+| 块 | blocked 怎么填 | 字段 |
+|---|---|---|
+| 1 当前执行 | 一行「已暂停，等待重启」；其下高亮 **最近一条已结束 run**（outcome 多为 `blocked` / `gave_up` / `crashed` / `timed_out` / `spawn_failed`） | `runs[]` 按 id 倒序第一条；`summary`/`error`/`ended_at`/`profile` |
+| 2 运行日志 | **可以请求** `/log`（实施留下的文件）；默认折，标题「最近一次执行日志」，不要写成实时 | `GET .../log`；`exists=false` 则不画 |
+| 3 历史执行 | 其余 runs | `runs[]` |
+| 4 事件 | 突出最近 `blocked` 或 `gave_up`；可列更早的 `unblocked` | `events[]` |
+
+**产出 Tab：** 若阻塞前有 `latest_summary` / 附件则展示（那是上一趟成功或 handoff，不是本次阻塞原因）。没有则「暂无产出」。不要把 `blocked` 的 reason 当执行摘要。
+
+**评论：** 可写。有助于消掉 `stuck_in_blocked`。
+
+**D Footer**
+
+| | 按钮 | Hermes |
+|---|---|---|
+| 主 | **重启** | `unblock_task` → ready/todo/review |
+| 次要 | 转交、更新说明、归档 | `assign_task`；PATCH title/body；`archive` |
+| 禁止 | 完成、再标记阻塞、完善后继续、claim、`PATCH running` | `complete_task` 虽允许但产品收窄；`block_task` 不接受已 blocked；`unblock` 不用于踢回 triage |
+
+重启后第三行按落地 status 换成待办/评审短句，不要停在「待介入」标签对应的阻塞文案。
+
+---
+
+**字段够不够**
+
+| 要展示的 | 够？ |
+|---|---|
+| kind、同类次数、失败次数、last error | **够**（在 `task.*`） |
+| 人工阻塞原因原文 | **半够**：不在任务表，在最近 `blocked` 事件 `payload.reason`（详情有 `events[]`） |
+| 熔断原因 | **够**：`gave_up.payload.error` 或 `last_failure_error` |
+| 最近失败 run / 日志 | **够**：`runs[]` + `/log` |
+| 父任务标题 | 与待办相同，适配 `parents[]` |
+
+**不要画：** 已运行时长/心跳（claim 已释放）、完善后继续、反复阻塞文案、空的当前 run 监控、把 `gave_up` 卡当成踢回 triage。
+
+##### 12.2.2.5 已完成列 `done` / `archived`：Hermes 能给详情什么（盘点）
+
+`done` 和 `archived` 在**已完成列**，不在暂停列。暂停列剩余的是系统踢回 `triage`（12.2.2.6）。沿用 **12.2.2.3** 骨架。默认 Tab：**产出**（五块都空则落到 **任务**）。没有活 worker，第三行 **不加**「查看过程」。
+
+---
+
+**怎么进来**
+
+| 状态 | 怎么发生 | 任务表落地 | 事件 |
+|---|---|---|---|
+| **done** | `complete_task`：仅 `running` / `ready` / `blocked` / `review`。产品完成按钮只放实施 running | `status=done`；写 `result`（常仍是 null）、`completed_at`；清 claim / pid / `block_kind` / `block_recurrences`；`consecutive_failures` 事后清零 | `events.kind=completed`。payload：`summary`（摘要首行 400 字）、`result_len`、可选 `verified_cards` / `artifacts`。**没有全文 result** |
+| **archived** | `archive_task`：任意非 archived。产品 Footer「归档」 | `status=archived`；**不写** `completed_at`；清 claim / pid。若当时还有 run，以 outcome=`reclaimed` 关掉 | `events.kind=archived`，payload **null** |
+
+完成时 `_end_run(..., outcome="completed", summary=handoff)`。`handoff` = 传入的 `summary`，缺省用 `result`。从未 claim 的 review 通过会 `_synthesize_ended_run`。
+
+归档中途执行：run summary 固定英文 `"task archived with run still active"`。**不要**把这句当 Banner / 产出摘要。
+
+完成/归档后都会 `_cleanup_workspace`：managed scratch 目录可能被删；`workspace_path` **仍留在任务行**。详情只展示路径，**不扫盘**。有未完成子任务时 cleanup 会推迟。
+
+`archived` 父任务不再挡住子任务（与 `done` 一样算满足）。`recompute_ready` 会立刻尝试拉子任务。
+
+---
+
+**看板怎么拿到这两态**
+
+Hermes `GET /board` 默认 `include_archived=false`，**archived 卡不会出现**。`BOARD_COLUMNS` 也没有 archived 列；打开 `include_archived=true` 才多一列 `columns.archived`。
+
+产品默认已完成列 **只画 `done`**。archived 由列头开关显隐（**8.3.2**），不要一上来就把两类卡混在一列，也不要为 archived 做独立弹窗。列头「已归档 n」的数字来自 board `counts.archived`（或等价计数）。开关打开后再把 Hermes 的 `columns.archived` **并进已完成列下半**（灰卡 + 分隔）。
+
+`GET /tasks/{id}` 对 archived **仍然可用**（从其它入口点进详情不依赖开关）。
+
+卡片第三行：done 用 `latest_summary` 首句（board 已有 200 字预览）；archived 无卡点则折叠（12.2.1.1）。
+
+---
+
+**`latest_summary` ≠ `result`（已完成最容易画错）**
+
+| 字段 | 是什么 | 工人常见写法 |
+|---|---|---|
+| `task.latest_summary` | 最新一条非空 `task_runs.summary`（详情接口现场算；board 截 200 字） | **主阅读**。工人 handoff 写在这里 |
+| `task.result` | 任务表一列，仅 `complete_task` / `edit_completed_task_result` 写入 | 常 **null**。空则产出 Tab 不画「完成说明」 |
+| `age.time_to_complete_seconds` | `completed_at - (started_at 或 created_at)` | 仅 `completed_at` 有值时有。纯归档未完成过则为 null |
+
+Banner 辅句、卡片第三行、产出第一块都读 **`latest_summary`**。不要因为 `result` 为空就画「无产出」。
+
+---
+
+**详情各区块**
+
+**A 首屏：** 与卡片相同的三行。标签 **已完成** / **已归档**（8.3.1）。`current_run_id` 一般为 null。archived 标签灰色。无复制 ID。
+
+**第三行 + 诊断**
+
+| 槽 | done | archived（曾经 done） | archived（从未完成，直接归档） | 字段 |
+|---|---|---|---|---|
+| 第三行 | 摘要首句 | 摘要首句（有则） | （空，折叠） | `task.latest_summary` 首句。完成时间进任务 Tab，不进第三行（标签已是已完成/已归档） |
+| 诊断 | 通常无 | 通常无 | 通常无 | `repeated_failures` 等对 done/archived **豁免** |
+| 查看过程 | **不加** | **不加** | **不加** | 无活 worker |
+
+完成时间格式与创建时间相同（本地 `YYYY-MM-DD HH:mm`）。摘要过长截一行，全文在产出 Tab。
+
+不要把 `completed.payload.summary` 与 `latest_summary` 各画一遍。事件里那条只是通知器用的截断。
+
+**任务 Tab：** 顺序与 12.2.2.3 相同。时间块在创建时间之后：有 `completed_at` 则加一行「完成于 …」；无当前 run，不画「本次开始」。失败块：完成会清 `consecutive_failures`，一般不画；若历史 `last_failure_error` 仍在且 n=0，也不要当当前故障。工作目录：路径照展示；「在工作空间打开」不先探活（目录可能已清）。
+
+**过程 Tab：** 仍是四块，只读、不刷心跳。
+
+| 块 | done | archived |
+|---|---|---|
+| 1 当前执行 | 一行「已完成」；其下高亮最近 `outcome=completed` 的 run | 一行「已归档，只读」；高亮最近已结束 run（可能是 completed，也可能是归档中止的 `reclaimed`） |
+| 2 运行日志 | **可以请求** `/log`；默认折，标题「完成前的执行日志」，不要写成实时 | 同左。从未 spawn 则不请求 |
+| 3 历史执行 | 其余 runs | 其余 runs |
+| 4 事件 | 突出 `completed`；可列更早的 `review_requested` / `claimed` | 突出 `archived`；若曾经 done，其下保留 `completed` |
+
+不要把 in-flight 骨架（心跳、已运行时长）画回来。
+
+**产出 Tab：** 这是本列的主阅读。五块规则同 12.2.2.3。done 通常至少有摘要或附件。从未执行就归档：五块都空 → 「暂无产出」，默认改停 **任务** Tab。
+
+补录结果之后刷新 `result` + 该 completed run 的 `summary`（从而 `latest_summary`），产出 Tab / 第三行跟着变。
+
+**评论：** done **可写**。archived **只读**（去掉输入）。Hermes `POST .../comments` 无状态守卫，产品收窄。
+
+**D Footer**
+
+| | done | archived |
+|---|---|---|
+| 主 | **创建后续任务** | **无** |
+| 次要 | 补录结果、归档 | **永久删除**（危险，二次确认） |
+| 禁止 | 重新打开同一条、完成、重启、阻塞、催促、claim | 改派、补录、重启、完善后继续、改标题/说明、发评论、加附件 |
+
+创建后续 = `POST /tasks`，`parents: [当前 id]`，打开创建任务弹窗并预填父任务（12.2.4）。子任务初始仍按父依赖门控：父已是 done/archived → 子任务可直接 `ready`。
+
+补录结果 = `edit_completed_task_result`（**仅 done**）：写 `tasks.result`，更新最近 `outcome=completed` 的 run.summary（没有则合成一条），事件 `edited`。L3 字段：result 必填，summary / metadata 可选。
+
+**适配缺口（P0）：** dashboard `PATCH /tasks/{id}` 的 `result` **只在把 status 改成 done 时**交给 `complete_task`。任务已经是 done 时 PATCH `result` **不会**调用 `edit_completed_task_result`。产品「补录结果」要直调该 mutator（或 CLI `hermes kanban edit --result`），不要靠现有 PATCH。
+
+归档 = `archive_task`。任务从已完成列内变成 archived 子状态（灰/折），不要移出已完成列。
+
+永久删除 = `delete_archived_task`（先 archived 才能硬删，连 comments/events/runs/links 一起删）。**不要**走 dashboard `DELETE /tasks/{id}`（那是 `delete_task`，任意状态都能硬删）。二次确认文案写清不可恢复。
+
+Hermes `_set_status_direct` 允许把 done/archived 拖回其它状态，并会 invalidate 后代。产品 **不做 reopen**。
+
+---
+
+**字段够不够**
+
+| 要展示的 | 够？ |
+|---|---|
+| 完成时间、耗时 | **够**：`completed_at`、`age.time_to_complete_seconds`（仅真正 complete 过） |
+| 执行摘要 | **够**：详情 `latest_summary` 全文；board 预览够卡片 |
+| 完成说明 | **够但常空**：`task.result` |
+| 附件 / 子任务产出 | **够**：`attachments[]`、`child_results[]` |
+| 完成事件截断摘要 | 详情有 `events`；优先用 `latest_summary`，避免双份 |
+| 归档时间 | **半够**：无 `archived_at` 列。用最近 `events.kind=archived` 的 `created_at` |
+| 归档前是什么状态 | **半够**：`archived` payload 为空。需要的话看 `archived` 之前最后一条 status 类事件，MVP Banner 不展示 |
+| 补录结果 API | **不够**：见上，PATCH 不达 mutator |
+| 列上的 archived 卡 | **默认不够**：必须 `include_archived=true` 再合成已完成列 |
+
+**不要画：** 活心跳/本次运行时长、完成按钮、重启、完善后继续、把 `result` 空当成失败、把 scratch 清理失败画成任务失败、archived 上的补录/评论输入。
+
+##### 12.2.2.1 任务 Tab 内容 + 详情字段来源
+
+**任务 Tab 从上到下（各状态共用，空块不占位）：**
+
+1. **任务 ID**（完整 `task.id` + **复制**；必显）
+2. 任务说明（`body` 空则整块不画）
+3. **依赖**（父/子每行带状态）
+4. 工作目录
+5. **创建时间**（必显；有当前 run 时加「本次开始」）
+6. 失败次数 / 最近错误（仅有失败时）
+7. 高级信息（默认折叠）
+
+顺序固定，见 12.2.2.3。不要按状态把依赖提前，不要单独做「评审说明」块。
+
+**依赖行怎么画：**
+
+```text
+依赖
+  父任务
+    采集权限开通          [待介入]
+    点位清单导出          [已完成]
+  子任务
+    报表汇总              [待开始]
+```
+
+- 一行：标题（可点开该任务详情）+ 右侧重状态标签。未完成父任务可在标题前加 ⏳
+- 状态用 8.3.1，不要写英文 `todo`/`blocked`
+- Banner 里等父任务只列未完成父任务短名单；任务 Tab 是完整父/子表，含已完成
+
+**Hermes 原生不够画依赖状态的部分：**
+
+| 侧 | `GET /tasks/{id}` | 缺什么 | 适配 |
+|---|---|---|---|
+| 父任务 | `links.parents: string[]` 只有 id | 没有 title、没有 status | 调用已有 `task_graph_context()`，附 `parents: [{id, title, status}]` |
+| 子任务 | `child_results[]` 已有 `id, title, status, latest_summary, result` | **够**画状态 | 任务 Tab 用这三项；摘要留给产出 Tab |
+
+不要对每个 parent 再打一次 `GET /tasks/{id}`。
+
+---
+
+**任务详情字段来源（权威）**
+
+数据入口：
+
+- 主：`GET /api/plugins/kanban/tasks/{id}?board=<project_slug>`
+- 日志（过程 Tab，有 spawn 才请求）：`GET /api/plugins/kanban/tasks/{id}/log`
+- 产品适配附加（不改 Kanban schema）：`parents[{id,title,status}]`；目标 root 身份用 `project_goals` 判断，不进看板详情
+
+时间戳均为 Unix 秒，UI 格式化为本地 `YYYY-MM-DD HH:mm`。
+
+**固区（不进 Tab）**
+
+| UI | 展示 | 来源 | 空态 |
+|---|---|---|---|
+| 第 1 行 | 标题 + 8.3.1 标签（排版同卡片） | `task.title`、`task.status`（+ `claimed_ev`） | 必有 |
+| 第 2 行 | `@assignee` + 优先级圆标 | `task.assignee`、`task.priority` | 无负责人「未指派」 |
+| 第 3 行 | 当前状况简要说明 | 与卡片同一套 **12.2.1.1** | 无内容则整行不占位 |
+| 关闭 | 弹窗右上角 ✕ | — | 必有 |
+| 诊断行 | 产品中文，不用英文 title | `task.diagnostics[]` | 无则不画 |
+| 查看过程 | 仅活 worker，挂在第三行末 | `is_impl_running` / `is_review_run` | 无活 worker 不画 |
+
+**不要在固区放复制 ID。** ID 只在任务 Tab。
+
+**任务 Tab**
+
+| UI | 展示 | 来源 | 空态 |
+|---|---|---|---|
+| **任务 ID** | 完整 id + **复制** | `task.id` | 必有；复制成功轻提示「已复制」 |
+| 任务说明 | 全文 | `task.body` | 空则整块不画 |
+| 父依赖 · 标题 | 可点击 | 适配 `parents[].title`（底层 `task_links` + 父任务行） | 无父：「无父任务」 |
+| 父依赖 · 状态 | 8.3.1 标签 | 适配 `parents[].status` | 与标题同行，必带 |
+| 子依赖 · 标题 | 可点击 | `child_results[].title` | 无子：「无子任务」 |
+| 子依赖 · 状态 | 8.3.1 标签 | `child_results[].status` | 与标题同行，必带 |
+| 工作目录 | 路径 +「在工作空间打开」 | `task.workspace_kind`、`task.workspace_path` | 空则写「未绑定」，不扫盘列文件 |
+| **创建时间** | 本地日期时间 | **`task.created_at`** | 创建即有，**必显** |
+| 创建人 | 文案「由 xxx 创建」 | `task.created_by` | 空则只显示时间 |
+| 失败次数 | n 次 | `task.consecutive_failures` | `0` 不画 |
+| 最近错误 | 截断 | `task.last_failure_error` | 空不画 |
+| 评审说明 | （不进任务 Tab，见首屏第三行） | `review_requested` payload | — |
+| 高级信息 | claim / pid / 模型覆盖等 | `task.claim_lock` `worker_pid` `skills` `model_override` 等 | 默认折叠 |
+
+**过程 Tab**
+
+| UI | 来源 | 空态 |
+|---|---|---|
+| 执行记录 | `runs[]`（`id, profile, status, outcome, summary, error, metadata, started_at, ended_at`） | `[]`：一行「尚未执行」，不请求 log |
+| 事件 | `events[]`（`kind, payload, created_at, run_id`） | 至少有 `created` |
+| 运行日志 | `GET .../log` 的 `content`；`exists=false` 表示从未 spawn | 未 spawn **不请求** |
+
+排期原因/时间：最近 `events` 中 `kind=scheduled` 的 `payload.reason` 与 `created_at`（任务表无独立列）。
+
+**产出 Tab**
+
+| UI | 来源 | 空态 |
+|---|---|---|
+| 执行摘要 | `task.latest_summary`（来自最新非空 `task_runs.summary`） | 无则不画该块；Tab 仍在（空态「暂无产出」） |
+| 产出文件 | `attachments[]` | 无则块不画 |
+| 结构化事实 | 最近 run 的 `metadata` | 无则不画空 JSON |
+| 完成说明 | `task.result` | 常空，空则不画 |
+| 子任务产出 | `child_results[].latest_summary` / `result` | 无摘要的子任务不在此重复（状态已在任务 Tab） |
+
+**评论 Tab**
+
+| UI | 来源 | 空态 |
+|---|---|---|
+| 列表 | `comments[]`：`author, body, created_at` | 空列表 + 输入框 |
+| 条数角标 | `comments.length`（board 上还有 `comment_count`） | 0 仍显示 Tab，角标可省略 |
+
+**不要当详情数据源：** 看板 `GET /board`（缺父标题/原因原文）；直连 SQLite；Agent 对话 transcript；工作目录扫盘。
+
+区块怎么排、默认停在哪个 Tab，以 **12.2.2.3** 为准（上表只回答字段从哪来）。
+
+##### 12.2.2.3 统一骨架：各区块展示什么（待办 + 进行中）
+
+待办（todo / scheduled / ready）和进行中（实施 running / 等待 review / 评审 worker running）**同一套弹窗**。状态只改首屏第三行文案、过程/产出的空满、Footer 按钮，不换布局、不换 Tab 顺序、不把 running 做成单独的「日志工作台」。
+
+暂停 `blocked`、已完成 `done`/`archived` 沿用本骨架（见 12.2.2.4 / 12.2.2.5）。done / archived 默认停在产出（空则任务）。本节锁的是各列同一套槽位。
+
+```text
+┌─ 任务详情 ────────────────────────────────────────── [✕] ─┐  A 首屏＝卡片三行
+│ 补齐 SPC 采集脚本                          [待开始]     │  1 标题 + 状态标签
+│ @工艺专家                                      (中)     │  2 专家 + 优先级圆标
+│ 等待「采集权限开通」                    [查看过程]      │  3 简要说明；无则折叠；仅活 worker 有链
+│ ⚠ 诊断一句（有才画）                                    │  可选，不算第四行身份
+├──────────────────────────────────────────────────────────┤
+│ [任务]  [过程]  [产出]  [评论 n]                           │  C 四 Tab 始终都在
+│           当前 Tab 正文（只这一层滚）                      │
+├══════════════════════════════════════════════════════════┤
+│ [更多] [次要]                                   [主按钮]   │  D Footer
+└──────────────────────────────────────────────────────────┘
+```
+
+首屏 **不要** 再排「标题两行 + 徽章行」，也不要顶栏「复制 ID」。关闭是弹窗控件，贴在窗口右上角，不挤进三行文案栅格（第一行右侧仍是状态标签，与卡片一致）。
+
+**派生（详情里算一次，第三行 / 过程 / Footer 共用）：**
+
+| 名字 | 怎么算 | Hermes |
+|---|---|---|
+| `current_run` | `runs[]` 中 `id == task.current_run_id` | `task.current_run_id`，`runs[].id` |
+| `claimed_ev` | `events[]` 里 `kind=claimed` 且 `run_id` 等于当前 run，取最近 | `events[].kind` / `run_id` / `payload` |
+| `is_review_run` | `claimed_ev.payload.source_status == "review"` | `claim_review_task` 写入 |
+| `is_review_ui` | `task.status == "review"` **或** `is_review_run` | 徽章用「评审中」 |
+| `is_impl_running` | `task.status == "running"` 且不是 `is_review_run` | 徽章「执行中」；Footer 才有完成/阻塞 |
+
+打开一律默认 **任务** Tab（含 running / review）。「现在怎么了」就是首屏第三行（与卡片 12.2.1.1 同一套短句）。有活 worker 时第三行末提供文字链 **查看过程**（切到过程 Tab）。
+
+四个 Tab **始终显示**。产出五块都空时，正文一行「暂无产出」（待办改动：不再从栏上拿掉产出 Tab）。
+
+任务 Tab **不按状态重排**。等父任务短名单只在第三行。评审人不进任务 Tab。完整 ID 只在任务 Tab。
+
+---
+
+**A 首屏身份（各状态相同，排版锁死为卡片三行）**
+
+与 **12.2.1** 同一套行：
+
+| 行 | 左 | 右 | 字段 |
+|---|---|---|---|
+| 1 | 标题（单行截断） | 8.3.1 状态标签；`is_review_ui` 时为「评审中」 | `task.title`；`task.status` + `claimed_ev` |
+| 2 | `@assignee`，空则「未指派」 | 高/中/低圆标 | `task.assignee`、`task.priority` |
+| 3 | 当前状况简要说明 | 仅活 worker：**查看过程** | **12.2.1.1**；无内容则本行不占位 |
+
+弹窗右上角只留 **关闭**。
+
+**不要在首屏画：** 复制 ID、任务 ID 字符串、说明全文、日志、摘要全文、完成说明。
+
+原先 Banner ① 主句 / ② 辅句：能压进 12.2.1.1 的只出现在第三行，不要在三行下面再重复一句加粗主句。下表仍说明各状态第三行用哪句（权威短句以 12.2.1.1 为准；详情可比卡片略长但仍单行截断）。
+
+**B 附属（不算第四行身份）**
+
+| 槽 | 何时画 | 字段 |
+|---|---|---|
+| 诊断 | `diagnostics[]` 非空 | 产品中文一句，不用英文 `title` |
+| 查看过程 | 已画在第三行末，此处不重复 | — |
+
+---
+
+**第三行文案（短句以 12.2.1.1 为准；不要在三行下再画一块加粗 Banner）**
+
+| 状态 | 第三行 | 详情可点/可加长（仍单行） | 字段 |
+|---|---|---|---|
+| todo 等父 | `等待「{标题}」` | 父任务名可点；≥3 个写「等待 n 个父任务」 | 适配 `parents[]`，status 不是 done/archived |
+| todo 可入队 | （空，折叠） | — | `status=todo` 且无未完成父 |
+| scheduled | `等：{reason}` 或「等待时间窗口」 | — | 最近 `events.kind=scheduled` 的 `payload.reason` |
+| ready 未指派 | 需先指派负责人 | — | `assignee` 空 |
+| ready 已指派 | 等待调度领取 | stranded 时改「调度较久未领取」 | `status=ready`；`diagnostics[].kind==stranded_in_ready` |
+| `is_impl_running` | 已运行 {本次时长} | 行末 **查看过程** | **`current_run.started_at`**（不要 `task.started_at`） |
+| `status=review` | 通过后将自动完成 | — | 标签已是评审中 |
+| `is_review_run` | 通过后将自动完成 / 评审已运行时长 | 行末 **查看过程** | 同实施 running |
+| `status=blocked` 人工 | `{kind}：{reason}` | — | 最近 `blocked` 事件 + `block_kind` |
+| `status=blocked` 熔断 | 连续失败已停止 | — | `gave_up` 或 `last_failure_error` |
+| `status=done` | 摘要首句 | — | `latest_summary` |
+| `status=archived` | （空，折叠） | 曾 complete 过可用摘要首句 | `status` |
+
+不要把完整依赖表、日志、摘要全文塞进第三行。诊断走 B，不进第三行。
+
+---
+
+**任务 Tab（同一顺序）**
+
+| 顺序 | 块 | 展示 | 字段 | 空态 |
+|---|---|---|---|---|
+| 1 | **任务 ID** | 等宽完整 id + **复制** | `task.id` | 必显。复制成功轻提示「已复制」。archived 也可复制 |
+| 2 | 任务说明 | 全文 | `task.body` | 空则不画 |
+| 3 | 依赖 | 父/子每行：标题 + 8.3.1 状态；未完成父可 ⏳；可点 | 父：`parents[{id,title,status}]`；子：`child_results[{id,title,status}]` | 无父「无父任务」；无子「无子任务」；都无则整块不画 |
+| 4 | 工作目录 | 路径 +「在工作空间打开」 | `task.workspace_kind`、`task.workspace_path` | 「未绑定」。不扫盘 |
+| 5 | 时间 | **创建时间**必显；有则「由 xxx 创建」；有当前 run 时多一行 **本次开始**；有 `completed_at` 再加「完成于」 | `task.created_at`、`task.created_by`；本次开始=`current_run.started_at`；完成于=`task.completed_at` | 无当前 run 不画本次开始；未 complete 过不画完成于 |
+| 6 | 失败 | 连续失败 n 次 + 错误截断 | `consecutive_failures`、`last_failure_error` | n=0 且无 error：不画 |
+| 7 | 高级 | 默认折叠 | `claim_lock` `claim_expires` `worker_pid` `skills` `model_override` `max_retries` `goal_mode` | 折叠 |
+
+禁止：仅 review 的「评审说明」块（已在首屏第三行）。禁止本 Tab 插入日志。禁止把 ID 再放进高级折叠或首屏。
+
+---
+
+**过程 Tab（同一顺序）**
+
+| 顺序 | 块 | 待办处女卡 | 实施 running | 等待 review | 评审 worker running |
+|---|---|---|---|---|---|
+| 1 | 当前执行 | 一行「尚未执行」 | 高亮 `current_run.profile` / 开始时间 / running | 一行「等待评审领取」 | 高亮评审 run，标「评审」 |
+| 2 | 运行日志 | **不请求** `/log`，不画块 | **请求** tail，默认展开 | 可折「实施日志」（旧文件），不要写「正在评审」 | **请求** tail，标题「评审日志」 |
+| 3 | 历史执行 | `runs[]` 空则不画 | 当前 run 以外，默认折 | 实施 run（如 outcome=`review_requested`） | 实施 run + 更早 |
+| 4 | 事件 | 人协作以动态为主，此处可折 | `claimed`/`spawned`；心跳合成一条 | 突出 `review_requested` | 同上 + 本 run claimed |
+
+自动流转（领取/spawn/评审/失败）**只在本 Tab 的事件块**，不要铺到项目动态。heartbeat 合成「心跳 n 次」。
+
+run 行用：`id, profile, status, outcome, summary, error, started_at, ended_at`。`metadata` 只进产出。
+
+---
+
+**产出 Tab（始终有）**
+
+| 顺序 | 块 | 字段 | 空态 |
+|---|---|---|---|
+| 1 | 执行摘要 | `task.latest_summary`；review 可用 `review_requested.payload.summary` 后备 | 无则不画该块 |
+| 2 | 产出文件 | `attachments[]`：`id, filename, size, content_type` | 无则不画 |
+| 3 | 结构化事实 | 最近 **已结束** run 的 `metadata` | 无则不画空 JSON。当前 in-flight 不画 |
+| 4 | 完成说明 | `task.result` | 无则不画 |
+| 5 | 子任务产出 | `child_results[]` 中有 summary/result 的项 | 无则不画 |
+
+五块都空：仅「暂无产出」。不要为当前 running 画空摘要卡。
+
+---
+
+**评论 Tab**
+
+`comments[]`：`author, body, created_at`。空列表 + 输入。角标 `comments.length`，0 不显示数字。`archived` 去掉输入，标注只读。
+
+---
+
+**D Footer（左右布局相同）**
+
+| 画面 | 主按钮（右） | 次要（左） | 更多 | 禁止 |
+|---|---|---|---|---|
+| todo 等父 | 加入执行队列 **禁用** | 转交（无负责人则「分配负责人」）、归档 | — | 完成、阻塞、催促 |
+| todo 可入队 | 加入执行队列 | 转交 / 分配负责人、归档 | — | 完成、阻塞、直接 running |
+| scheduled | 激活（unblock，落地 ready 时再 dispatch） | 转交、归档 | — | 催促（未激活无效）、完成、阻塞 |
+| ready 未指派 | **分配负责人** | 归档；催促置灰不画或禁用 | — | 催促装成已开始 |
+| ready 已指派 | 催促执行（仅 `POST /dispatch`） | 转交、阻塞、归档 | — | `PATCH running`、claim、完成 |
+| `is_impl_running` | 完成（L3） | 阻塞、转交（须 reclaim）、归档 | 收回执行 | 打回、无 reclaim 改派 |
+| `is_review_ui` | **无** | **无** | **无** | 完成、打回、阻塞、催促、转交、归档 |
+| `status=blocked` | **重启**（unblock） | 转交、归档 | — | 完成、再阻塞、完善后继续、更新阻塞说明 |
+| 踢回 `triage` | **完善后继续** | 转交、归档 | — | 重启 / unblock、decompose、完成 |
+| `status=done` | **创建后续任务** | 补录结果、归档 | — | reopen、完成、重启、转交 |
+| `status=archived` | **无** | **永久删除** | — | 改派、补录、评论写入、重启 |
+
+权威与原因见 **12.2.3**。守卫细节见 12.8.0。
+
+**待办为对齐进行中而改的点：** 默认任务 Tab；产出 Tab 始终占位；任务 Tab 不重排；过程 Tab 改用四块空态而不是另一页。**进行中为对齐待办而改的点：** 默认不再是过程/产出；日志只在过程 Tab，首屏第三行用「查看过程」跳转。**已完成：** 默认产出 Tab；无「查看过程」；补录走 `edit_completed_task_result` 而非 PATCH。**首屏：** 与卡片同款三行；复制 ID 只在任务 Tab。
 
 **信息分层（自上而下）：**
 
 
+
 | 层级     | 名称              | 默认可见性                | 职责                            |
 | ------ | --------------- | -------------------- | ----------------------------- |
-| Header | 标题 + 状态徽章 + 负责人 | 固定                   | 任务身份                          |
-| ①      | **当前状况**        | 始终可见                 | Status Banner：阻塞原因、诊断、最新产出、进度 |
+| Header | 卡片同款三行（标题+标签 / 专家+优先级 / 简要说明） | 固定 | 任务身份；现在怎么了在第三行 |
+| ①      | **当前状况**        | 即第三行；诊断有则贴在三行下 | 与卡片 12.2.1.1 同一套短句 |
 | ②      | **执行详情**        | Running/Blocked 默认展开 | runs 时间线、events 时间线、运行日志      |
 | ③      | **任务上下文**       | 默认展开                 | 说明、依赖、工作目录、配置元数据              |
 | ④      | **协作**          | 固定底部输入框上方            | 评论列表 + 添加评论                   |
@@ -1337,11 +2011,10 @@ Hermes 已提供批量 graph（`task_graph_contexts`）和事件表，不必新�
 ```text
                     ┌ 蒙层 40% ─────────────────────────────────┐
                     │  ┌─ 任务详情  800 × ≤85vh ─────────────┐  │
-                    │  │ 设备关联分析              [复制ID] [✕] │  │  固：身份
-                    │  │ [Blocked]  @设备运维总监 · 高优先级    │  │
-                    │  ├───────────────────────────────────────┤  │
-                    │  │ ⚠ 需人工介入：缺少 SPC 原始数据权限    │  │  固：状况
-                    │  │   类型：capability · 已重试 2/2 次    │  │
+                    │  │ 设备关联分析              [待介入] [✕] │  │  1 同卡片
+                    │  │ @设备运维总监                    (高) │  │  2 同卡片
+                    │  │ 缺能力：缺少 SPC 原始数据权限          │  │  3 同卡片
+                    │  │ ⚠ 诊断一句（有才画）                  │  │  可选
                     │  ├───────────────────────────────────────┤  │
                     │  │ [任务]  [过程]  [产出]  [评论 3]      │  │  固：Tab 栏
                     │  │                                       │  │
@@ -1355,9 +2028,11 @@ Hermes 已提供批量 graph（`task_graph_contexts`）和事件表，不必新�
 
 
 
-##### ① 当前状况（Status Banner）
+##### ① 当前状况（首屏第三行）
 
-Header 下方固定一条 **Status Banner**，按任务状态与子状态动态渲染。用户打开弹窗时无需滚动即可看到「现在怎么了」。
+「现在怎么了」画在固区 A 第三行，与卡片 **12.2.1.1** 同一套短句，不要在三行下面再做一块加粗 Banner。诊断有则贴在三行下。权威排版见 **12.2.2.3**。
+
+下表是各状态第三行还对应哪些 Hermes 字段（文案以 12.2.1.1 为准）：
 
 
 | 看板列 / 子状态     | Banner 内容                          | Hermes 数据来源                                                       |
@@ -1410,13 +2085,13 @@ block_kind 产品层中文映射：
 
 outcome 产品层中文映射（常用）：`completed`→完成、`blocked`→阻塞、`crashed`→崩溃、`timed_out`→超时、`spawn_failed`→启动失败、`gave_up`→已放弃、`reclaimed`→已回收、`scheduled`→已排期。
 
-**执行事件（events）——单任务时间线**
+**执行事件（events）——单任务自动流转（过程 Tab）**
 
-runs 下方展示该任务的 **执行事件** 时间线（与项目动态 Tab 互补，非重复）：
+与项目 **动态 Tab** 分工：这里画调度/worker 怎么跑；动态只画人协作（第 9 节）。不要把 `claimed`/`spawned`/心跳铺到项目动态。
 
-- MVP 展示高频 kind：`created` / `spawned` / `assigned` / `completed` / `blocked` / `unblocked` / `crashed` / `timed_out` / `gave_up` / `decomposed`
-- 每条：时间 + 中文标签 + payload 关键字段（如 `reason`、`assignee`、`exit_code`）
-- 其余 kind 归入「其他事件」折叠或暂不展示（完整清单见 13.5.5）
+- 过程 Tab 高频 kind：`claimed` / `spawned` / `promoted` / `review_requested` / `changes_requested` / `blocked` / `unblocked` / `crashed` / `timed_out` / `gave_up`；heartbeat 合成「心跳 n 次」
+- 每条：时间 + 中文标签 + payload 关键字段
+- 其余 kind 归入「其他事件」折叠（分流见 9.7 / 13.5.5）
 
 数据来源：`task_events`（`show` / `GET /tasks/{id}` 的 `events[]`）。
 
@@ -1451,12 +2126,10 @@ Hermes 中两个字段来源不同，Done 状态分开展示：
 
 | 区块        | 内容                                       | Hermes 来源                                                                | MVP    |
 | --------- | ---------------------------------------- | ------------------------------------------------------------------------ | ------ |
-| **任务说明**  | body 全文                                  | `tasks.body`                                                             | P0     |
-| **依赖关系**  | 父/子任务列表，未完成父任务标注 ⏳，可点击跳转                 | `task_links` + `parent_ids` / `child_ids`                                | P0     |
-| **父任务产出** | 已完成父任务旁「查看摘要」展开                          | 先读 `links.parents`，再批量获取父任务 `latest_summary`；现有单任务响应不直接返回 parent results | P1     |
-| **子任务进度** | 「N/M 已完成」+ 子任务状态列表（有 children 时）         | `child_ids` + 批量查 status                                                 | P1     |
-| **工作目录**  | workspace 路径 + 「在工作空间中打开」链接              | `workspace_kind` / `workspace_path`                                      | P0     |
-| **配置元数据** | 创建者、开始/完成时间、总耗时、Skills、连续失败、最近错误         | `tasks.`*                                                                | P0     |
+| **任务说明**  | body 全文                                  | `task.body`                                                             | P0     |
+| **依赖关系**  | 父列表 + 子列表，**每行标题 + 8.3.1 状态**；未完成父任务可 ⏳，可点击跳转 | 父：适配 `parents[{id,title,status}]`；子：`child_results[{id,title,status}]`。权威见 12.2.2.1 | P0     |
+| **创建时间**  | 本地日期时间；有 `created_by` 则附「由谁创建」     | `task.created_at`（必显）、`task.created_by`（可空）                         | P0     |
+| **工作目录**  | workspace 路径 + 「在工作空间中打开」链接              | `task.workspace_kind` / `task.workspace_path`                                      | P0     |
 | **评审信息**  | 仅 review：「系统自动评审中」；评审通过→done，不通过→running | 固定文案 + status                                                            | P0     |
 | **任务附件**  | 只读列表 + 下载（有附件时）                          | `task_attachments` / `GET .../attachments`                               | P1     |
 | **高级信息**  | claim_lock、worker_pid、idempotency_key 等  | `tasks.`*                                                                | 默认折叠隐藏 |
@@ -1484,16 +2157,18 @@ Hermes 中两个字段来源不同，Done 状态分开展示：
 
 ##### 数据接口
 
-弹窗打开时，产品层一次拉取任务详情（避免 N+1）：
+字段级对照以 **12.2.2.1** 为准。弹窗打开时一次拉取（禁止对每个父任务再 GET）：
 
 ```text
-# 推荐：复用 Kanban dashboard API（与 Hermes 原生 dashboard 一致）
 GET /api/plugins/kanban/tasks/{task_id}?board=<project_slug>
 
-# 返回含：task、comments、events、attachments、links、runs、diagnostics（若有）
+# Hermes 返回：task、comments、events、attachments、
+#   links.parents/children（仅 id）、child_results（子任务含 title+status）、
+#   runs、diagnostics（挂在 task 上）
+# 适配附加：parents[{id, title, status}]  — 与 child_results 对称，供任务 Tab 依赖行
 ```
 
-运行日志按需懒加载（展开日志区或点击刷新时）：
+运行日志按需懒加载（过程 Tab 展开或刷新；从未 spawn 不请求）：
 
 ```text
 GET /api/plugins/kanban/tasks/{task_id}/log?board=<project_slug>&tail=65536
@@ -1603,8 +2278,8 @@ hermes kanban --board <project_slug> runs <task_id>
 | 表面 | 始终可看 | 有才显示 | 任何状态都不看 |
 |---|---|---|---|
 | **卡片** | 三行：标题+右上角标签、专家+优先级圆标、简要说明（见 12.2.1） | 第三行按 12.2.1.1 有才显示 | 操作按钮、`⋯`、评论数、完整说明、日志、run 明细 |
-| **详情 Header** | 标题、状态徽章、负责人、优先级、复制 ID | — | Agent 对话 transcript |
-| **详情 ③ 上下文** | 任务说明 `body`、父/子依赖、工作目录、创建时间 | 父任务产出摘要、子任务进度、附件（P1）；失败计数仅 `consecutive_failures > 0` 时突出 | claim_lock / worker_pid / idempotency_key（默认藏在「高级信息」） |
+| **详情 Header** | 卡片同款三行 + 关闭 | 诊断 | 复制 ID、任务 ID、Agent transcript |
+| **详情 ③ 任务 Tab** | **任务 ID + 复制**、说明、父/子依赖（每行带状态）、工作目录、**创建时间** | 失败次数有才显示 | 英文 status、扫盘文件列表、把 ID 再放到首屏 |
 | **详情 ④ 协作** | 评论列表 | — | 目标拆解失败的 specify（那在发起记录） |
 | **详情 ②** | 事件时间线（至少有 `created`） | 有 runs 才列出执行记录；有 spawn 过才拉日志 | 项目动态 Tab 的全局时间线副本 |
 
@@ -1637,8 +2312,8 @@ hermes kanban --board <project_slug> runs <task_id>
 
 | 区块 | A 等父任务 | B 可入队 | C 已排期 | D ready | E running | F review | G blocked | H 反复阻塞 | I done | J archived |
 |---|---|---|---|---|---|---|---|---|---|---|
-| **Banner** | ● 等待父任务列表（可点） | ● 可加入执行队列 | ● 已排期 + 原因 | ● 等待调度；未指派则提示先指派 | ● 时长 + Run# + 心跳 | ● 系统自动评审中 | ● 原因 + kind + 失败次数 | ● 反复阻塞 + kind + 次数 + 最近原因 | ● 完成时间 + 摘要首行 | ● 已归档 |
-| **诊断 diagnostics** | ○ 有则 Banner 下 | ○ | ○ | ○ | ○ | ○ | ● 建议重启/转交 | ● 建议完善说明 | ○ | ○ |
+| **第三行** | ● 等待「父标题」（可点） | ●（空，折叠） | ● 等：原因 | ● 等待调度 / 需先指派 | ● 已运行 {时长} | ● 通过后将自动完成 | ● `{kind}：{原因}` | ● 同一原因已反复 n 次 | ● 摘要首句 | ●（空，折叠） |
+| **诊断 diagnostics** | ○ 有则三行下 | ○ | ○ | ○ | ○ | ○ | ● 建议重启/转交 | ● 建议完善说明 | ○ | ○ |
 | **执行摘要 latest_summary** | — 通常无 | — | — | ○ 若有上次 run | ○ 当前/上次 handoff | ◐ 评审前产出 | ◐ 失败前摘要 | ◐ 历次失败摘要 | ● 独立成块 | ◐ 只读 |
 | **完成说明 result** | — | — | — | — | — | — | — | — | ● 与摘要分开；可空 | ○ 只读 |
 | **runs** | ○ 空态「尚未执行」 | ○ 空态 | ○ 空态 | ○ 收回/重启后才有 | ● 当前 run 高亮展开 | ◐ 含评审 run | ● 最近失败 run 展开（error） | ● 历次 blocked run | ◐ 全部历史 | ◐ 只读 |
@@ -1674,8 +2349,8 @@ hermes kanban --board <project_slug> runs <task_id>
 
 | 类别 | 给用户的意思 | 包含项（共 18） | 数据从哪来 |
 |---|---|---|---|
-| **1 身份** | 这是哪条任务 | 标题、状态徽章、负责人、优先级（+ 复制 ID） | `task.*` |
-| **2 当前状况** | 现在卡在哪 / 在干什么 | Banner；诊断 `diagnostics[]` | status / events / diagnostics |
+| **1 身份** | 这是哪条任务 | 标题、状态徽章、负责人、优先级（三行同卡片；ID 在任务 Tab） | `task.*` |
+| **2 当前状况** | 现在卡在哪 / 在干什么 | 首屏第三行；诊断 `diagnostics[]` | status / events / diagnostics |
 | **3 产出** | 专家交出来的东西 | 执行摘要；产出文件；结构化事实；完成说明；子任务产出 | `latest_summary` / `attachments` / `run.metadata` / `result` / `child_results` |
 | **4 过程** | 怎么跑的、好不好查 | 执行记录 runs；事件 events；运行日志 | `runs[]` / `events[]` / `/log` |
 | **5 定义** | 当初要它做什么 | 任务说明；依赖；工作目录；时间与配置元数据；失败次数；评审说明 | `body` / links / workspace / task 元数据 |
@@ -1731,11 +2406,10 @@ Footer 操作不算展示内容，见 12.2.3。Agent 对话、工作目录扫盘
 
 ```text
 ┌──────────────────────────────────────────────┐
-│ 标题（最多 2 行）              [复制ID] [✕]   │  固区 A  身份
-│ [状态徽章]  @负责人 · 高/中/低                  │
-├──────────────────────────────────────────────┤
-│ Banner 1–3 行（现在怎么了）                    │  固区 B  状况
-│ 诊断 0–1 行（有 diagnostics 才出现）           │
+│ 标题                               [待介入] [✕]│  固区 A  与卡片同行 1
+│ @负责人                                 (高)  │           同行 2
+│ 缺能力：缺少 SPC 原始数据权限     [查看过程]  │           同行 3；无则折叠
+│ ⚠ 诊断一句（有才画）                          │  可选，不算第四行身份
 ├──────────────────────────────────────────────┤
 │ [任务] [过程] [产出] [评论 3]                  │  固区 C  Tab 栏
 │ ┌──────────────────────────────────────────┐ │
@@ -1756,24 +2430,20 @@ Footer 操作不算展示内容，见 12.2.3。Agent 对话、工作目录扫盘
 
 | 位置 | Tab | 为什么在这 |
 |---|---|---|
-| 1 | **任务** | 先交代要做什么。未执行时默认就在这，和最左对齐 |
-| 2 | **过程** | 接着是怎么跑的。running / blocked 默认在这，紧挨任务 |
-| 3 | **产出** | 最后才有结果，放在过程右边。没内容则整 Tab 拿掉，右边的「评论」左移补位 |
-| 4 | **评论** | 永远最右，和常见详情页一致 |
+| 1 | **任务** | 先交代要做什么。待办与进行中默认都在这 |
+| 2 | **过程** | 怎么跑的。不自动切过来；第三行「查看过程」可跳入 |
+| 3 | **产出** | 交了什么。**始终占位**，空则一行「暂无产出」 |
+| 4 | **评论** | 永远最右 |
 
-只改 **默认选中** 和 **产出显隐**，不要按状态把 Tab 重排（例如 done 把产出挪到最左）。位置一变，用户会找不到。
-
-产出隐藏后的栏是：`任务 | 过程 | 评论`。不要留空坑。
-
-不采用「产出 → 过程 → 任务」：未执行会隐藏产出，最左变成过程，但默认却是任务，栏和阅读起点对不上。
+待办与进行中不要按状态重排 Tab，也不要把产出从栏上拿掉。done 仍可默认停在产出。权威排版见 **12.2.2.3**。
 
 **固区排版（不进 Tab）**
 
 | 固区 | 类别 | 排版 | 不放进这里 |
 |---|---|---|---|
-| **A 顶栏** | 1 身份 | 第一行：标题左、复制 ID + 关闭右。第二行：状态徽章、`@负责人`（无则「未指派」）、优先级点。标题超 2 行截断，完整标题悬停可见 | 说明全文、摘要、日志 |
-| **B 状况条** | 2 当前状况 | 紧贴顶栏。主文案 1 行加粗，辅文案 1–2 行（父任务链接、kind、心跳、失败次数）。诊断有则再加 1 行，可点建议 | 完整 runs、完整依赖表（等父任务 Banner 只列未完成父任务名，全表在「任务」Tab） |
-| **C Tab 栏** | — | 从左到右固定 `任务 → 过程 → 产出 → 评论`。当前项下划线。评论带数字。产出可隐藏，隐藏后不留空位 | 不要做成左右分栏；不要按状态重排 Tab |
+| **A 顶栏** | 1+2 身份与状况 | **与卡片同款三行**（12.2.1）。右上角只留关闭，不要复制 ID。第三行 = 12.2.1.1；无则折叠。活 worker 时第三行末「查看过程」 | 说明全文、摘要、日志、任务 ID |
+| **B 诊断** | 2 当前状况 | 仅 `diagnostics[]` 非空时紧贴三行下画一行 | 完整 runs、完整依赖表（等父任务第三行只列未完成父任务名，全表在「任务」Tab） |
+| **C Tab 栏** | — | 固定 `任务 → 过程 → 产出 → 评论`。产出始终在 | 按状态重排；拿掉产出 |
 | **D 底栏** | 操作 | 左次要、右主按钮，见 12.2.3。review 底栏空白 | 评论输入（放「评论」Tab 底） |
 
 Esc / 点蒙层关弹窗；有 L3 时先关 L3。固区高度合计大约 200–240px，Tab 正文至少剩半个弹窗。
@@ -1782,35 +2452,33 @@ Esc / 点蒙层关弹窗；有 L3 时先关 L3。固区高度合计大约 200–
 
 | 顺序 | Tab | 对应类别 | 内里从上到下 | 何时显示这个 Tab |
 |---|---|---|---|---|
-| 1 | **任务** | 5 | 等父任务 / 反复阻塞把 **依赖或说明提到最前**。其余：说明 → 依赖 → 工作目录 → 时间配置 → 失败次数（有）→ 评审说明（仅 review） | **始终有** |
-| 2 | **过程** | 4 | running：日志（默认展开）→ 当前 run → 事件。其它：runs → 日志（有才画）→ 事件 | **始终有**（至少有 `created`）。未执行时正文一行「尚未执行」+ 创建事件 |
-| 3 | **产出** | 3 | 执行摘要 → 产出文件 → 结构化事实 → 完成说明（有值）→ 子任务产出 | **有任一项才出现**。A/B/C 未执行且无附件/子结果则整 Tab 隐藏 |
-| 4 | **评论** | 6 | 列表 + 底部输入（archived 只读、无输入） | **始终有**。Tab 上显示条数 |
+| 1 | **任务** | 5 | **任务 ID + 复制** → 说明 → 依赖（带状态）→ 工作目录 → 创建时间（+ 本次开始）→ 失败（有）→ 高级 | **始终有** |
+| 2 | **过程** | 4 | 当前执行 → 运行日志 → 历史执行 → 事件 | **始终有** |
+| 3 | **产出** | 3 | 摘要 → 文件 → 事实 → 完成说明 → 子任务产出；全空则「暂无产出」 | **始终有** |
+| 4 | **评论** | 6 | 列表 + 底部输入 | **始终有** |
 
 **打开时默认落在哪个 Tab**
 
-| 状态 | 默认 Tab | 产出 Tab | 原因 |
-|---|---|---|---|
-| A 等父任务 | **任务** | 通常隐藏 | 要看依赖，不看日志 |
-| B 可入队 | **任务** | 通常隐藏 | 读说明后入队 |
-| C 已排期 | **任务** | 通常隐藏 | 状况在 Banner，说明在任务 |
-| D ready | **任务** | 有上次摘要才出现 | 等调度，定义仍是主体 |
-| E running | **过程** | 仅有上次产出时出现 | 主阅读是实时日志 |
-| F review | **产出**（无摘要则 **任务**） | 有评审前摘要则显示 | 先看交了什么，Banner 已说明在评审 |
-| G blocked | **过程** | 有失败前摘要则显示 | 先看 error 和日志 |
-| H 反复阻塞 | **任务** | 有则显示 | 完善说明依据在 body |
-| I done | **产出** | **必显** | 主阅读是摘要和文件 |
-| J archived | **产出**（无则 **任务**） | 有则显示 | 只读看当时交了什么 |
+| 状态 | 默认 Tab | 原因 |
+|---|---|---|
+| A–D 待办 | **任务** | 与进行中同一骨架 |
+| E 实施 running | **任务** | 时长在第三行；日志在过程 |
+| F / F2 评审 | **任务** | 第三行「通过后将自动完成」；摘要在产出 |
+| G blocked | **任务** | 第三行已是原因 |
+| H 反复阻塞 | **任务** | 说明在任务 Tab |
+| I done | **产出** | 主阅读是摘要 |
+| J archived | **产出**（无则任务） | 只读快照 |
 
-切换 Tab 不关弹窗、不丢 Footer。从「等父任务」Banner 点父任务：关掉当前详情，打开父任务详情（默认按其状态选 Tab）。
+切换 Tab 不关弹窗、不丢 Footer。从第三行点父任务：关掉当前详情，打开父任务详情（默认按其状态选 Tab）。
 
 **不要：**
 
-- 把 Banner 或 Footer 放进某个 Tab。
-- 未执行还留着空的「产出」Tab。
-- running 默认停在「产出」并画空卡片。
-- 再加第 5 个 Tab（附件、日志单独成 Tab 都不做；附件归产出，日志归过程）。
+- 把 Footer 放进某个 Tab。
+- 在首屏再画一块加粗 Banner，或把复制 ID 放回顶栏。
+- 未执行还画空的「执行摘要」大卡片（产出空态只用一行「暂无产出」）。
+- running 默认停在「过程」或「产出」。
 - 按状态把 Tab 左右重排。
+- 再加第 5 个 Tab。
 
 ###### 原型怎么体现「可看」差异
 
@@ -1842,25 +2510,25 @@ Esc / 点蒙层关弹窗；有 L3 时先关 L3。固区高度合计大约 200–
 | --- | --- |
 | 宽度 | 800px（允许 720–880） |
 | 高度 | 内容自适应，上限 85vh |
-| Header / Banner / Footer | sticky，不随内容滚走 |
+| Header 三行 / Footer | sticky，不随内容滚走 |
 | 滚动 | 仅 ②③④ |
 | 主按钮 | Footer 最右；次要按钮在左 |
 | 关闭 | ✕、点蒙层、Esc（有 L3 时只关 L3） |
 
 ##### 各状态差异一览
 
-| # | 底层 status | 看板列 | Banner（首屏必须看见） | ② 默认 | Footer 主按钮 | Footer 次要 | 原型重点 |
+| # | 底层 status | 看板列 | 第三行（首屏必须看见） | ② 默认 | Footer 主按钮 | Footer 次要 | 原型重点 |
 |---|---|---|---|---|---|---|---|
-| A | todo（有未完成父任务） | 待办 | 等待父任务：T3, T5（可点开父任务） | 折叠 | 加入执行队列 **置灰** | 分配负责人、归档 | 置灰原因写在 tooltip；卡片上不要画这个按钮 |
-| B | todo（父依赖已满足） | 待办 | 可加入执行队列 | 折叠 | **加入执行队列** | 分配负责人、归档 | 点主按钮后 Banner 切到 ready，不写成执行中 |
-| C | scheduled | 待办 | 已排期 + 原因 | 折叠 | **激活** | 归档 | 激活 = unblock，不是 dispatch |
-| D | ready | 待办 | 可执行，等待调度；无负责人时「需先指派」 | 折叠 | **催促执行**（无负责人则主按钮改为分配负责人） | 转交、标记阻塞、归档 | 禁止写成「开始运行」 |
-| E | running | 进行中 | 已运行 3m12s · Run #2 · heartbeat 12s 前 | **展开** | **完成**（开 L3） | 标记阻塞、转交、归档 | 当前 run 高亮；日志在正文不在 Footer |
-| F | review | 进行中 | 系统自动评审中 | 展开 runs，日志可看 | 无 | 无 | Footer 空；只读 + 评论 |
-| G | blocked | 暂停 | 需人工介入：原因 + kind + 失败次数 | **展开** | **重启** | 更新说明、转交、归档 | 首屏就是原因 |
-| H | triage（系统踢回） | 暂停 | 反复阻塞：kind + 次数 + 最近原因 | **展开** | **完善后继续**（开 L3） | 转交、归档 | **不要画重启** |
-| I | done | 已完成 | 完成时间 + 摘要首行 | 展开产出与日志 | **创建后续任务** | 补录结果、归档 | 执行摘要 ≠ 完成说明 |
-| J | archived | 已完成 | 已归档 | 折叠 | 无 | **永久删除** | 字段只读 |
+| A | todo（有未完成父任务） | 待办 | 等待「父标题」（可点） | 折叠 | 加入执行队列 **置灰** | 分配负责人、归档 | 置灰原因写在 tooltip；卡片上不要画这个按钮 |
+| B | todo（父依赖已满足） | 待办 | （空，折叠） | 折叠 | **加入执行队列** | 分配负责人、归档 | 点主按钮后第三行改成「等待调度领取」，不写成执行中 |
+| C | scheduled | 待办 | 等：原因 / 等待时间窗口 | 折叠 | **激活** | 归档 | 激活 = unblock，不是 dispatch |
+| D | ready | 待办 | 等待调度领取；无负责人时「需先指派负责人」 | 折叠 | **催促执行**（无负责人则主按钮改为分配负责人） | 转交、标记阻塞、归档 | 禁止写成「开始运行」 |
+| E | running | 进行中 | 已运行 {时长}；行末查看过程 | **展开** | **完成**（开 L3） | 标记阻塞、转交、归档 | 当前 run 高亮；日志在过程 Tab |
+| F | review | 进行中 | 通过后将自动完成 | 展开 runs，日志可看 | 无 | 无 | Footer 空；只读 + 评论 |
+| G | blocked | 暂停 | `{kind}：{原因}` | **展开** | **重启** | 更新说明、转交、归档 | 第三行就是原因；不要另画加粗 Banner |
+| H | triage（系统踢回） | 暂停 | 同一原因已反复 n 次 | **展开** | **完善后继续**（开 L3） | 转交、归档 | **不要画重启** |
+| I | done | 已完成 | 摘要首句 | 展开产出与日志 | **创建后续任务** | 补录结果、归档 | 执行摘要 ≠ 完成说明；完成时间在任务 Tab |
+| J | archived | 已完成 | （空，折叠） | 折叠 | 无 | **永久删除** | 字段只读；ID 仍在任务 Tab 可复制 |
 
 目标 root（产品层 triage）**不画看板详情弹窗**，只在发起记录里看。
 
@@ -1954,10 +2622,10 @@ Esc / 点蒙层关弹窗；有 L3 时先关 L3。固区高度合计大约 200–
 │ ▾ 运行日志                                        │
 │ ── 评论 ──                                       │
 ├══════════════════════════════════════════════════┤
-│ [更新阻塞说明] [转交] [归档]              [重启]   │
+│ [转交] [归档]                              [重启]   │
 ```
 
-不要在 Blocked 放「完成」。重启 = `unblock`，不是踢回 triage 的「完善后继续」。
+不要在 Blocked 放「完成」，也不要「更新阻塞说明」（`block_task` 不接受已 blocked；改说明走任务 Tab，补充走评论）。重启 = `unblock`，不是踢回 triage 的「完善后继续」。
 
 ##### H. 暂停 · 反复阻塞（系统踢回 triage）
 
@@ -2028,74 +2696,115 @@ Esc / 点蒙层关弹窗；有 L3 时先关 L3。固区高度合计大约 200–
 | L3 | Esc / 取消 | 只关 L3，回到详情 |
 
 
-#### 12.2.3 详情弹窗操作按钮（按状态）
+#### 12.2.3 详情 Footer：各状态留什么、为什么
 
-卡片上没有任何操作。打开详情后，**Footer 只放会改变任务命运的按钮**。评论、日志、依赖编辑放在弹窗正文，不重复进 Footer。
+卡片上没有任何操作。Footer **只放会改变这条任务命运的按钮**（推进、改派、暂停、归档、删除）。阅读类动作不进 Footer：评论在评论 Tab，日志在过程 Tab，ID 复制在任务 Tab，改标题/说明/依赖在任务 Tab。
 
-**Footer 布局：**
+**布局（各状态相同）：**
 
 ```text
 [更多 ▾]  [次要…]                         [主按钮]
 ```
 
-- **主按钮**：最右，一颗主色，推进当前状态该做的那一步。没有推进步骤时不画主按钮。
-- **次要按钮**：主路径的旁路（转交、阻塞、归档等），描边或文字按钮。
-- **更多**：低频项（排期、收回执行、移动状态）。`review` / `archived` 不展示更多。
-- **评论**：永远在协作区输入框，Footer 不放「添加评论」。
-- **日志 / runs**：永远在执行详情区，Footer 不放「查看运行日志」。
+- **主按钮**：最右，一颗主色。只表达「这一态该做的下一步」。没有下一步就不画（review / archived）。
+- **次要**：左边，描边。旁路：转交、阻塞、归档。
+- **更多**：MVP **只给实施 running 放「收回执行」**。不要用更多塞排期、移动状态、添加依赖。
+- 无负责人时文案用「分配负责人」；已有负责人用「转交」。二者都是 `assign_task`（running 须 `reclaim`）。
 
-**不进 Footer 的原因：** 评论和日志是阅读动作；依赖在「任务上下文」里改更直观；「移动状态」容易被点成 PATCH running，收进更多并按 12.7 过滤选项。
+`is_review_ui`（`status=review` 或评审 worker 已 claim 成 running）走 **F**，不要用实施 running 的完成/阻塞。
 
-##### 各状态放什么、为什么
+---
 
-| 状态 | 主按钮 | 次要（左） | 更多 | 正文承担 | 不出现 | 原因 |
-|---|---|---|---|---|---|---|
-| **A todo 等父任务** | **加入执行队列**（置灰） | 分配负责人、归档 | 添加依赖 | 评论；依赖列表点进父任务 | 完成、阻塞、催促 | Hermes 不允许 todo 上 `block`/`complete`；父依赖未完成 `promote` 会 409。置灰主按钮让用户看见「下一步是入队」，而不是藏起来 |
-| **B todo 可入队** | **加入执行队列** | 分配负责人、归档 | 添加依赖、排期 | 评论 | 完成、阻塞、直接 running | `PATCH ready` + `POST /dispatch`。入队后 Banner 变 ready，不要写成「已开始执行」 |
-| **C scheduled** | **激活** | 归档 | — | 评论 | 催促执行、完成、阻塞 | 激活 = `unblock`，按父依赖落到 ready 或 todo。排期中 dispatcher 不会领，催促无效 |
-| **D ready** | **催促执行** | 转交、标记阻塞、归档 | 排期、移动状态 | 评论 | PATCH running、完成 | 调度领取后才变 running。无负责人时主按钮置灰，改把「分配负责人」提成主按钮 |
-| **E running** | **完成** | 标记阻塞、转交、归档 | 收回执行 | 评论、日志、runs | 无 reclaim 的改派、再 PATCH running | 完成开 L3。转交须 reclaim（文案：将中断当前执行）。收回执行 = `reclaim` 回 ready，低频进更多 |
-| **F review** | （无） | （无） | （无） | 仅评论 + 只读 runs/日志 | 完成、打回、阻塞、重启、转交、归档 | 评审由系统 claim；用户既不能通过也不能打回。Footer 空，避免误操作 |
-| **G blocked** | **重启** | 更新阻塞说明、转交、归档 | — | 评论、日志 | 完成、再阻塞、完善后继续 | 重启 = `unblock`。Hermes 允许 complete(blocked)，产品不开放，避免跳过介入 |
-| **H 踢回 triage** | **完善后继续** | 转交、归档 | — | 评论 | **重启**、看板 decompose、完成 | `unblock` 不接受 triage。L3 只收自然语言 → `resume-from-loop` |
-| **I done** | **创建后续任务** | 补录结果、归档 | — | 评论、摘要、日志 | 重新打开同一条、完成、重启 | done 无 reopen。后续工作 `create --parent` |
-| **J archived** | （无） | **永久删除**（危险） | — | 只读评论 | 改派、重启、完善后继续、补录 | 仅 `DELETE`；二次确认 |
+**筛选原则**
 
-**ready 无负责人（D 的变体）：**
+| 问 | 留 Footer | 不留 Footer |
+|---|---|---|
+| 不按这个按钮，任务就卡死或走错？ | 主按钮 | — |
+| 改谁做 / 先停下来 / 软删除？ | 次要 | — |
+| 只是看、写评论、改说明、加依赖？ | — | 正文 Tab |
+| Hermes 允许但会跳过本态门控、或和产品模型打架？ | — | 禁止，即使 CLI 能做 |
+
+---
+
+**Hermes 允许 vs 产品保留**
+
+「Hermes 允许」看 mutator 的 `status IN (...)`。产品 MVP 只开放 B 端有意义的子集。
+
+| 动作 | Hermes 接受 | 产品 Footer | 原因 |
+|---|---|---|---|
+| 加入执行队列 `promote` / `PATCH ready` | 仅 **todo**（及 blocked，产品不用这条晋级） | 仅 todo。父未完成 **置灰**，不用 `force` | 有未完成父会 409。置灰让用户看见「下一步是入队」，而不是把按钮藏掉 |
+| 催促 `POST /dispatch` | board 级 nudge，不保证先领这张 | 仅 **ready 且已指派** | scheduled / todo 调度不会领。未指派 ready dispatcher 会跳过，催促不能装成已开始 |
+| 激活 `unblock` | 仅 **blocked / scheduled** | scheduled 主按钮；blocked 叫「重启」 | 排期不是人工介入。激活后按父依赖落 ready 或 todo；若落 ready 可再 dispatch |
+| 完成 `complete_task` | running / **ready / blocked / review** | **仅实施 running** | ready 完成会跳过执行；blocked 完成会跳过介入；review 交给系统。产品收窄 |
+| 阻塞 `block_task` | 仅 **running / ready** | ready、实施 running | **不接受** todo / scheduled / blocked / review / triage。blocked 上再点阻塞会失败 |
+| 重启 `unblock` | blocked / scheduled | **仅 blocked** 主按钮 | 踢回 triage **禁止**（接口不认）。scheduled 用「激活」避免和介入混淆 |
+| 完善后继续 `resume-from-loop` | 踢回 triage | **仅踢回 triage** 主按钮 | 不是发起目标 decompose，也不是 unblock |
+| 转交 `assign` | 除 running 有 claim 时须 reclaim；archived 源码未挡 assign，产品仍禁 | 除 review / done / archived 外可转交 | running 文案写明将中断执行。done 用「创建后续」而不是改派同一条 |
+| 归档 `archive_task` | 任意非 archived | 除 **review、archived** 外 | review 交给系统跑完；归档会中断评审。archived 下一步是硬删 |
+| 收回 `reclaim_task` | running（及仍持有 claim 的 ready/blocked） | 仅实施 running 的 **更多** | 低频、会杀 worker。转交已经 reclaim，不必再占次要 |
+| 补录 `edit_completed_task_result` | **仅 done** | done 次要 | 已 done 时 PATCH `result` 不会走到该 mutator |
+| 创建后续 `create --parent` | 任意时刻可建子任务 | **仅 done** 主按钮 | 做完才分叉。未完成请用任务 Tab 加子依赖，不要占 Footer |
+| 永久删除 `delete_archived_task` | **仅 archived** | archived 唯一按钮 | 禁止 `DELETE /tasks/{id}`（任意硬删） |
+| 排期 `schedule_task` | todo / ready / running / blocked | **不放** | 创建表单已去掉排期。CLI/worker 仍可能写出 scheduled，详情只提供「激活」 |
+| 移动状态 / `PATCH running` / claim | dashboard 直写 / dispatcher | **不放** | 伪造执行中；claim 是调度的事 |
+| 添加依赖 `link_tasks` | 无状态守卫 | **不放 Footer** | 在任务 Tab 改依赖。等父时点第三行/依赖行进父详情 |
+| 更新阻塞说明 | `block_task` **不接受已 blocked** | **不放** | 改 `body` 走任务 Tab；补充信息走评论。不要假装能改 `payload.reason` |
+| 完成/打回 review | `complete_task` / `request_changes` | **不放** | 评审 agent 自动通过或打回 |
+| reopen done | 无指令；直写会 invalidate 后代 | **不放** | 后续工作新建子任务 |
+
+---
+
+**各状态锁定**
+
+| 状态 | 主按钮 | 次要 | 更多 | 不出现（即使 Hermes 能） |
+|---|---|---|---|---|
+| **A todo 等父** | 加入执行队列 **禁用** | 转交或分配负责人、归档 | — | 完成、阻塞、催促 |
+| **B todo 可入队** | 加入执行队列 | 转交或分配负责人、归档 | — | 完成、阻塞、`PATCH running` |
+| **C scheduled** | **激活** | 转交、归档 | — | 催促、完成、阻塞 |
+| **D ready 未指派** | **分配负责人** | 归档 | — | 把催促画成已开始 |
+| **D ready 已指派** | **催促执行** | 转交、标记阻塞、归档 | — | claim、完成、排期、移动状态 |
+| **E 实施 running** | **完成**（L3） | 标记阻塞、转交（须 reclaim）、归档 | 收回执行 | 打回、无 reclaim 改派 |
+| **F `is_review_ui`** | （无） | （无） | （无） | 完成、打回、阻塞、转交、归档、催促 |
+| **G blocked** | **重启** | 转交、归档 | — | 完成、再阻塞、完善后继续、更新阻塞说明 |
+| **H 踢回 triage** | **完善后继续**（L3） | 转交、归档 | — | 重启、decompose、完成 |
+| **I done** | **创建后续任务** | 补录结果、归档 | — | reopen、完成、重启、转交 |
+| **J archived** | （无） | **永久删除**（二次确认） | — | 改派、补录、写评论、重启 |
+
+**ready 无负责人：**
 
 ```text
-[归档]  [催促执行(置灰)]              [分配负责人]
+[归档]                                      [分配负责人]
 ```
 
-催促在未指派时不假报「已开始」；dispatcher 会跳过无 assignee 的 ready。
+不要同时画启用的「催促执行」。
 
-##### 主按钮与接口（和 12.2.5 / 12.8.0 对齐）
+**原型 Footer：**
+
+```text
+A  [转交] [归档]                    [加入执行队列 disabled]
+B  [转交] [归档]                    [加入执行队列]
+C  [转交] [归档]                    [激活]
+D  [转交] [标记阻塞] [归档]          [催促执行]
+E  [更多:收回执行] [标记阻塞] [转交] [归档]  [完成]
+F  （空）
+G  [转交] [归档]                    [重启]
+H  [转交] [归档]                    [完善后继续]
+I  [补录结果] [归档]                 [创建后续任务]
+J  [永久删除]
+```
+
+主按钮接口见下表；与 12.2.5 / 12.8.0 冲突时以本节 + 12.8.0 为准。
 
 | 主按钮 | 出现在 | 调用 |
 |---|---|---|
 | 加入执行队列 | A（置灰）/ B | `PATCH ready` + `POST /dispatch` |
-| 激活 | C | `unblock`（内部再按依赖落 ready/todo） |
-| 催促执行 | D | 仅 `POST /dispatch` |
-| 完成 | E | L3 → `complete` |
-| 重启 | G | `unblock` |
+| 激活 | C | `unblock`；若落地 ready 再 `POST /dispatch` |
+| 催促执行 | D 已指派 | 仅 `POST /dispatch` |
+| 分配负责人 | D 未指派 | `assign_task` |
+| 完成 | E | L3 → `complete_task` |
+| 重启 | G | `unblock_task` |
 | 完善后继续 | H | L3 → `resume-from-loop` |
 | 创建后续任务 | I | 创建任务弹窗，预填父任务 |
-| 分配负责人 | D 无 assignee 时升为主按钮 | `assign` / 转交 |
-
-##### 原型 Footer 画法（替换卡片按钮）
-
-```text
-A  [更多] [分配负责人] [归档]     [加入执行队列 disabled]
-B  [更多] [分配负责人] [归档]     [加入执行队列]
-C  [归档]                         [激活]
-D  [更多] [转交] [标记阻塞] [归档]  [催促执行]
-E  [更多] [标记阻塞] [转交] [归档]  [完成]
-F  （Footer 不画按钮，协作区可评论）
-G  [更新阻塞说明] [转交] [归档]     [重启]
-H  [转交] [归档]                   [完善后继续]
-I  [补录结果] [归档]               [创建后续任务]
-J  [永久删除]
-```
 
 
 
@@ -2114,7 +2823,7 @@ J  [永久删除]
 | **转交任务**   | 新负责人（必选，从项目成员中选）                    | running 状态自动带 `--reclaim`                                                 |
 | **补录结果**   | result（必填）、summary（可选）、metadata（可选） | 对应 `edit`，仅 done 状态可用                                                     |
 | **创建后续任务** | 复用创建任务弹窗，预填父任务                      | 对应 `create --parent`                                                      |
-| **移动状态**   | 目标状态选择器                             | 按底层 status 动态展示可选项（见 12.7 节）                                              |
+| **移动状态**   | 目标状态选择器                             | **不进 MVP Footer**（12.2.3）。若保留调试入口，按 12.7 过滤且禁止 running |
 
 
 
@@ -2342,18 +3051,20 @@ hermes kanban --board <project_slug> reclaim <task_id>
 | **ready** | 待办 | 第三行：需先指派 / 等待调度领取 | 等待调度；未指派提示 | 催促执行（POST dispatch）、评论、转交、标记阻塞、排期、归档、编辑标题/说明 | `claim_task`：仅 ready→running，且父依赖须满足否则降回 todo；`block_task`/`request_review`/`complete_task`/`schedule_task` 均接受 ready；无 assignee 时 dispatcher 跳过（除非 default_assignee） | 不能 PATCH running；未指派时催促执行不假报已开始 |
 | **running** | 进行中 | 第三行：已运行时长 | 时长、run#、heartbeat | **完成**、标记阻塞、转交（须 reclaim）、评论、看日志/runs、打断（reclaim） | `complete_task`：running\|ready\|blocked\|review；`block_task`/`request_review`/`schedule_task` 接受 running；`assign_task` 在有 claim 时 **抛错**，须 `reassign --reclaim`；`reclaim_task` 释放 claim，按 run 来源回到 ready 或 review | 不能无 reclaim 改派；不能拖成 running 之外再伪造执行中 |
 | **review** | 进行中 | 第三行：通过后将自动完成 | 系统自动评审中 | **仅查看** + 评论；看 runs | dispatcher `claim_review_task`：review→running（review agent）；通过走 `complete_task`；打回走 `request_changes`（须当前 run 从 review claim）。`reopen_review_task` 供离开评审；产品 MVP **不**给用户点完成/打回 | 不可手动 promote、完成、阻塞、重启；评审由系统完成 |
-| **blocked** | 暂停 | 第三行：kind 短文案 + 原因截断 | 原因 + kind + 失败次数 | **重启**（unblock）、更新说明、转交、评论、归档 | `unblock_task`：blocked→ready/todo/review（按父依赖与 resume_status）；`complete_task` Hermes 允许但产品 **不**在 Blocked 放完成，避免跳过介入；`block_task` **不接受**已是 blocked（须先 unblock）；dispatcher 连续失败也会进 blocked | 不能对 blocked 再 block；不能当踢回 triage 用完善后继续 |
+| **blocked** | 暂停 | 第三行：kind 短文案 + 原因截断 | 原因在第三行 | **重启**（unblock）、转交、评论、归档 | `unblock_task`：blocked→ready/todo/review；`complete_task` Hermes 允许但产品 **不**放完成；`block_task` **不接受**已是 blocked | 不能再 block；不能当踢回 triage 用完善后继续；不要「更新阻塞说明」按钮 |
 | **triage（系统踢回）** | 暂停 | 第三行：同一原因已反复 n 次 | kind + 次数 + 原因 | **完善后继续**、评论、转交、归档 | `specify_triage_task`：仅 triage→todo；`unblock_task` **不认** triage；`block_task` 不认 triage；`decompose_triage_task` 仅 triage，产品 **不用**（那是发起目标） | **禁止 unblock**；禁止看板 decompose；禁止当作发起目标 root |
 | **triage（目标 root）** | 不在看板 | — | 只在发起记录 | 见 12.1.6 / 12.1.7 | 同上 mutator；身份以 `project_goals` 为准 | 看板不展示、不操作 |
-| **done** | 已完成 | 完成标记 | 完成时间 + 摘要 | 查看、评论、**补录结果**、创建后续任务、看 runs/日志、归档 | `edit_completed_task_result` **仅 done**；无 reopen；后续工作 `create --parent` | 不能 unblock/complete 再改 status 当常规路径（dashboard 直写 reopen 会 invalidate 后代，产品不做） |
-| **archived** | 已完成（灰/折） | 已归档 | 「已归档」 | 查看、**永久删除** | `archive_task`：非 archived 均可；`delete_archived_task` 仅 archived；override 类接口拒绝 archived | 不能改派/改模型/重启/完善后继续 |
+| **done** | 已完成 | 第三行摘要首句 | 完成时间 + `latest_summary` 首句 | 查看、评论、**补录结果**、创建后续任务、看 runs/日志、归档 | `complete_task` 写 `completed_at`；工人摘要在 `task_runs.summary`（`latest_summary`），`result` 常空。`edit_completed_task_result` **仅 done**。无 reopen；后续 `create --parent` | 不能 unblock/complete 再改 status（dashboard 直写 reopen 会 invalidate 后代）。**补录不要走 PATCH `result`**（已 done 时 PATCH 不会调 edit mutator） |
+| **archived** | 已完成（开关打开后灰/折） | 已归档；第三行常空 | 「已归档」；曾 complete 过则仍可带摘要 | 查看、**永久删除** | `archive_task`：非 archived 均可，不写 `completed_at`。默认 `GET /board` 不含 archived；列头开关打开后 `include_archived=true` 再并进已完成下半（8.3.2）。`delete_archived_task` 仅 archived；override 拒绝 archived | 不能改派/改模型/重启/完善后继续/补录/发评论。永久删除禁止用 `DELETE /tasks/{id}`（那是任意硬删）。不要为 archived 做独立列表弹窗 |
 
 **Hermes 有、产品 MVP 故意收窄：**
 
 1. `complete_task` 还允许 ready/blocked/review → done。产品完成按钮只放 Running（running）；review 交给系统；blocked 走重启。
 2. dashboard `PATCH` 可把任务拖到 triage/todo/ready（`_set_status_direct`）。产品不得把执行卡拖成目标 triage，也不得拖成 running。
 3. `hermes kanban specify` / `POST .../specify` 与 `decompose` 对任意 triage 生效。产品：目标 root 只走发起记录；踢回 triage 只走 `resume-from-loop`。
-4. dashboard `DELETE /tasks/{id}` 可硬删任意任务。产品永久删除仅 archived。
+4. dashboard `DELETE /tasks/{id}` 可硬删任意任务。产品永久删除仅 archived，且走 `delete_archived_task`。
+5. dashboard `PATCH` 的 `result` 只在 `status→done` 时进入 `complete_task`。已完成后的补录必须调 `edit_completed_task_result`。
+6. `GET /board` 默认不含 archived。产品已完成列默认只画 `done`；列头「已归档」开关打开后再带 `include_archived=true`，把 Hermes 的 archived 列并进已完成下半。不要做 archived 独立弹窗。
 
 #### 12.8.1 操作矩阵
 
@@ -2362,13 +3073,13 @@ hermes kanban --board <project_slug> reclaim <task_id>
 
 | 看板列         | 底层状态      | 详情主按钮   | 详情次要                                    | Hermes 指令                                                                                              |
 | ----------- | --------- | ------ | ----------------------------------------- | ------------------------------------------------------------------------------------------------------ |
-| **待办**    | todo      | 加入执行队列（有未完成父依赖时置灰） | 分配负责人、归档；更多：添加依赖、排期 | 依赖满足时 `PATCH status=ready` + `POST /dispatch`；`comment` / `assign` / `link` / `archive`。**不能** `block`（Hermes 只接受 running/ready） |
-| **待办**    | scheduled | 激活   | 归档                   | `show` / `comment` / `unblock` / `archive`                                                             |
-| **待办**    | ready     | 催促执行（无负责人时主按钮改为分配负责人） | 转交、标记阻塞、归档；更多：排期            | `POST /dispatch`（见 12.2.5）/ `comment` / `reassign` / `block` / `schedule` / `archive`                  |
-| **进行中** | running   | 完成   | 标记阻塞、转交、归档；更多：收回执行 | `show` / `comment` / `complete` / `block` / `reassign --reclaim` / `log` / `runs` / `tail` / `reclaim` |
-| **进行中** | review    | （无）   | （无；正文可评论）                          | `show` / `comment` / `runs`（评审由系统自动完成，用户无需也无法手动操作）                                                     |
-| **暂停** | blocked   | 重启     | 更新阻塞说明、转交、归档 | `show` / `comment` / `unblock`(注2) / `archive` / `reassign` |
-| **暂停** | triage（系统踢回） | 完善后继续 | 转交、归档 | `resume-from-loop`（12.6.3）/ `comment` / `reassign` / `archive`；**禁止** `unblock` |
+| **待办**    | todo      | 加入执行队列（有未完成父依赖时置灰） | 转交或分配负责人、归档 | 依赖满足时 `PATCH status=ready` + `POST /dispatch`；`assign` / `archive`。**不能** `block`/`complete`。依赖在任务 Tab 改 |
+| **待办**    | scheduled | 激活   | 转交、归档                   | `unblock` / `assign` / `archive`。不要 dispatch 未激活的卡 |
+| **待办**    | ready     | 催促执行（无负责人时主按钮改为分配负责人） | 转交、标记阻塞、归档            | `POST /dispatch`（见 12.2.5）/ `reassign` / `block` / `archive`。不要排期、不要移动状态 |
+| **进行中** | running   | 完成   | 标记阻塞、转交、归档；更多：收回执行 | `complete` / `block` / `reassign --reclaim` / `archive` / `reclaim` |
+| **进行中** | review    | （无）   | （无；正文可评论）                          | 评审由系统完成 |
+| **暂停** | blocked   | 重启     | 转交、归档 | `unblock` / `reassign` / `archive`。不要 complete、不要再 block、不要「更新阻塞说明」 |
+| **暂停** | triage（系统踢回） | 完善后继续 | 转交、归档 | `resume-from-loop` / `reassign` / `archive`；**禁止** `unblock` |
 | **已完成**    | done      | 创建后续任务   | 补录结果、归档                | `show` / `edit --result` / `create --parent` / `runs` / `archive`                                      |
 | **已完成**    | archived  | （无）   | 永久删除                                 | `GET /tasks/{id}` / `DELETE /tasks/{id}`；CLI 等价 `archive --rm <id>`                                    |
 
@@ -2523,22 +3234,19 @@ POST /projects/{project_slug}/tasks/{task_id}/resume-from-loop  # 系统踢回 t
 
 ### 13.4 任务数据
 
-来自 Kanban tasks。
+来自 Kanban `GET /tasks/{id}`。详情弹窗每个 UI 字段对应哪条路径见 **12.2.2.1**。
 
-需要字段：
+看板卡片最少用：id、title、status、assignee、priority。
 
-- id
-- title
-- body
-- status
-- assignee
-- priority
-- created_at
-- started_at
-- completed_at
-- result
-- latest_summary
-- comment_count
+详情另需：
+
+- `body`、`created_at`、`created_by`、`workspace_kind`、`workspace_path`
+- `links.parents` / `links.children`（id）
+- `child_results[]`：`id, title, status`（子依赖状态直接用这个）
+- 适配 `parents[]`：`id, title, status`（父依赖；Hermes 详情不带父标题/状态）
+- `comments`、`events`、`runs`、`attachments`、`latest_summary`、`result`
+- `started_at` / `completed_at`（过程/完成态才有值）
+- `diagnostics[]`（可空）
 
 
 
@@ -2548,14 +3256,15 @@ POST /projects/{project_slug}/tasks/{task_id}/resume-from-loop  # 系统踢回 t
 
 #### 13.5.1 数据来源
 
-任务动态的权威来源是 board 对应的 `task_events`；项目创建、成员变更、项目设置变更
-来自产品层 `project_events`。时间线服务按时间/稳定游标合并两类事件。
+任务动态里 **给人看的协作事件** 来自 board `task_events` 的 allowlist（见 9.7）；项目创建、成员变更、发起目标来自产品层 `project_events`。时间线按时间/游标合并。
+
+**自动流转不进动态 Tab**，进任务详情过程 Tab：`GET /tasks/{id}` 的 `events[]` + `runs[]` + `/log`。
 
 补充数据：
 
-- `task_comments` 表：评论正文（MVP 不在时间线展示，v1.1 接入）。
-- `task_runs` 表：执行记录详情（点击动态跳转任务详情时使用）。
-- `tasks` 表 join：补充 `task_title`、`assignee` 等展示字段。
+- `task_comments`：评论正文（动态只展示「谁评论了」；正文在详情评论 Tab）
+- `tasks` join：`title`、`created_by`、`assignee`
+- 不要用 `task_runs` 填动态 Tab（runs 是过程 Tab）
 
 
 
@@ -2611,19 +3320,11 @@ Hermes 无 board 级事件表。「项目创建」动态由产品层合成：
 
 
 
-#### 13.5.5 MVP 关注的事件类型（非完整枚举）
+#### 13.5.5 动态 vs 过程：kind 分流
 
-当前 MVP 需要处理的主要 `task_events.kind`：
+以 **9.7** 为准。动态 Tab allowlist 大约是：`created`（非拆解子卡）/ `assigned` / `commented` / `completed` / `blocked` / `unblocked` / `archived` / `specified` / `linked` / `edited`，外加 `project_events`。
 
-`created` / `assigned` / `commented` / `completed` / `blocked` /
-`dependency_wait` / `block_loop_detected` / `unblocked` / `crashed` / `gave_up` /
-`protocol_violation` / `timed_out` / `rate_limited` / `decomposed` / `specified` /
-`promoted` / `promoted_manual` / `reclaimed` / `scheduled` / `claimed` /
-`spawned` / `linked` / `unlinked` / `review_requested` / `changes_requested` /
-`archived` / `status`。
-
-事件集合会随 Hermes 演进，产品映射必须有未知 kind 的通用降级展示，不能用静态完整
-枚举阻断新事件。MVP 展示 9.3 节对应种类，其余归入“其他”。
+过程 Tab 承接：`claimed` / `spawned` / `promoted` / `review_requested` / `crashed` / `timed_out` / `gave_up` / `heartbeat` 等。未知 kind：动态丢弃，过程折进「其他」。
 
 ## 14. 状态映射
 
@@ -2758,16 +3459,17 @@ Hermes 无 board 级事件表。「项目创建」动态由产品层合成：
 - 「按专家」二级视图、看板顶部 `任务状态 | 分配专家` 切换条推迟到 v1.1。
 - 看板 Tab 顶部不保留「+ 创建任务」工具栏按钮。待办列列头右上角提供 `+` 按钮，点击后唤起创建任务弹窗（见 8.5）。
 - 任务卡片信息简洁，避免过载。
-- 任务卡片只展示标题、负责人、子状态、评论数；无悬停按钮、无「…」菜单。点击卡片打开详情弹窗，操作见 12.2.3。
-- 任务详情弹窗：身份与状况固定，中间 4 Tab，Footer 固定。见 12.2.2「固区与 Tab」。
+- 任务卡片只展示三行：标题+状态标签、专家+优先级圆标、简要说明（见 12.2.1）；无悬停按钮、无「…」菜单、无评论数。点击卡片打开详情弹窗，操作见 12.2.3。
+- 任务详情弹窗首屏复用卡片三行；任务 ID 在任务 Tab。见 12.2.2.3。
 
 
 
 ### 17.3 任务详情弹窗
 
 - 点击卡片打开居中弹窗（约 800px，高 ≤85vh）。
-- **固定：** 顶栏身份、状况 Banner、Tab 栏、底栏操作。打开后不用滚就能看见「现在怎么了」和主按钮。
-- **Tab 顺序固定：** 任务 → 过程 → 产出 → 评论。未执行隐藏「产出」（不留空位）。默认选中：done→产出，running/blocked→过程，等父任务与反复阻塞→任务（见 12.2.2「固区与 Tab」）。
+- **固定：** 与卡片同款三行（右上角只留关闭）、可选诊断、Tab 栏、底栏操作。打开后不用滚就能看见三行「现在怎么了」和主按钮。
+- **不要** 在顶栏放复制 ID。完整 ID 与复制在「任务」Tab 第一块。
+- **Tab 顺序固定：** 任务 → 过程 → 产出 → 评论。四个 Tab 始终占位。默认选中：done / archived→产出（空则任务），其余→任务（见 12.2.2.3）。
 - 只有 Tab 正文滚动。评论输入在「评论」Tab 底部，不进 Footer。
 - review 底栏无按钮。archived 评论只读。
 - L3 叠在详情上；与发起目标 / 发起记录 / 创建任务 / 成员抽屉互斥。
@@ -2776,9 +3478,10 @@ Hermes 无 board 级事件表。「项目创建」动态由产品层合成：
 
 ### 17.4 动态 Tab
 
-- 使用时间线布局。
-- 动态类型使用图标或标签区分。
-- 支持点击跳转任务（打开任务详情弹窗）。
+- 项目级人与人协作时间线，不是执行日志。见第 9 节。
+- 展示：创建/转交/评论/人工完成阻塞重启归档、成员变更、发起目标。
+- **不展示** claimed/spawned/评审/崩溃超时等自动流转（那些在任务详情「过程」Tab）。
+- 点击任务类条目打开任务详情；成员类打开成员抽屉；发起目标打开发起记录。
 
 
 
@@ -2936,9 +3639,10 @@ Hermes 无 board 级事件表。「项目创建」动态由产品层合成：
 
 ### 动态
 
-- 项目动态可以展示任务事件。
-- 新增任务、指派任务、完成任务、阻塞任务后，动态中有记录。
-- 点击动态可以定位或打开对应任务。
+- 动态 Tab 只记录人协作，不记录自动流转（第 9 节）。
+- 创建、转交、评论、完成、阻塞、重启、归档、成员变更、发起目标有记录。
+- 点击可打开对应任务详情 / 成员抽屉 / 发起记录。
+- 领取、spawn、系统评审、失败超时只出现在任务详情「过程」Tab。
 
 
 

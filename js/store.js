@@ -1731,6 +1731,249 @@
     (tasks || []).forEach(applyDemoTaskOutputs);
   }
 
+  function extraYieldStatusDemoTasks(p, members) {
+    var lead = members[0];
+    var device = members.find(function (m) { return m.expertId !== lead.expertId; }) || members[1];
+    var quality = members.find(function (m) {
+      return m.expertId !== lead.expertId && m.expertId !== device.expertId;
+    }) || members[0];
+    return [
+      projectTaskSeed(p, {
+        title: '光刻套刻抽样方案',
+        status: 'ready',
+        expertId: null,
+        assignee: null,
+        sortOrder: 32,
+        priority: 'medium',
+        body: '制定光刻套刻抽样方案，确认量测点位与抽样频率。负责人未指派，调度不会领取。',
+        latestSummary: '',
+        taskEvents: [
+          { id: uid(), kind: 'created', label: '创建', author: lead.expertId, payload: {}, createdAt: minutesAgoIso(70) }
+        ],
+        createdAt: minutesAgoIso(70),
+        updatedAt: minutesAgoIso(70)
+      }),
+      projectTaskSeed(p, {
+        title: '缺陷库同步作业',
+        status: 'ready',
+        expertId: quality.expertId,
+        sortOrder: 33,
+        priority: 'medium',
+        body: '把最新缺陷分类同步到质量缺陷库，供后续 pareto 使用。',
+        latestSummary: '',
+        diagnostics: [
+          { kind: 'stranded_in_ready', title: 'stranded in ready', suggestion: '检查 dispatcher 是否在跑，或催促执行。', severity: 'warn' }
+        ],
+        taskEvents: [
+          { id: uid(), kind: 'assigned', label: '分配负责人', author: lead.expertId, payload: { assignee: quality.expertId }, createdAt: minutesAgoIso(420) },
+          { id: uid(), kind: 'created', label: '创建', author: lead.expertId, payload: {}, createdAt: minutesAgoIso(420) }
+        ],
+        createdAt: minutesAgoIso(420),
+        updatedAt: minutesAgoIso(400)
+      }),
+      projectTaskSeed(p, {
+        title: '量测机台周末窗口',
+        status: 'scheduled',
+        expertId: device.expertId,
+        sortOrder: 34,
+        priority: 'low',
+        lastStatusReason: '',
+        body: '周末安排量测机台做 overlay 复测。排期事件未写原因。',
+        taskEvents: [
+          { id: uid(), kind: 'scheduled', label: '排期', author: device.expertId, payload: {}, createdAt: minutesAgoIso(95) },
+          { id: uid(), kind: 'created', label: '创建', author: lead.expertId, payload: {}, createdAt: minutesAgoIso(96) }
+        ],
+        createdAt: minutesAgoIso(96),
+        updatedAt: minutesAgoIso(95)
+      }),
+      projectTaskSeed(p, {
+        title: 'SPC 规则变更评审',
+        status: 'running',
+        expertId: quality.expertId,
+        sortOrder: 35,
+        priority: 'high',
+        body: '评审 etch 区 SPC 加严规则变更，核对控制限与误报率。',
+        latestSummary: '实施已交卷，评审 worker 正在核对控制限。',
+        startedAt: minutesAgoIso(18),
+        currentRunId: 'run-review-1',
+        lastHeartbeatAt: minutesAgoIso(1),
+        workspaceKind: 'git',
+        workspacePath: '/workspace/yield/spc-rule-review',
+        runs: [
+          {
+            id: 'run-review-1', profile: quality.expertId, outcome: 'running', status: 'running',
+            startedAt: minutesAgoIso(18), endedAt: null,
+            summary: '正在核对 UCL 调整幅度与近 4 周误报率。', error: '', metadata: { source_status: 'review' }
+          },
+          {
+            id: 'run-impl-1', profile: quality.expertId, outcome: 'completed', status: 'completed',
+            startedAt: minutesAgoIso(80), endedAt: minutesAgoIso(22),
+            summary: '已提交 SPC 加严规则草案。', error: '', metadata: null
+          }
+        ],
+        taskEvents: [
+          { id: uid(), kind: 'heartbeat', label: '心跳', author: quality.expertId, payload: { n: 6 }, createdAt: minutesAgoIso(1) },
+          { id: uid(), kind: 'claimed', label: '领取', author: quality.expertId, payload: { source_status: 'review', assignee: quality.expertId }, createdAt: minutesAgoIso(18), run_id: 'run-review-1' },
+          { id: uid(), kind: 'review_requested', label: '提交评审', author: quality.expertId, payload: {}, createdAt: minutesAgoIso(22) },
+          { id: uid(), kind: 'spawned', label: '启动', author: quality.expertId, payload: { assignee: quality.expertId }, createdAt: minutesAgoIso(80) },
+          { id: uid(), kind: 'created', label: '创建', author: lead.expertId, payload: {}, createdAt: minutesAgoIso(100) }
+        ],
+        createdAt: minutesAgoIso(100),
+        updatedAt: minutesAgoIso(1)
+      }),
+      projectTaskSeed(p, {
+        title: 'EMS 瞬时超时排查',
+        status: 'blocked',
+        expertId: device.expertId,
+        sortOrder: 36,
+        priority: 'medium',
+        body: '排查设备管理系统瞬时超时，确认是否影响 PM 记录导出。',
+        latestSummary: 'EMS 网关抖动，等待网络恢复后重试。',
+        blockedReason: 'EMS 网关抖动，等待网络恢复后重试',
+        blockKind: 'transient',
+        consecutiveFailures: 1,
+        lastFailureError: 'Gateway Timeout: EMS /pm-logs 504',
+        startedAt: minutesAgoIso(55),
+        runs: [
+          {
+            id: 'run-1', profile: device.expertId, outcome: 'blocked', status: 'blocked',
+            startedAt: minutesAgoIso(55), endedAt: minutesAgoIso(52),
+            summary: '拉取 PM 日志时 EMS 网关超时。', error: 'Gateway Timeout: EMS /pm-logs 504', metadata: null
+          }
+        ],
+        taskEvents: [
+          { id: uid(), kind: 'blocked', label: '阻塞', author: device.expertId, payload: { reason: 'EMS 网关抖动，等待网络恢复后重试', block_kind: 'transient' }, createdAt: minutesAgoIso(52) },
+          { id: uid(), kind: 'spawned', label: '启动', author: device.expertId, payload: { assignee: device.expertId }, createdAt: minutesAgoIso(55) },
+          { id: uid(), kind: 'created', label: '创建', author: lead.expertId, payload: {}, createdAt: minutesAgoIso(88) }
+        ],
+        createdAt: minutesAgoIso(88),
+        updatedAt: minutesAgoIso(52)
+      })
+    ];
+  }
+
+  function extraSupplyStatusDemoTasks(p, members) {
+    var supplyLead = members[0];
+    var digital = members[1] || members[0];
+    return [
+      projectTaskSeed(p, {
+        title: '渠道对账核对',
+        status: 'ready',
+        expertId: digital.expertId,
+        sortOrder: 24,
+        priority: 'medium',
+        body: '核对渠道回款与订单差异，作为预测模型校准输入。',
+        latestSummary: '',
+        createdAt: minutesAgoIso(64),
+        updatedAt: minutesAgoIso(64)
+      }),
+      projectTaskSeed(p, {
+        title: 'Q4 盘点窗口对齐',
+        status: 'scheduled',
+        expertId: supplyLead.expertId,
+        sortOrder: 25,
+        priority: 'medium',
+        lastStatusReason: '财务关账',
+        body: '与财务对齐 Q4 盘点窗口，避免预测回测窗口错位。',
+        taskEvents: [
+          { id: uid(), kind: 'scheduled', label: '排期', author: supplyLead.expertId, payload: { reason: '财务关账' }, createdAt: minutesAgoIso(72) },
+          { id: uid(), kind: 'created', label: '创建', author: supplyLead.expertId, payload: {}, createdAt: minutesAgoIso(80) }
+        ],
+        createdAt: minutesAgoIso(80),
+        updatedAt: minutesAgoIso(72)
+      }),
+      projectTaskSeed(p, {
+        title: '治理规范自动评审',
+        status: 'running',
+        expertId: digital.expertId,
+        sortOrder: 26,
+        priority: 'high',
+        body: '系统自动评审主数据治理规范草案。',
+        latestSummary: '草案已提交，评审 worker 正在核对编码规则一致性。',
+        startedAt: minutesAgoIso(14),
+        currentRunId: 'run-review-1',
+        runs: [
+          {
+            id: 'run-review-1', profile: digital.expertId, outcome: 'running', status: 'running',
+            startedAt: minutesAgoIso(14), endedAt: null,
+            summary: '正在核对物料编码一对多映射规则。', error: '', metadata: { source_status: 'review' }
+          }
+        ],
+        taskEvents: [
+          { id: uid(), kind: 'claimed', label: '领取', author: digital.expertId, payload: { source_status: 'review', assignee: digital.expertId }, createdAt: minutesAgoIso(14), run_id: 'run-review-1' },
+          { id: uid(), kind: 'review_requested', label: '提交评审', author: digital.expertId, payload: {}, createdAt: minutesAgoIso(20) },
+          { id: uid(), kind: 'created', label: '创建', author: supplyLead.expertId, payload: {}, createdAt: minutesAgoIso(40) }
+        ],
+        createdAt: minutesAgoIso(40),
+        updatedAt: minutesAgoIso(14)
+      }),
+      projectTaskSeed(p, {
+        title: 'EDI 报文拉取熔断',
+        status: 'blocked',
+        expertId: digital.expertId,
+        sortOrder: 27,
+        priority: 'high',
+        body: '稳定拉取供应商 EDI 交货报文。连续失败后调度已停止自动重试。',
+        latestSummary: '连续超时已达上限，调度停止自动重试。',
+        blockedReason: '',
+        blockKind: 'transient',
+        consecutiveFailures: 2,
+        lastFailureError: 'edi gateway timeout after 120s',
+        runs: [
+          {
+            id: 'run-2', profile: digital.expertId, outcome: 'gave_up', status: 'gave_up',
+            startedAt: minutesAgoIso(40), endedAt: minutesAgoIso(38),
+            summary: '第二次拉取超时，达到失败上限。', error: 'timed_out: edi gateway timeout after 120s', metadata: { failures: 2, effective_limit: 2 }
+          },
+          {
+            id: 'run-1', profile: digital.expertId, outcome: 'crashed', status: 'crashed',
+            startedAt: minutesAgoIso(70), endedAt: minutesAgoIso(68),
+            summary: '报文解析进程异常退出。', error: 'spawn_failed: edi adapter crashed (exit 1)', metadata: null
+          }
+        ],
+        taskEvents: [
+          { id: uid(), kind: 'gave_up', label: '放弃', payload: { error: 'edi gateway timeout after 120s', failures: 2, effective_limit: 2 }, createdAt: minutesAgoIso(38) },
+          { id: uid(), kind: 'created', label: '创建', createdAt: minutesAgoIso(90) }
+        ],
+        diagnostics: [
+          { title: '连续失败已停止重试', suggestion: '检查 EDI 网关后重启', kind: 'repeated_failures', severity: 'warn' }
+        ],
+        createdAt: minutesAgoIso(90),
+        updatedAt: minutesAgoIso(38)
+      }),
+      projectTaskSeed(p, {
+        title: 'WMS 瞬时超时排查',
+        status: 'blocked',
+        expertId: digital.expertId,
+        sortOrder: 28,
+        priority: 'medium',
+        body: '排查 WMS 热力图导出时的瞬时超时。',
+        latestSummary: 'WMS 查询网关抖动，等待恢复后重试。',
+        blockedReason: 'WMS 查询网关抖动，等待恢复后重试',
+        blockKind: 'transient',
+        consecutiveFailures: 1,
+        lastFailureError: 'Gateway Timeout: WMS /heatmap 504',
+        taskEvents: [
+          { id: uid(), kind: 'blocked', label: '阻塞', author: digital.expertId, payload: { reason: 'WMS 查询网关抖动，等待恢复后重试', block_kind: 'transient' }, createdAt: minutesAgoIso(44) },
+          { id: uid(), kind: 'created', label: '创建', author: supplyLead.expertId, payload: {}, createdAt: minutesAgoIso(60) }
+        ],
+        createdAt: minutesAgoIso(60),
+        updatedAt: minutesAgoIso(44)
+      }),
+      projectTaskSeed(p, {
+        title: '试点工厂调研',
+        status: 'archived',
+        expertId: supplyLead.expertId,
+        sortOrder: 29,
+        priority: 'low',
+        body: '项目启动前对试点工厂的调研纪要，已归档。',
+        latestSummary: '',
+        createdAt: daysAgoIso(8, 10, 0),
+        updatedAt: daysAgoIso(7, 16, 0)
+      })
+    ];
+  }
+
   function defaultYieldProjectTasksFor(p, members) {
     var lead = members[0];
     var device = members.find(function (m) { return m.expertId !== lead.expertId; }) || members[1];
@@ -1894,7 +2137,9 @@
           }
         ],
         taskEvents: [
+          { id: uid(), kind: 'heartbeat', label: '心跳', author: device.expertId, payload: { n: 12 }, createdAt: minutesAgoIso(2) },
           { id: uid(), kind: 'spawned', label: '启动', author: device.expertId, payload: { assignee: device.expertId }, createdAt: minutesAgoIso(35) },
+          { id: uid(), kind: 'claimed', label: '领取', author: device.expertId, payload: { source_status: 'ready', assignee: device.expertId }, createdAt: minutesAgoIso(36), run_id: 'run-2' },
           { id: uid(), kind: 'created', label: '创建', author: lead.expertId, payload: {}, createdAt: minutesAgoIso(240) }
         ],
         diagnostics: [],
@@ -2142,6 +2387,47 @@
         updatedAt: minutesAgoIso(30)
       }),
       projectTaskSeed(p, {
+        title: 'FDC 实时采集熔断',
+        status: 'blocked',
+        expertId: device.expertId,
+        sortOrder: 27.5,
+        priority: 'high',
+        body: '稳定拉取 FDC 实时流并写入良率对照表。连续启动失败后调度已停止自动重试。',
+        latestSummary: '连续 spawn/timeout 已达上限，调度停止自动重试。',
+        blockedReason: '',
+        blockKind: 'transient',
+        consecutiveFailures: 2,
+        lastFailureError: 'collector timeout after 600s',
+        startedAt: minutesAgoIso(80),
+        workspaceKind: 'git',
+        workspacePath: '/workspace/yield/fdc-stream',
+        skills: ['data-query'],
+        runs: [
+          {
+            id: 'run-2', profile: device.expertId, outcome: 'gave_up', status: 'gave_up',
+            startedAt: minutesAgoIso(50), endedAt: minutesAgoIso(48),
+            summary: '第二次启动采集进程超时，达到失败上限。', error: 'timed_out: collector timeout after 600s', metadata: { failures: 2, effective_limit: 2 }
+          },
+          {
+            id: 'run-1', profile: device.expertId, outcome: 'crashed', status: 'crashed',
+            startedAt: minutesAgoIso(80), endedAt: minutesAgoIso(78),
+            summary: '采集进程启动后立即退出。', error: 'spawn_failed: FDC agent crashed (exit 1)', metadata: null
+          }
+        ],
+        taskEvents: [
+          { id: uid(), kind: 'gave_up', label: '放弃', author: device.expertId, payload: { error: 'collector timeout after 600s', failures: 2, effective_limit: 2, trigger_outcome: 'timed_out' }, createdAt: minutesAgoIso(48) },
+          { id: uid(), kind: 'spawned', label: '启动', author: device.expertId, payload: { assignee: device.expertId }, createdAt: minutesAgoIso(80) },
+          { id: uid(), kind: 'created', label: '创建', author: lead.expertId, payload: {}, createdAt: minutesAgoIso(180) }
+        ],
+        diagnostics: [
+          { title: '连续失败已停止重试', suggestion: '检查采集链路后重启', kind: 'repeated_failures', severity: 'warn' }
+        ],
+        comments: [],
+        commentCount: 0,
+        createdAt: minutesAgoIso(180),
+        updatedAt: minutesAgoIso(48)
+      }),
+      projectTaskSeed(p, {
         title: '光刻 overlay 偏差复核',
         status: 'blocked',
         expertId: lead.expertId,
@@ -2150,7 +2436,13 @@
         body: '复核光刻工序 overlay 偏差数据，确认是否影响近期良率波动。',
         latestSummary: '量测设备校准证书过期，需等待计量部门更新。',
         blockedReason: '量测设备校准证书过期',
+        blockKind: 'needs_input',
+        lastStatusReason: '量测设备校准证书过期',
         commentCount: 1,
+        taskEvents: [
+          { id: uid(), kind: 'blocked', label: '阻塞', author: lead.expertId, payload: { reason: '量测设备校准证书过期', block_kind: 'needs_input' }, createdAt: minutesAgoIso(45) },
+          { id: uid(), kind: 'created', label: '创建', author: lead.expertId, payload: {}, createdAt: minutesAgoIso(90) }
+        ],
         createdAt: minutesAgoIso(90),
         updatedAt: minutesAgoIso(45)
       }),
@@ -2187,9 +2479,15 @@
         createdAt: daysAgoIso(10, 14, 0),
         updatedAt: daysAgoIso(9, 11, 0)
       })
-    ];
+    ].concat(extraYieldStatusDemoTasks(p, members));
     applyDemoOutputsToTaskList(yieldTasks);
     return yieldTasks;
+  }
+
+  function seedExpertName(expertId) {
+    if (!expertId) return '当前用户';
+    var expert = (state.experts || []).find(function (e) { return sameId(e.id, expertId); });
+    return (expert && expert.name) || '当前用户';
   }
 
   function defaultYieldProjectEventsFor(p, tasks) {
@@ -2197,25 +2495,31 @@
     var quality = (state.projectMembers.find(function (m) {
       return sameId(m.projectId, p.id) && m.role === 'member';
     }) || {}).expertId;
+    var device = (state.projectMembers.find(function (m) {
+      return sameId(m.projectId, p.id) && m.role === 'member' && !sameId(m.expertId, quality);
+    }) || {}).expertId;
+    var leadName = seedExpertName(lead);
+    var qualityName = seedExpertName(quality);
+    var deviceName = seedExpertName(device || quality);
     function taskId(title) {
       var t = (tasks || []).find(function (x) { return x.title === title; });
       return t ? t.id : null;
     }
     return [
-      { type: 'project_created', category: 'project', title: '项目已创建', content: '项目「12寸产线良率提升项目」已创建，协调专家开始拆解目标。', createdAt: daysAgoIso(7, 9, 0) },
-      { type: 'goal_created', category: 'task', title: '目标已发起', taskId: taskId('针对近期良率波动组织专家排查'), expertId: lead, content: '用户发起目标「针对近期良率波动组织专家排查」，系统自动拆解为 5 个子任务。', createdAt: minutesAgoIso(280) },
-      { type: 'task_decomposed', category: 'task', title: '任务已拆解', taskId: taskId('针对近期良率波动组织专家排查'), expertId: lead, content: '协调专家将目标拆解为 SPC 数据分析、良率根因分析、设备关联分析等 5 个子任务并派发。', createdAt: minutesAgoIso(275) },
-      { type: 'task_completed', category: 'task', title: '任务已完成', taskId: taskId('良率根因分析'), expertId: lead, content: '任务「良率根因分析」已完成：主要根因 etch 区 3 号 chamber 压力偏差 +12%。', createdAt: minutesAgoIso(90) },
-      { type: 'task_status_moved', category: 'task', title: '任务状态变更', taskId: taskId('设备关联分析'), expertId: (state.projectMembers.find(function (m) { return sameId(m.projectId, p.id) && m.expertId !== lead; }) || {}).expertId, content: '任务「设备关联分析」状态变更为「执行中」。', createdAt: minutesAgoIso(20) },
-      { type: 'task_blocked', category: 'exception', title: '任务阻塞', taskId: taskId('MES 数据接口对接'), expertId: (state.projectMembers.find(function (m) { return sameId(m.projectId, p.id); }) || {}).expertId, content: '任务「MES 数据接口对接」被阻塞：MES API 权限待 IT 开通。', createdAt: minutesAgoIso(30) },
-      { type: 'comment_added', category: 'comment', title: '新增评论', taskId: taskId('SPC 数据分析'), expertId: quality, content: '[质量专家] 建议同步检查冷却系统对颗粒污染的影响。', createdAt: minutesAgoIso(50) },
-      { type: 'execution_run', category: 'execution', title: '执行记录', taskId: taskId('良率根因分析'), expertId: lead, content: 'Run #1 工艺专家 完成 18m32s — 已定位 etch 区 3 号 chamber 压力漂移。', createdAt: minutesAgoIso(95) },
-      { type: 'goal_completed', category: 'task', title: '目标已完成', taskId: taskId('12寸产线工艺窗口复盘'), expertId: lead, content: '目标「12寸产线工艺窗口复盘」全部子任务已完成（4/4）。', createdAt: daysAgoIso(1, 16, 30) },
-      { type: 'goal_created', category: 'task', title: '目标已发起', taskId: taskId('etch 区设备健康度评估'), expertId: lead, content: '用户发起目标「etch 区设备健康度评估」，拆解失败，需补充说明后重试。', createdAt: daysAgoIso(3, 14, 20) },
-      { type: 'goal_created', category: 'task', title: '目标已发起', taskId: taskId('光刻胶厚度窗口评估'), expertId: lead, content: '用户发起目标「光刻胶厚度窗口评估」，系统正在拆解。', createdAt: minutesAgoIso(8) },
-      { type: 'task_review', category: 'execution', title: '进入评审', taskId: taskId('工艺参数回标方案'), expertId: lead, content: '任务「工艺参数回标方案」已提交 PR，系统自动评审中。', createdAt: minutesAgoIso(25) }
+      { type: 'project_created', category: 'project', actor: '', title: '项目创建，成员 3 人', createdAt: daysAgoIso(7, 9, 0) },
+      { type: 'member_added', category: 'project', actor: leadName, expertId: quality, title: leadName + ' 将 @' + qualityName + ' 加入项目', createdAt: daysAgoIso(7, 9, 10) },
+      { type: 'goal_submitted', category: 'project', actor: leadName, expertId: lead, taskId: taskId('针对近期良率波动组织专家排查'), title: leadName + ' 发起了目标「针对近期良率波动组织专家排查」', createdAt: minutesAgoIso(280) },
+      { type: 'task_created', category: 'task', actor: leadName, expertId: lead, taskId: taskId('站会纪要整理'), title: leadName + ' 创建了任务「站会纪要整理」· 负责人 @' + leadName, createdAt: daysAgoIso(0, 9, 30) },
+      { type: 'task_completed', category: 'task', actor: leadName, expertId: lead, taskId: taskId('良率根因分析'), title: leadName + ' 完成了「良率根因分析」', createdAt: minutesAgoIso(90) },
+      { type: 'task_blocked', category: 'task', actor: deviceName, expertId: device, taskId: taskId('MES 数据接口对接'), title: deviceName + ' 标记「MES 数据接口对接」需介入：MES API 权限待 IT 开通', createdAt: minutesAgoIso(30) },
+      { type: 'task_commented', category: 'task', actor: qualityName, expertId: quality, taskId: taskId('SPC 数据分析'), title: qualityName + ' 评论了「SPC 数据分析」', createdAt: minutesAgoIso(50) },
+      { type: 'goal_submitted', category: 'project', actor: leadName, expertId: lead, taskId: taskId('etch 区设备健康度评估'), title: leadName + ' 发起了目标「etch 区设备健康度评估」', createdAt: daysAgoIso(3, 14, 20) },
+      { type: 'goal_submitted', category: 'project', actor: leadName, expertId: lead, taskId: taskId('光刻胶厚度窗口评估'), title: leadName + ' 发起了目标「光刻胶厚度窗口评估」', createdAt: minutesAgoIso(8) },
+      { type: 'task_archived', category: 'task', actor: leadName, expertId: lead, taskId: taskId('初期数据摸底'), title: leadName + ' 归档了「初期数据摸底」', createdAt: daysAgoIso(6, 17, 0) },
+      { type: 'task_created', category: 'task', actor: leadName, expertId: lead, taskId: taskId('光刻套刻抽样方案'), title: leadName + ' 创建了任务「光刻套刻抽样方案」', createdAt: minutesAgoIso(70) },
+      { type: 'task_blocked', category: 'task', actor: deviceName, expertId: device, taskId: taskId('EMS 瞬时超时排查'), title: deviceName + ' 标记「EMS 瞬时超时排查」需介入：EMS 网关抖动，等待网络恢复后重试', createdAt: minutesAgoIso(52) }
     ].map(function (e) {
-      return Object.assign({ id: uid(), projectId: p.id, meta: null }, e);
+      return Object.assign({ id: uid(), projectId: p.id, meta: null, content: e.title }, e);
     });
   }
 
@@ -2427,11 +2731,13 @@
         body: '对接供应商协同平台 API，获取实时交付数据。',
         latestSummary: '供应商平台 API 密钥待采购部门审批。',
         blockedReason: '供应商平台 API 密钥待采购部门审批',
+        blockKind: 'capability',
+        lastStatusReason: '供应商平台 API 密钥待采购部门审批',
         commentCount: 2,
         createdAt: minutesAgoIso(80),
         updatedAt: minutesAgoIso(35)
       })
-    ];
+    ].concat(extraSupplyStatusDemoTasks(p, members));
     applyDemoOutputsToTaskList(supplyTasks);
     return supplyTasks;
   }
@@ -2445,19 +2751,19 @@
       var t = (tasks || []).find(function (x) { return x.title === title; });
       return t ? t.id : null;
     }
+    var leadName = seedExpertName(lead);
+    var digitalName = seedExpertName(digital);
     return [
-      { type: 'project_created', category: 'project', title: '项目已创建', content: '项目「供应链数字化规划」已创建，协调专家开始拆解目标。', createdAt: daysAgoIso(7, 9, 0) },
-      { type: 'goal_created', category: 'task', title: '目标已发起', taskId: taskId('推进供应链数字化核心能力建设'), expertId: lead, content: '用户发起目标「推进供应链数字化核心能力建设」，系统自动拆解为 5 个子任务。', createdAt: minutesAgoIso(320) },
-      { type: 'task_decomposed', category: 'task', title: '任务已拆解', taskId: taskId('推进供应链数字化核心能力建设'), expertId: lead, content: '协调专家将目标拆解为需求预测建模、促销日历对齐、历史特征工程等子任务并派发。', createdAt: minutesAgoIso(315) },
-      { type: 'task_completed', category: 'task', title: '任务已完成', taskId: taskId('促销日历对齐'), expertId: lead, content: '任务「促销日历对齐」已完成，促销特征已纳入预测模型。', createdAt: minutesAgoIso(200) },
-      { type: 'task_status_moved', category: 'task', title: '任务状态变更', taskId: taskId('需求预测建模'), expertId: lead, content: '任务「需求预测建模」状态变更为「执行中」。', createdAt: minutesAgoIso(25) },
-      { type: 'task_blocked', category: 'exception', title: '任务阻塞', taskId: taskId('供应商协同平台对接'), expertId: digital, content: '任务「供应商协同平台对接」被阻塞：供应商平台 API 密钥待采购部门审批。', createdAt: minutesAgoIso(35) },
-      { type: 'comment_added', category: 'comment', title: '新增评论', taskId: taskId('需求预测建模'), expertId: digital, content: '[数字化顾问] WMS 热力图特征已可供模型使用，请同步纳入。', createdAt: minutesAgoIso(60) },
-      { type: 'goal_completed', category: 'task', title: '目标已完成', taskId: taskId('完成供应链数据底座建设'), expertId: lead, content: '目标「完成供应链数据底座建设」全部子任务已完成（4/4）。', createdAt: daysAgoIso(2, 16, 0) },
-      { type: 'goal_created', category: 'task', title: '目标已发起', taskId: taskId('数据治理规范建设'), expertId: digital, content: '用户发起目标「数据治理规范建设」，系统正在拆解。', createdAt: daysAgoIso(3, 14, 20) },
-      { type: 'task_review', category: 'execution', title: '进入评审', taskId: taskId('数据治理规范'), expertId: digital, content: '任务「数据治理规范」已提交 PR，系统自动评审中。', createdAt: minutesAgoIso(30) }
+      { type: 'project_created', category: 'project', actor: '', title: '项目创建，成员 2 人', createdAt: daysAgoIso(7, 9, 0) },
+      { type: 'member_added', category: 'project', actor: leadName, expertId: digital, title: leadName + ' 将 @' + digitalName + ' 加入项目', createdAt: daysAgoIso(7, 9, 10) },
+      { type: 'goal_submitted', category: 'project', actor: leadName, expertId: lead, taskId: taskId('推进供应链数字化核心能力建设'), title: leadName + ' 发起了目标「推进供应链数字化核心能力建设」', createdAt: minutesAgoIso(320) },
+      { type: 'task_completed', category: 'task', actor: leadName, expertId: lead, taskId: taskId('促销日历对齐'), title: leadName + ' 完成了「促销日历对齐」', createdAt: minutesAgoIso(200) },
+      { type: 'task_blocked', category: 'task', actor: digitalName, expertId: digital, taskId: taskId('供应商协同平台对接'), title: digitalName + ' 标记「供应商协同平台对接」需介入：供应商平台 API 密钥待采购部门审批', createdAt: minutesAgoIso(35) },
+      { type: 'task_commented', category: 'task', actor: digitalName, expertId: digital, taskId: taskId('需求预测建模'), title: digitalName + ' 评论了「需求预测建模」', createdAt: minutesAgoIso(60) },
+      { type: 'goal_submitted', category: 'project', actor: digitalName, expertId: digital, taskId: taskId('数据治理规范建设'), title: digitalName + ' 发起了目标「数据治理规范建设」', createdAt: daysAgoIso(3, 14, 20) },
+      { type: 'task_archived', category: 'task', actor: leadName, expertId: lead, taskId: taskId('试点工厂调研'), title: leadName + ' 归档了「试点工厂调研」', createdAt: daysAgoIso(7, 16, 0) }
     ].map(function (e) {
-      return Object.assign({ id: uid(), projectId: p.id, meta: null }, e);
+      return Object.assign({ id: uid(), projectId: p.id, meta: null, content: e.title }, e);
     });
   }
 
@@ -2608,6 +2914,7 @@
     '缺陷 pareto 更新': 'todo',
     '工艺参数回标方案': 'review',
     'MES 数据接口对接': 'blocked',
+    'FDC 实时采集熔断': 'blocked',
     '初期数据摸底': 'archived',
     '立项背景调研': 'archived',
     '针对近期良率波动组织专家排查': 'todo',
@@ -2623,6 +2930,11 @@
     'CMP 区良率对标分析': 'todo',
     'FDC 告警规则梳理': 'running',
     '光刻 overlay 偏差复核': 'blocked',
+    '光刻套刻抽样方案': 'ready',
+    '缺陷库同步作业': 'ready',
+    '量测机台周末窗口': 'scheduled',
+    'SPC 规则变更评审': 'running',
+    'EMS 瞬时超时排查': 'blocked',
     '站会纪要整理': 'done',
     '推进供应链数字化核心能力建设': 'todo',
     '完成供应链数据底座建设': 'done',
@@ -2640,6 +2952,12 @@
     'WMS 库位热力图导出': 'done',
     '历史订单数据清洗': 'done',
     '供应商协同平台对接': 'blocked',
+    '渠道对账核对': 'ready',
+    'Q4 盘点窗口对齐': 'scheduled',
+    '治理规范自动评审': 'running',
+    'EDI 报文拉取熔断': 'blocked',
+    'WMS 瞬时超时排查': 'blocked',
+    '试点工厂调研': 'archived',
     '任务拆解': 'ready',
     '数据收集': 'ready',
     '分析报告': 'running',
@@ -2839,6 +3157,113 @@
       }
       if (t.title === '光刻 overlay 偏差复核' && t.status === 'blocked' && !t.blockKind) {
         t.blockKind = 'needs_input';
+      }
+    });
+    state.projectTaskSchemaVersion = SCHEMA;
+    persist();
+  }
+
+  function migrateHumanTimelineAndGaveUp() {
+    var SCHEMA = 13;
+    if ((state.projectTaskSchemaVersion || 0) >= SCHEMA) return;
+    (state.projects || []).forEach(function (p) {
+      if (p.name.indexOf('良率') >= 0) {
+        var exists = (state.projectTasks || []).some(function (t) {
+          return sameId(t.projectId, p.id) && t.title === 'FDC 实时采集熔断';
+        });
+        if (!exists) {
+          var device = (state.projectMembers || []).find(function (m) {
+            return sameId(m.projectId, p.id) && m.role === 'member';
+          });
+          var lead = (state.projectMembers || []).find(function (m) {
+            return sameId(m.projectId, p.id) && m.role === 'lead';
+          });
+          state.projectTasks.push(projectTaskSeed(p, {
+            title: 'FDC 实时采集熔断',
+            status: 'blocked',
+            expertId: device ? device.expertId : (lead ? lead.expertId : null),
+            sortOrder: 27.5,
+            priority: 'high',
+            body: '稳定拉取 FDC 实时流并写入良率对照表。连续启动失败后调度已停止自动重试。',
+            latestSummary: '连续 spawn/timeout 已达上限，调度停止自动重试。',
+            blockedReason: '',
+            blockKind: 'transient',
+            consecutiveFailures: 2,
+            lastFailureError: 'collector timeout after 600s',
+            startedAt: minutesAgoIso(80),
+            runs: [
+              {
+                id: 'run-2', profile: device ? device.expertId : null, outcome: 'gave_up', status: 'gave_up',
+                startedAt: minutesAgoIso(50), endedAt: minutesAgoIso(48),
+                summary: '第二次启动采集进程超时，达到失败上限。', error: 'timed_out: collector timeout after 600s', metadata: { failures: 2, effective_limit: 2 }
+              },
+              {
+                id: 'run-1', profile: device ? device.expertId : null, outcome: 'crashed', status: 'crashed',
+                startedAt: minutesAgoIso(80), endedAt: minutesAgoIso(78),
+                summary: '采集进程启动后立即退出。', error: 'spawn_failed: FDC agent crashed (exit 1)', metadata: null
+              }
+            ],
+            taskEvents: [
+              { id: uid(), kind: 'gave_up', label: '放弃', payload: { error: 'collector timeout after 600s', failures: 2, effective_limit: 2 }, createdAt: minutesAgoIso(48) },
+              { id: uid(), kind: 'created', label: '创建', createdAt: minutesAgoIso(180) }
+            ],
+            diagnostics: [
+              { title: '连续失败已停止重试', suggestion: '检查采集链路后重启', kind: 'repeated_failures', severity: 'warn' }
+            ],
+            createdAt: minutesAgoIso(180),
+            updatedAt: minutesAgoIso(48)
+          }));
+        }
+      }
+      if (p.name.indexOf('良率') >= 0 || p.name.indexOf('供应链') >= 0) {
+        var tasks = (state.projectTasks || []).filter(function (t) { return sameId(t.projectId, p.id); });
+        state.projectEvents = (state.projectEvents || []).filter(function (e) { return !sameId(e.projectId, p.id); });
+        var seeded = p.name.indexOf('良率') >= 0
+          ? defaultYieldProjectEventsFor(p, tasks)
+          : defaultSupplyProjectEventsFor(p, tasks);
+        seeded.forEach(function (e) { state.projectEvents.push(e); });
+      }
+    });
+    state.projectTaskSchemaVersion = SCHEMA;
+    persist();
+  }
+
+  function migrateStatusVariantDemoCards() {
+    var SCHEMA = 14;
+    if ((state.projectTaskSchemaVersion || 0) >= SCHEMA) return;
+    (state.projects || []).forEach(function (p) {
+      var members = (state.projectMembers || []).filter(function (m) { return sameId(m.projectId, p.id); });
+      if (!members.length) return;
+      var extras = [];
+      if (p.name.indexOf('良率') >= 0) extras = extraYieldStatusDemoTasks(p, members);
+      else if (p.name.indexOf('供应链') >= 0) extras = extraSupplyStatusDemoTasks(p, members);
+      extras.forEach(function (task) {
+        var exists = (state.projectTasks || []).some(function (t) {
+          return sameId(t.projectId, p.id) && t.title === task.title;
+        });
+        if (!exists) state.projectTasks.push(task);
+      });
+      (state.projectTasks || []).forEach(function (t) {
+        if (!sameId(t.projectId, p.id)) return;
+        if (t.title === '光刻 overlay 偏差复核' && t.status === 'blocked') {
+          t.blockKind = t.blockKind || 'needs_input';
+          t.lastStatusReason = t.lastStatusReason || t.blockedReason || '量测设备校准证书过期';
+        }
+        if (t.title === '供应商协同平台对接' && t.status === 'blocked') {
+          t.blockKind = t.blockKind || 'capability';
+          t.lastStatusReason = t.lastStatusReason || t.blockedReason || '供应商平台 API 密钥待采购部门审批';
+        }
+      });
+      if (p.name.indexOf('良率') >= 0 || p.name.indexOf('供应链') >= 0) {
+        var tasks = (state.projectTasks || []).filter(function (t) { return sameId(t.projectId, p.id); });
+        var keepHumanArchive = (state.projectEvents || []).filter(function (e) {
+          return sameId(e.projectId, p.id) && e.type === 'task_archived' && /良率根因分析/.test(String(e.title || ''));
+        });
+        state.projectEvents = (state.projectEvents || []).filter(function (e) { return !sameId(e.projectId, p.id); });
+        var seeded = p.name.indexOf('良率') >= 0
+          ? defaultYieldProjectEventsFor(p, tasks)
+          : defaultSupplyProjectEventsFor(p, tasks);
+        seeded.concat(keepHumanArchive).forEach(function (e) { state.projectEvents.push(e); });
       }
     });
     state.projectTaskSchemaVersion = SCHEMA;
@@ -3239,6 +3664,30 @@
     persist();
   }
 
+  var TIMELINE_KIND_CATEGORY = {
+    project_created: 'project',
+    member_added: 'project',
+    member_removed: 'project',
+    goal_submitted: 'project',
+    goal_created: 'project',
+    settings_changed: 'project',
+    task_created: 'task',
+    task_assigned: 'task',
+    task_reassigned: 'task',
+    task_commented: 'task',
+    comment_added: 'task',
+    task_completed: 'task',
+    task_blocked: 'task',
+    task_unblocked: 'task',
+    task_archived: 'task',
+    task_resumed_from_loop: 'task',
+    task_edited: 'task'
+  };
+
+  function currentActorName() {
+    return '当前用户';
+  }
+
   window.AppStore = {
     isDevMock: function () {
       return DEV_MOCK;
@@ -3278,6 +3727,8 @@
       migrateTaskProcessDemo();
       migrateCardLayoutFields();
       migrateKickbackDemoCards();
+      migrateHumanTimelineAndGaveUp();
+      migrateStatusVariantDemoCards();
       migrateDialogueTaskLastActivity();
       migrateProjectFiles();
       migrateProjectMessageTypes();
@@ -4500,13 +4951,15 @@
         { id: uid(), role: 'system', content: '项目「' + project.name + '」已创建。', createdAt: nowIso() }
       ];
       (payload.expertIds || []).forEach(function (eid) {
-        AppStore.addProjectMember(project.id, eid);
+        AppStore.addProjectMember(project.id, eid, { skipEvent: true });
       });
+      var memberCount = (payload.expertIds || []).length;
       AppStore.addProjectEvent(project.id, {
         type: 'project_created',
         category: 'project',
-        title: '项目创建',
-        content: '项目「' + project.name + '」已创建并初始化为 Kanban Board。'
+        actor: currentActorName(),
+        title: '项目创建，成员 ' + memberCount + ' 人',
+        content: '项目创建，成员 ' + memberCount + ' 人'
       }, { skipPersist: true });
       persist();
       return project;
@@ -4540,7 +4993,8 @@
     getProjectMembers: function (projectId) {
       return state.projectMembers.filter(function (m) { return sameId(m.projectId, projectId); });
     },
-    addProjectMember: function (projectId, expertId) {
+    addProjectMember: function (projectId, expertId, opts) {
+      opts = opts || {};
       if (state.projectMembers.some(function (m) { return sameId(m.projectId, projectId) && sameId(m.expertId, expertId); })) return;
       state.projectMembers.push({
         id: uid(),
@@ -4554,11 +5008,33 @@
       markProjectUserTouched(projectId);
       var pMember = state.projects.find(function (x) { return sameId(x.id, projectId); });
       if (pMember) pMember.updatedAt = nowIso();
+      if (!opts.skipEvent) {
+        var profileName = ((AppStore.getExpert(expertId) || {}).name) || '专家';
+        AppStore.addProjectEvent(projectId, {
+          type: 'member_added',
+          category: 'project',
+          actor: currentActorName(),
+          expertId: expertId,
+          title: currentActorName() + ' 将 @' + profileName + ' 加入项目',
+          content: currentActorName() + ' 将 @' + profileName + ' 加入项目'
+        }, { skipPersist: true });
+      }
       persist();
     },
     removeProjectMember: function (memberId) {
       var member = state.projectMembers.find(function (m) { return m.id === memberId; });
-      if (member) markProjectUserTouched(member.projectId);
+      if (member) {
+        markProjectUserTouched(member.projectId);
+        var profileName = ((AppStore.getExpert(member.expertId) || {}).name) || '专家';
+        AppStore.addProjectEvent(member.projectId, {
+          type: 'member_removed',
+          category: 'project',
+          actor: currentActorName(),
+          expertId: member.expertId,
+          title: currentActorName() + ' 将 @' + profileName + ' 移出项目',
+          content: currentActorName() + ' 将 @' + profileName + ' 移出项目'
+        }, { skipPersist: true });
+      }
       state.projectMembers = state.projectMembers.filter(function (m) { return m.id !== memberId; });
       persist();
     },
@@ -4620,9 +5096,10 @@
         taskId: payload.taskId || null,
         expertId: payload.expertId || null,
         type: payload.type || 'project_event',
-        category: payload.category || 'project',
+        category: payload.category || TIMELINE_KIND_CATEGORY[payload.type] || 'project',
+        actor: payload.actor || '',
         title: payload.title || '项目动态',
-        content: payload.content || '',
+        content: payload.content || payload.title || '',
         meta: payload.meta || null,
         createdAt: payload.createdAt || nowIso()
       };
@@ -4635,8 +5112,13 @@
       return (state.projectEvents || [])
         .filter(function (e) {
           if (!sameId(e.projectId, projectId)) return false;
+          var mapped = TIMELINE_KIND_CATEGORY[e.type];
+          if (!mapped) return false;
+          if (e.type === 'comment_added') e.type = 'task_commented';
+          if (e.type === 'goal_created') mapped = 'project';
+          e.category = mapped;
           if (!category) return true;
-          return e.category === category;
+          return mapped === category;
         })
         .sort(function (a, b) { return (b.createdAt || '').localeCompare(a.createdAt || ''); });
     },
@@ -4684,20 +5166,36 @@
         blockedReason: '',
         sortOrder: Date.now(),
         createdAt: nowIso(),
-        updatedAt: nowIso()
+        updatedAt: nowIso(),
+        createdBy: currentActorName()
       };
       if (!state.projectTasks) state.projectTasks = [];
       state.projectTasks.unshift(task);
       var p = state.projects.find(function (x) { return sameId(x.id, projectId); });
       if (p) p.updatedAt = nowIso();
-      AppStore.addProjectEvent(projectId, {
-        type: 'task_created',
-        category: 'task',
-        taskId: task.id,
-        expertId: task.expertId,
-        title: '任务创建',
-        content: '创建任务「' + task.title + '」' + (task.expertId ? ('，负责人：' + ((AppStore.getExpert(task.expertId) || {}).name || '未知专家')) : '，暂未指派负责人。')
-      }, { skipPersist: true });
+      if (!payload.skipTimelineEvent) {
+        var actor = currentActorName();
+        var assigneeLabel = task.expertId ? (((AppStore.getExpert(task.expertId) || {}).name) || '专家') : '';
+        if (task.isTriage) {
+          AppStore.addProjectEvent(projectId, {
+            type: 'goal_submitted',
+            category: 'project',
+            actor: actor,
+            taskId: task.id,
+            expertId: task.expertId,
+            title: actor + ' 发起了目标「' + task.title + '」'
+          }, { skipPersist: true });
+        } else {
+          AppStore.addProjectEvent(projectId, {
+            type: 'task_created',
+            category: 'task',
+            actor: actor,
+            taskId: task.id,
+            expertId: task.expertId,
+            title: actor + ' 创建了任务「' + task.title + '」' + (assigneeLabel ? (' · 负责人 @' + assigneeLabel) : '')
+          }, { skipPersist: true });
+        }
+      }
       persist();
       return task;
     },
@@ -4710,14 +5208,6 @@
       root.decomposeError = '';
       root.latestSummary = '系统正在拆解目标并派发子任务';
       root.updatedAt = nowIso();
-      AppStore.addProjectEvent(projectId, {
-        type: 'task_decompose_started',
-        category: 'execution',
-        taskId: root.id,
-        expertId: root.expertId,
-        title: '自动拆解启动',
-        content: '协调专家开始拆解目标「' + root.title + '」并派发子任务。'
-      }, { skipPersist: true });
       var members = (state.projectMembers || [])
         .filter(function (m) { return sameId(m.projectId, projectId) && !sameId(m.expertId, root.expertId); })
         .map(function (m) { return m.expertId; });
@@ -4731,31 +5221,16 @@
           assignee: assignee,
           priority: def.priority || 'medium',
           status: assignee ? 'ready' : 'todo',
-          parentTaskId: root.id
+          parentTaskId: root.id,
+          skipTimelineEvent: true
         });
         children.push(child);
-        AppStore.addProjectEvent(projectId, {
-          type: 'task_dispatched',
-          category: 'task',
-          taskId: child.id,
-          expertId: assignee,
-          title: '子任务派发',
-          content: '协调专家派发子任务「' + child.title + '」' + (assignee ? ('给 ' + ((AppStore.getExpert(assignee) || {}).name || '专家')) : '，暂未指派。')
-        }, { skipPersist: true });
       });
       root.status = normalizeProjectTaskStatus('todo');
       root.goalRequestStatus = 'running';
       root.decomposeError = '';
       root.latestSummary = '已拆解为 ' + children.length + ' 个子任务并完成派发';
       root.updatedAt = nowIso();
-      AppStore.addProjectEvent(projectId, {
-        type: 'task_decompose_completed',
-        category: 'execution',
-        taskId: root.id,
-        expertId: root.expertId,
-        title: '拆解完成',
-        content: '目标「' + root.title + '」已拆解为 ' + children.length + ' 个子任务并完成派发。'
-      }, { skipPersist: true });
       persist();
       return { root: root, children: children };
     },
@@ -4781,29 +5256,28 @@
       if (!Array.isArray(task.comments)) task.comments = [];
       task.comments.push({
         id: uid(),
-        author: '当前用户',
+        author: currentActorName(),
         expertId: null,
         body: text,
         createdAt: nowIso()
       });
-      task.latestSummary = text;
       task.updatedAt = nowIso();
       if (!Array.isArray(task.taskEvents)) task.taskEvents = [];
       task.taskEvents.unshift({
         id: uid(),
         kind: 'commented',
         label: '添加评论',
-        author: '当前用户',
-        payload: { reason: text },
+        author: currentActorName(),
+        payload: { author: currentActorName(), len: text.length },
         createdAt: nowIso()
       });
       AppStore.addProjectEvent(projectId, {
         type: 'task_commented',
-        category: 'comment',
+        category: 'task',
+        actor: currentActorName(),
         taskId: task.id,
         expertId: task.expertId,
-        title: '任务评论',
-        content: '在任务「' + task.title + '」下添加评论：' + text
+        title: currentActorName() + ' 评论了「' + task.title + '」'
       }, { skipPersist: true });
       persist();
       return task;
@@ -4829,10 +5303,10 @@
       AppStore.addProjectEvent(projectId, {
         type: 'task_assigned',
         category: 'task',
+        actor: currentActorName(),
         taskId: task.id,
         expertId: expertId || null,
-        title: '任务指派',
-        content: '任务「' + task.title + '」' + (expert ? ('已指派给 ' + expert.name + '。') : '已取消负责人。')
+        title: currentActorName() + ' 把「' + task.title + '」转交给 @' + (expert ? expert.name : '未指派')
       }, { skipPersist: true });
       persist();
       return task;
@@ -4859,10 +5333,10 @@
       AppStore.addProjectEvent(projectId, {
         type: 'task_completed',
         category: 'task',
+        actor: currentActorName(),
         taskId: task.id,
         expertId: task.expertId,
-        title: '任务完成',
-        content: '任务「' + task.title + '」已完成。' + (text ? ('结果：' + text) : '')
+        title: currentActorName() + ' 完成了「' + task.title + '」'
       }, { skipPersist: true });
       persist();
       return task;
@@ -4890,11 +5364,11 @@
       });
       AppStore.addProjectEvent(projectId, {
         type: 'task_blocked',
-        category: 'exception',
+        category: 'task',
+        actor: currentActorName(),
         taskId: task.id,
         expertId: task.expertId,
-        title: '任务阻塞',
-        content: '任务「' + task.title + '」被标记为阻塞。原因：' + text
+        title: currentActorName() + ' 标记「' + task.title + '」需介入：' + text
       }, { skipPersist: true });
       persist();
       return task;
@@ -4928,10 +5402,10 @@
       AppStore.addProjectEvent(projectId, {
         type: 'task_unblocked',
         category: 'task',
+        actor: currentActorName(),
         taskId: task.id,
         expertId: task.expertId,
-        title: '任务重启',
-        content: '任务「' + task.title + '」已解除阻塞并重启。' + (text ? ('说明：' + text) : '')
+        title: currentActorName() + ' 重启了「' + task.title + '」'
       }, { skipPersist: true });
       persist();
       return task;
@@ -4940,15 +5414,23 @@
       var task = (state.projectTasks || []).find(function (t) { return sameId(t.projectId, projectId) && sameId(t.id, taskId); });
       if (!task) return null;
       task.status = normalizeProjectTaskStatus('archived');
-      task.latestSummary = '任务已归档';
       task.updatedAt = nowIso();
+      if (!Array.isArray(task.taskEvents)) task.taskEvents = [];
+      task.taskEvents.unshift({
+        id: uid(),
+        kind: 'archived',
+        label: '归档',
+        author: currentActorName(),
+        payload: null,
+        createdAt: nowIso()
+      });
       AppStore.addProjectEvent(projectId, {
         type: 'task_archived',
         category: 'task',
+        actor: currentActorName(),
         taskId: task.id,
         expertId: task.expertId,
-        title: '任务归档',
-        content: '任务「' + task.title + '」已归档。'
+        title: currentActorName() + ' 归档了「' + task.title + '」'
       }, { skipPersist: true });
       persist();
       return task;
@@ -4997,10 +5479,10 @@
       AppStore.addProjectEvent(projectId, {
         type: 'task_resumed_from_loop',
         category: 'task',
+        actor: currentActorName(),
         taskId: task.id,
         expertId: task.expertId,
-        title: '完善后继续',
-        content: '任务「' + task.title + '」已根据补充说明离开反复阻塞。'
+        title: currentActorName() + ' 完善后继续了「' + task.title + '」'
       }, { skipPersist: true });
       persist();
       return task;
@@ -5011,14 +5493,6 @@
       task.status = normalizeProjectTaskStatus('ready');
       task.latestSummary = '任务已晋升为排队中';
       task.updatedAt = nowIso();
-      AppStore.addProjectEvent(projectId, {
-        type: 'task_promoted',
-        category: 'task',
-        taskId: task.id,
-        expertId: task.expertId,
-        title: '任务晋升',
-        content: '任务「' + task.title + '」已晋升为排队中。'
-      }, { skipPersist: true });
       persist();
       return task;
     },
@@ -5035,10 +5509,10 @@
       AppStore.addProjectEvent(projectId, {
         type: 'task_reassigned',
         category: 'task',
+        actor: currentActorName(),
         taskId: task.id,
         expertId: expertId || null,
-        title: '任务转交',
-        content: '任务「' + task.title + '」' + (expert ? ('已转交给 ' + expert.name + '。') : '已取消负责人。') + (text ? ('原因：' + text) : '')
+        title: currentActorName() + ' 把「' + task.title + '」转交给 @' + (expert ? expert.name : '未指派')
       }, { skipPersist: true });
       persist();
       return task;
@@ -5073,11 +5547,40 @@
       AppStore.addProjectEvent(projectId, {
         type: 'task_edited',
         category: 'task',
+        actor: currentActorName(),
         taskId: task.id,
         expertId: task.expertId,
-        title: '任务编辑',
-        content: '任务「' + task.title + '」更新了：' + changed.join('、')
+        title: currentActorName() + ' 更新了「' + task.title + '」'
       }, { skipPersist: true });
+      persist();
+      return task;
+    },
+    reclaimProjectTask: function (projectId, taskId) {
+      var task = (state.projectTasks || []).find(function (t) { return sameId(t.projectId, projectId) && sameId(t.id, taskId); });
+      if (!task) return null;
+      if (normalizeProjectTaskStatus(task.status) !== 'running') return task;
+      if (Array.isArray(task.runs)) {
+        task.runs.forEach(function (run) {
+          if (!run) return;
+          if (run.outcome === 'running' || run.status === 'running' || (task.currentRunId && run.id === task.currentRunId)) {
+            run.outcome = 'reclaimed';
+            run.status = 'reclaimed';
+            run.endedAt = nowIso();
+          }
+        });
+      }
+      task.status = 'ready';
+      task.currentRunId = null;
+      task.updatedAt = nowIso();
+      if (!Array.isArray(task.taskEvents)) task.taskEvents = [];
+      task.taskEvents.unshift({
+        id: uid(),
+        kind: 'reclaimed',
+        label: '收回执行',
+        author: currentActorName(),
+        payload: {},
+        createdAt: nowIso()
+      });
       persist();
       return task;
     },

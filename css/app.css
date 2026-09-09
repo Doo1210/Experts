@@ -6347,13 +6347,13 @@ body {
 }
 .project-task-card-priority {
   flex-shrink: 0;
-  width: 22px;
-  height: 22px;
+  width: 16px;
+  height: 16px;
   border-radius: 50%;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  font-size: 10px;
+  font-size: 9px;
   font-weight: 700;
   color: #fff;
   line-height: 1;
@@ -7195,9 +7195,9 @@ body {
   white-space: nowrap;
 }
 .project-task-card-priority {
-  width: 22px;
-  height: 22px;
-  font-size: 11px;
+  width: 16px;
+  height: 16px;
+  font-size: 9px;
 }
 .project-task-card-assignee,
 .project-task-card-row-summary {
@@ -7631,6 +7631,45 @@ body {
   background: rgba(64, 158, 255, 0.08);
 }
 
+.project-kanban-column-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.project-kanban-archived-toggle {
+  margin-left: auto;
+  height: 22px;
+  padding: 0 8px;
+  border-radius: 999px;
+  border: 1px solid #dcdfe6;
+  background: #fff;
+  color: #909399;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.project-kanban-archived-toggle:hover,
+.project-kanban-archived-toggle.active {
+  border-color: #c0c4cc;
+  color: #606266;
+  background: #f4f4f5;
+}
+.project-kanban-archived-toggle.active {
+  background: #f2f6fc;
+  border-color: #c0c4cc;
+  color: #303133;
+}
+.project-kanban-archived-divider {
+  margin: 8px 2px 4px;
+  padding: 4px 2px 0;
+  font-size: 11px;
+  font-weight: 600;
+  color: #909399;
+  border-top: 1px dashed #dcdfe6;
+}
+
 .project-unified-drawer .el-drawer__header {
   margin-bottom: 0;
   padding-bottom: 14px;
@@ -7735,6 +7774,7 @@ body {
 }
 
 .project-task-detail {
+  position: relative;
   display: flex;
   flex-direction: column;
   min-height: 0;
@@ -7751,6 +7791,103 @@ body {
   flex-direction: column;
   gap: 14px;
   -webkit-overflow-scrolling: touch;
+}
+
+.project-task-detail-identity {
+  flex-shrink: 0;
+  padding: 18px 48px 12px 18px;
+  background: #fff;
+  border-bottom: 1px solid #e8edf4;
+}
+.project-task-detail-identity .project-task-card-title {
+  flex: 0 1 auto;
+  font-size: 16px;
+  font-weight: 700;
+}
+.project-task-detail-title-row {
+  justify-content: flex-start;
+  gap: 8px;
+}
+.project-task-detail-identity .project-task-card-row-meta {
+  justify-content: flex-start;
+}
+.project-task-detail-summary-row {
+  margin: 0;
+}
+.project-task-detail-id-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.project-task-detail-id {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  color: #606266;
+  background: #f5f7fa;
+  padding: 4px 8px;
+  border-radius: 6px;
+  word-break: break-all;
+}
+.project-task-detail-dep-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 0;
+  border: none;
+  background: none;
+  cursor: pointer;
+  text-align: left;
+}
+.project-task-detail-dep-row .project-task-card-status {
+  margin-left: auto;
+}
+.context-dep-group + .context-dep-group {
+  margin-top: 10px;
+}
+.context-dep-caption {
+  font-size: 12px;
+  color: #909399;
+  margin-bottom: 4px;
+}
+.context-dep-empty {
+  font-size: 12px;
+  color: #c0c4cc;
+}
+.project-task-detail-advanced-toggle {
+  border: none;
+  background: none;
+  color: #909399;
+  font-size: 12px;
+  cursor: pointer;
+  padding: 0;
+}
+.exec-current {
+  margin-bottom: 8px;
+}
+.exec-current-headline {
+  font-size: 13px;
+  color: #606266;
+  margin: 4px 0 8px;
+}
+.run-item.is-highlight {
+  border-color: #c6d4ee;
+  background: #f5f8ff;
+}
+.project-timeline-day {
+  margin-bottom: 16px;
+}
+.project-timeline-day-label {
+  font-size: 12px;
+  font-weight: 700;
+  color: #909399;
+  margin: 0 0 8px 28px;
+}
+.project-timeline-item.is-clickable {
+  cursor: pointer;
+}
+.project-timeline-dot.event-project {
+  background: #67c23a;
 }
 
 .project-task-detail-hero {
@@ -7793,7 +7930,10 @@ body {
   color: #303133;
 }
 .project-task-detail-close {
-  position: static;
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 2;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -8972,7 +9112,8 @@ body {
 .project-task-detail-dialog .project-task-detail {
   height: 100%;
 }
-.project-task-detail-dialog .project-task-detail-hero {
+.project-task-detail-dialog .project-task-detail-hero,
+.project-task-detail-dialog .project-task-detail-identity {
   flex-shrink: 0;
   border-radius: 0;
   box-shadow: none;
