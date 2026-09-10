@@ -15,6 +15,11 @@
     return 'id_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 8);
   }
 
+  /** 保留空字符串（澄清跳过）；仅把 null/undefined 收成 null */
+  function nullableText(value) {
+    return value == null ? null : value;
+  }
+
   function projectSlugFromName(name) {
     var raw = String(name || '').trim().toLowerCase();
     var slug = raw
@@ -469,7 +474,7 @@
         requestId: m.requestId || null,
         question: m.question || null,
         choices: m.choices || null,
-        answer: m.answer || null,
+        answer: nullableText(m.answer),
         command: m.command || null,
         description: m.description || null,
         allowPermanent: m.allowPermanent || false,
@@ -4846,7 +4851,7 @@
           requestId: m.requestId || null,
           question: m.question || null,
           choices: m.choices || null,
-          answer: m.answer || null,
+          answer: nullableText(m.answer),
           // 危险操作审批相关
           command: m.command || null,
           description: m.description || null,
@@ -4884,7 +4889,7 @@
         requestId: msg.requestId || null,
         question: msg.question || null,
         choices: msg.choices || null,
-        answer: msg.answer || null,
+        answer: nullableText(msg.answer),
         // 危险操作审批相关（approval.request / respond）
         command: msg.command || null,
         description: msg.description || null,
@@ -5905,6 +5910,7 @@
      * 模拟剧本触发词（按顺序命中，先匹配先生效）
      */
     mockScriptTriggers: [
+      { kind: 'clarify_multi', pattern: /多轮澄清|连续澄清|两问澄清|连环澄清/, label: '多轮澄清 / 连续澄清 / 两问澄清', desc: '处理 → 说明 → 两张澄清卡片' },
       { kind: 'phased', pattern: /分步|分段|中途|先说|边做边说|分阶段|穿插/, label: '分步 / 分段 / 中途 / 先说', desc: '处理 → 中途输出 → 再处理 → 最终回复' },
       { kind: 'loop', pattern: /反复|交替|再想|多轮|边想边调|继续查/, label: '反复 / 交替 / 再想 / 多轮', desc: '思考 → 工具 → 再思考 → 再工具 → 回复' },
       { kind: 'error', pattern: /错误|失败|报错|异常/, label: '错误 / 失败 / 报错', desc: '工具失败' },
@@ -6216,6 +6222,41 @@
           push({ type: 'reply.commit', content: '分析文件已生成，可直接预览或下载。' });
           push({ type: 'done', script: 'file' });
         }, 3300);
+        return { kind: kind, scheduled: steps.length };
+      }
+
+      if (kind === 'clarify_multi') {
+        push({ type: 'thought.start', title: '思考中' });
+        later(function () {
+          push({ type: 'text.delta', text: '需要先确认分析维度，再决定要不要同步对比口径。' });
+          push({ type: 'thought.commit', duration: 0.5 });
+        }, 400);
+        later(function () {
+          push({ type: 'reply.start' });
+          push({ type: 'text.delta', text: '有两处需要你确认后再继续。' });
+        }, 900);
+        later(function () {
+          push({ type: 'reply.commit', interim: true, content: '有两处需要你确认后再继续。' });
+        }, 1400);
+        later(function () {
+          push({
+            type: 'clarify.commit',
+            requestId: 'clarify-' + Date.now() + '-1',
+            question: '请确认您希望分析的维度：',
+            choices: ['按时间趋势', '按地域分布', '按产品类别']
+          });
+        }, 1800);
+        later(function () {
+          push({
+            type: 'clarify.commit',
+            requestId: 'clarify-' + Date.now() + '-2',
+            question: '是否需要同步输出对比口径？',
+            choices: ['需要', '不需要']
+          });
+        }, 2100);
+        later(function () {
+          push({ type: 'done', script: 'clarify_multi' });
+        }, 2500);
         return { kind: kind, scheduled: steps.length };
       }
 

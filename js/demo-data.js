@@ -2,7 +2,7 @@
  * 演示数据 — 专家对话任务剧本（按专家 id 索引）。
  * 修改剧本后请同步递增 DEMO_DATA_VERSION，触发一次性重新同步。
  */
-window.DEMO_DATA_VERSION = 10;
+window.DEMO_DATA_VERSION = 11;
 
 window.DEMO_DIALOGUE_TASK_BUNDLES = {
       '1': [
@@ -447,6 +447,7 @@ window.DEMO_DIALOGUE_TASK_BUNDLES = {
             { role: 'expert', type: 'action', toolName: 'read_file', params: { path: 'workspace/station-8/README.md' }, summary: '读取工位说明 1.8k 字', duration: 0.4, content: '[read_file] 执行完成 (0.4s)', offsetMin: 21 },
             { role: 'expert', type: 'chat', content: '资料能对上，但可以从时间、地域或产品类别切入。请先选一个分析维度。', offsetMin: 22 },
             { role: 'expert', type: 'clarify', requestId: 'demo-clarify-1', question: '请确认您希望分析的维度：', choices: ['按时间趋势', '按地域分布', '按产品类别'], answer: '按时间趋势', offsetMin: 23 },
+            { role: 'expert', type: 'clarify', requestId: 'demo-clarify-skip', question: '是否需要同步输出对比口径？', choices: ['需要', '不需要'], answer: '', offsetMin: 23 },
             { role: 'expert', type: 'thought', content: '维度已确认，按时间趋势查询后准备导出。', duration: 0.5, offsetMin: 24 },
             { role: 'expert', type: 'action', toolName: '数据查询', params: { dimension: '按时间趋势' }, summary: '按时间趋势完成分析', duration: 1.5, content: '[数据查询] 执行完成 (1.5s)', offsetMin: 25 },
             { role: 'expert', type: 'chat', content: '已按时间趋势完成分析，共 3 条记录。接下来会导出 Excel 到工作空间，需确认后执行。', offsetMin: 26 },
@@ -469,7 +470,7 @@ window.DEMO_DIALOGUE_TASK_BUNDLES = {
             { role: 'expert', type: 'action', toolName: 'terminal', params: { command: 'python scripts/summarize_cycle.py' }, summary: '汇总平均节拍 45.2s', duration: 1.0, content: '[terminal] 执行完成 (1.0s)', offsetMin: 41 },
             { role: 'expert', type: 'thought', content: '脚本结果还缺 MES 对照，补一次查询后即可下结论。', duration: 0.5, offsetMin: 42 },
             { role: 'expert', type: 'action', toolName: 'MES 数据查询', params: { query: '工位8产能', source: 'MES 实时库' }, summary: '检索到 3 条记录并完成聚合', duration: 1.3, content: '[MES 数据查询] 执行完成 (1.3s)', offsetMin: 42 },
-            { role: 'expert', type: 'chat', content: '已完成多轮核对：资料、脚本与 MES 结果一致，节拍按 45.2s 计即可。\n\n以上是**过程内多轮**：思考 → 工具 → 再思考 → 再工具，全部收在同一条「处理完成」里。\n\n模拟触发词（按先后命中）：\n- **分步 / 分段 / 中途 / 先说** → 处理 → 中途输出 → 再处理 → 最终回复\n- **反复 / 交替 / 再想 / 多轮** → 思考 → 工具 → 再思考 → 再工具 → 回复\n- **思考 / 推理** → 仅思考后回复\n- **查询 / 检索 / 工具** → 多次工具调用后回复\n- **子智能体 / 委派** → 子智能体流程\n- **错误 / 失败** → 工具失败\n- **澄清** → 处理 → 说明 → 澄清卡片\n- **审批 / 确认** → 处理 → 说明 → 审批卡片', offsetMin: 43 }
+            { role: 'expert', type: 'chat', content: '已完成多轮核对：资料、脚本与 MES 结果一致，节拍按 45.2s 计即可。\n\n以上是**过程内多轮**：思考 → 工具 → 再思考 → 再工具，全部收在同一条「处理完成」里。\n\n模拟触发词（按先后命中）：\n- **分步 / 分段 / 中途 / 先说** → 处理 → 中途输出 → 再处理 → 最终回复\n- **反复 / 交替 / 再想 / 多轮** → 思考 → 工具 → 再思考 → 再工具 → 回复\n- **思考 / 推理** → 仅思考后回复\n- **查询 / 检索 / 工具** → 多次工具调用后回复\n- **子智能体 / 委派** → 子智能体流程\n- **错误 / 失败** → 工具失败\n- **多轮澄清 / 连续澄清 / 两问澄清** → 处理 → 说明 → 两张澄清卡片\n- **澄清** → 处理 → 说明 → 澄清卡片\n- **审批 / 确认** → 处理 → 说明 → 审批卡片', offsetMin: 43 }
           ],
           artifacts: [
             { title: '内容块演示报告', content: '本任务演示了阶段0与阶段1的全部对话内容块类型，包括工具参数、执行时长、错误状态、子智能体嵌套事件、HITL 交互闭环。', type: 'report' }

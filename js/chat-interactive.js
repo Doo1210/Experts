@@ -400,9 +400,9 @@
   /**
    * 危险操作审批卡片（HITL）
    * props: { requestId, command, description, allowPermanent, choice }
-   * - pending 态（choice 为空）：展示允许 / 允许并记住 / 拒绝 按钮
+   * - pending 态（choice 为空）：本次允许 / 本会话允许 / 始终允许 / 拒绝
    * - resolved 态（choice 有值）：展示已选决定
-   * emits: 'resolve' ({ requestId, choice, permanent })
+   * emits: 'resolve' ({ requestId, choice, permanent, session })
    */
   var ApprovalCard = {
     props: {
@@ -417,8 +417,9 @@
         return this.choice !== null && this.choice !== undefined && this.choice !== '';
       },
       choiceLabel: function () {
-        if (this.choice === 'allow') return '已允许';
-        if (this.choice === 'allow_permanent') return '已允许并记住';
+        if (this.choice === 'allow') return '本次已允许';
+        if (this.choice === 'allow_session') return '本会话已允许';
+        if (this.choice === 'allow_permanent') return '已始终允许';
         if (this.choice === 'deny') return '已拒绝';
         return this.choice;
       }
@@ -426,8 +427,12 @@
     methods: {
       resolve: function (choice) {
         if (this.isResolved) return;
-        var permanent = choice === 'allow_permanent';
-        this.$emit('resolve', { requestId: this.requestId, choice: choice, permanent: permanent });
+        this.$emit('resolve', {
+          requestId: this.requestId,
+          choice: choice,
+          permanent: choice === 'allow_permanent',
+          session: choice === 'allow_session'
+        });
       }
     },
     template: '\
@@ -442,8 +447,9 @@
         </div>\
         <div class="approval-desc" v-if="description">{{ description }}</div>\
         <div v-if="!isResolved" class="approval-actions">\
-          <button type="button" class="approval-btn approval-btn-allow" @click="resolve(\'allow\')">允许</button>\
-          <button v-if="allowPermanent" type="button" class="approval-btn approval-btn-allow-perm" @click="resolve(\'allow_permanent\')">允许并记住</button>\
+          <button type="button" class="approval-btn approval-btn-allow" @click="resolve(\'allow\')">本次允许</button>\
+          <button type="button" class="approval-btn approval-btn-allow-session" @click="resolve(\'allow_session\')">本会话允许</button>\
+          <button type="button" class="approval-btn approval-btn-allow-perm" @click="resolve(\'allow_permanent\')">始终允许</button>\
           <button type="button" class="approval-btn approval-btn-deny" @click="resolve(\'deny\')">拒绝</button>\
         </div>\
         <div v-else class="approval-resolved" :class="\'resolved-\' + choice">{{ choiceLabel }}</div>\
@@ -463,15 +469,20 @@
    *
    * emits:
    *   answer  ({ requestId, choice })           // variant === 'clarify'
-   *   resolve ({ requestId, choice, permanent }) // variant === 'approval'
+   *   resolve ({ requestId, choice, permanent, session }) // variant === 'approval'
    */
   var HitlCard = {
     props: {
       variant: { type: String, required: true },
       data:    { type: Object, required: true },
-      mode:    { type: String, default: 'pending' }
+      mode:    { type: String, default: 'pending' },
+      draft:   { type: Object, default: null },
+      pagerIndex: { type: Number, default: 0 },
+      pagerTotal: { type: Number, default: 0 },
+      pagerCanPrev: { type: Boolean, default: false },
+      pagerCanNext: { type: Boolean, default: false }
     },
-    emits: ['answer', 'resolve'],
+    emits: ['answer', 'resolve', 'draft-change', 'pager-prev', 'pager-next'],
     data: function () {
       return {
         selectedChoiceIndex: -1,
@@ -519,14 +530,36 @@
       hasClarifyAnswer: function () {
         return this.isClarify && this.isPending && !this.submitting && this.clarifyAnswer.length > 0;
       },
+      showPager: function () {
+        return this.isClarify && this.isPending && this.pagerTotal >= 2;
+      },
 
-      resolvedAnswer: function () {
-        return this.data.answer != null ? this.data.answer : '';
+      resolvedClarify: function () {
+        var answer = this.data.answer;
+        if (answer === '' || answer == null) {
+          return { kind: 'skip', label: '已跳过', key: '', value: '' };
+        }
+        var idx = this.choices.indexOf(answer);
+        if (idx >= 0) {
+          return {
+            kind: 'preset',
+            label: '已选择',
+            key: String.fromCharCode(65 + idx),
+            value: answer
+          };
+        }
+        return {
+          kind: 'other',
+          label: '已选择',
+          key: this.choices.length ? this.otherKey : '',
+          value: answer
+        };
       },
       resolvedChoiceLabel: function () {
         var c = this.data.choice;
-        if (c === 'allow') return '已允许';
-        if (c === 'allow_permanent') return '已允许并记住';
+        if (c === 'allow') return '本次已允许';
+        if (c === 'allow_session') return '本会话已允许';
+        if (c === 'allow_permanent') return '已始终允许';
         if (c === 'deny') return '已拒绝';
         return c || '';
       }
@@ -538,11 +571,13 @@
         this.otherValue = '';
         this.otherExpanded = false;
         this.otherFocused = false;
+        this.emitDraft();
       },
       activateOther: function () {
         if (!this.isClarify || !this.isPending || this.submitting) return;
         this.selectedChoiceIndex = -1;
         this.otherExpanded = true;
+        this.emitDraft();
         var self = this;
         this.$nextTick(function () {
           var el = self.$refs.otherInput;
@@ -552,6 +587,23 @@
       onOtherInput: function (event) {
         this.otherValue = event.target.value;
         this.selectedChoiceIndex = -1;
+        this.emitDraft();
+      },
+      emitDraft: function () {
+        this.$emit('draft-change', {
+          requestId: this.requestId,
+          draft: {
+            selectedChoiceIndex: this.selectedChoiceIndex,
+            otherValue: this.otherValue,
+            otherExpanded: this.otherExpanded
+          }
+        });
+      },
+      applyDraft: function (draft) {
+        if (!draft) return;
+        if (typeof draft.selectedChoiceIndex === 'number') this.selectedChoiceIndex = draft.selectedChoiceIndex;
+        if (draft.otherValue != null) this.otherValue = draft.otherValue;
+        if (draft.otherExpanded) this.otherExpanded = true;
       },
       onClarifyKeydown: function (event) {
         if (event.isComposing || event.keyCode === 229) return;
@@ -604,9 +656,16 @@
       },
       onResolve: function (choice) {
         if (!this.isPending) return;
-        var permanent = choice === 'allow_permanent';
-        this.$emit('resolve', { requestId: this.requestId, choice: choice, permanent: permanent });
+        this.$emit('resolve', {
+          requestId: this.requestId,
+          choice: choice,
+          permanent: choice === 'allow_permanent',
+          session: choice === 'allow_session'
+        });
       }
+    },
+    created: function () {
+      this.applyDraft(this.draft);
     },
     mounted: function () {
       document.addEventListener('keydown', this.onClarifyDocumentKeydown);
@@ -617,10 +676,27 @@
     template: '\
       <div class="hitl-card"\
            :class="[\'variant-\' + variant, \'mode-\' + mode, isDanger ? \'is-danger\' : \'\']">\
-        <div class="hitl-card-header" :class="{ \'is-clarify\': isClarify }">\
+        <div class="hitl-card-header" :class="{ \'is-clarify\': isClarify && isPending }">\
           <template v-if="isClarify">\
             <span class="hitl-card-icon">{{ headerIcon }}</span>\
-            <span class="hitl-card-title">{{ question }}</span>\
+            <span class="hitl-card-title">{{ isResolved ? headerTitle : question }}</span>\
+            <div v-if="showPager" class="hitl-clarify-pager" role="navigation" aria-label="澄清进度">\
+              <button type="button"\
+                      class="hitl-clarify-pager-btn"\
+                      :disabled="submitting || !pagerCanPrev"\
+                      aria-label="上一个"\
+                      @click.stop="$emit(\'pager-prev\')">\
+                <svg viewBox="0 0 12 12" width="12" height="12" fill="none" aria-hidden="true"><path d="M7.5 2.5 3.5 6l4 3.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>\
+              </button>\
+              <span class="hitl-clarify-pager-count">{{ pagerIndex + 1 }}/{{ pagerTotal }}</span>\
+              <button type="button"\
+                      class="hitl-clarify-pager-btn"\
+                      :disabled="submitting || !pagerCanNext"\
+                      aria-label="下一个"\
+                      @click.stop="$emit(\'pager-next\')">\
+                <svg viewBox="0 0 12 12" width="12" height="12" fill="none" aria-hidden="true"><path d="M4.5 2.5 8.5 6l-4 3.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>\
+              </button>\
+            </div>\
           </template>\
           <template v-else>\
             <span class="hitl-card-icon">{{ headerIcon }}</span>\
@@ -685,10 +761,17 @@
                 <template v-else>继续 <span class="hitl-clarify-enter" aria-hidden="true">⏎</span></template>\
               </button>\
             </div>\
-            <div v-else-if="isResolved" class="hitl-card-resolved">\
-              <span class="hitl-card-resolved-label">已选择：</span>\
-              <span class="hitl-card-resolved-value">{{ resolvedAnswer }}</span>\
-            </div>\
+            <template v-else-if="isResolved">\
+              <div v-if="question" class="hitl-card-command">\
+                <span class="hitl-card-command-label">提问</span>\
+                <span class="hitl-card-question-text">{{ question }}</span>\
+              </div>\
+              <div class="hitl-card-resolved" :class="\'resolved-clarify-\' + resolvedClarify.kind">\
+                <span class="hitl-card-resolved-status">{{ resolvedClarify.label }}</span>\
+                <span v-if="resolvedClarify.key" class="hitl-clarify-resolved-key">{{ resolvedClarify.key }}</span>\
+                <span v-if="resolvedClarify.value" class="hitl-card-resolved-value">{{ resolvedClarify.value }}</span>\
+              </div>\
+            </template>\
           </template>\
           <template v-else>\
             <div v-if="command" class="hitl-card-command">\
@@ -698,11 +781,11 @@
             <div v-if="description" class="hitl-card-desc">{{ description }}</div>\
             <div v-if="isPending" class="hitl-card-actions">\
               <button type="button" class="hitl-card-btn hitl-card-btn-allow"\
-                      @click="onResolve(\'allow\')">允许</button>\
-              <button v-if="allowPermanent"\
-                      type="button"\
-                      class="hitl-card-btn hitl-card-btn-allow-perm"\
-                      @click="onResolve(\'allow_permanent\')">允许并记住</button>\
+                      @click="onResolve(\'allow\')">本次允许</button>\
+              <button type="button" class="hitl-card-btn hitl-card-btn-allow-session"\
+                      @click="onResolve(\'allow_session\')">本会话允许</button>\
+              <button type="button" class="hitl-card-btn hitl-card-btn-allow-perm"\
+                      @click="onResolve(\'allow_permanent\')">始终允许</button>\
               <button type="button" class="hitl-card-btn hitl-card-btn-deny"\
                       @click="onResolve(\'deny\')">拒绝</button>\
             </div>\

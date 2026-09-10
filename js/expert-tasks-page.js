@@ -60,7 +60,7 @@
         var list = messages.value || [];
         for (var i = 0; i < list.length; i++) {
           var m = list[i];
-          if (m.type === 'clarify' && !m.answer) return 'hitl';
+          if (m.type === 'clarify' && m.answer == null) return 'hitl';
           if (m.type === 'approval' && !m.choice) return 'hitl';
         }
         if (streaming.value || sending.value) return 'running';
@@ -71,29 +71,117 @@
         return map[expertStatus.value] || '空闲';
       });
       /**
-       * 当前任务的"等待回应"卡片
-       * 规则：
-       *  - 倒序找最近一个 pending HITL（clarify/approval 任一）
-       *  - 同时返回 pending 总数，用于"还有 N 个"提示
+       * 当前任务的等待回应卡片
+       *  - 审批优先钉在 Pin 区，不进入澄清分页
+       *  - 本轮澄清批次（含已答）：≥2 张才显示 1/2；答完第一问后第二问仍显示 2/2
+       *  - 切页只在未回答的卡片之间移动
        */
-      var activeHitl = Vue.computed(function () {
+      var clarifyPagerIndex = Vue.ref(0);
+      var clarifyDrafts = Vue.ref({});
+
+      function pendingClarifyList() {
+        return (messages.value || []).filter(function (m) {
+          return m.type === 'clarify' && m.answer == null;
+        });
+      }
+
+      function pendingApprovalList() {
+        return (messages.value || []).filter(function (m) {
+          return m.type === 'approval' && m.choice == null;
+        });
+      }
+
+      /** 本轮连续澄清（含已回答），用于 1/2 分母，避免答完一问后分页条消失 */
+      function clarifyBatchList() {
         var list = messages.value || [];
-        var pending = [];
-        for (var i = 0; i < list.length; i++) {
-          var m = list[i];
-          if (m.type === 'clarify' && m.answer == null) {
-            pending.push({ kind: 'clarify', data: m });
-          } else if (m.type === 'approval' && m.choice == null) {
-            pending.push({ kind: 'approval', data: m });
+        var firstPending = -1;
+        var lastPending = -1;
+        var i;
+        for (i = 0; i < list.length; i++) {
+          if (list[i].type === 'clarify' && list[i].answer == null) {
+            if (firstPending < 0) firstPending = i;
+            lastPending = i;
           }
         }
-        if (!pending.length) return { current: null, count: 0, overflow: 0 };
-        var last = pending[pending.length - 1];
+        if (firstPending < 0) return [];
+        var start = firstPending;
+        var end = lastPending;
+        while (start > 0 && list[start - 1].type === 'clarify') start -= 1;
+        while (end + 1 < list.length && list[end + 1].type === 'clarify') end += 1;
+        var batch = [];
+        for (i = start; i <= end; i++) {
+          if (list[i].type === 'clarify') batch.push(list[i]);
+        }
+        return batch;
+      }
+
+      var activeHitl = Vue.computed(function () {
+        var emptyPager = { pagerIndex: 0, pagerTotal: 0, pagerCanPrev: false, pagerCanNext: false };
+        var approvals = pendingApprovalList();
+        if (approvals.length) {
+          return Object.assign({
+            current: { kind: 'approval', data: approvals[approvals.length - 1] }
+          }, emptyPager);
+        }
+        var clarifies = pendingClarifyList();
+        if (!clarifies.length) {
+          return Object.assign({ current: null }, emptyPager);
+        }
+        var idx = clarifyPagerIndex.value;
+        if (idx < 0) idx = 0;
+        if (idx >= clarifies.length) idx = clarifies.length - 1;
+        var current = clarifies[idx];
+        var batch = clarifyBatchList();
+        var batchIdx = 0;
+        var b;
+        for (b = 0; b < batch.length; b++) {
+          if (batch[b].requestId === current.requestId) { batchIdx = b; break; }
+        }
         return {
-          current: { kind: last.kind, data: last.data },
-          count: pending.length,
-          overflow: pending.length - 1
+          current: { kind: 'clarify', data: current },
+          pagerIndex: batchIdx,
+          pagerTotal: batch.length,
+          pagerCanPrev: idx > 0,
+          pagerCanNext: idx < clarifies.length - 1
         };
+      });
+
+      var currentClarifyDraft = Vue.computed(function () {
+        var current = activeHitl.value && activeHitl.value.current;
+        if (!current || current.kind !== 'clarify' || !current.data) return null;
+        return clarifyDrafts.value[current.data.requestId] || null;
+      });
+
+      function clarifyPagerPrev() {
+        if (clarifyPagerIndex.value > 0) clarifyPagerIndex.value -= 1;
+      }
+
+      function clarifyPagerNext() {
+        var n = pendingClarifyList().length;
+        if (clarifyPagerIndex.value < n - 1) clarifyPagerIndex.value += 1;
+      }
+
+      function handleClarifyDraft(payload) {
+        if (!payload || !payload.requestId) return;
+        var next = Object.assign({}, clarifyDrafts.value);
+        next[payload.requestId] = payload.draft || null;
+        clarifyDrafts.value = next;
+      }
+
+      function resetClarifyPager() {
+        clarifyPagerIndex.value = 0;
+        clarifyDrafts.value = {};
+      }
+      /**
+       * 顶部栏状态：澄清卡片本身已是待回应入口，不再重复「等待回应」
+       * 审批等其余 HITL 仍保留顶部提示
+       */
+      var topBarExpertStatus = Vue.computed(function () {
+        if (expertStatus.value === 'hitl') {
+          var current = activeHitl.value && activeHitl.value.current;
+          if (current && current.kind === 'clarify') return 'idle';
+        }
+        return expertStatus.value;
       });
       var sessionModelOverride = Vue.ref('');
       var sessionModelConfigOverride = Vue.ref(null);
@@ -331,26 +419,59 @@
         var list = messages.value;
         var msg = list.find(function (m) { return m.requestId === payload.requestId; });
         if (!msg) return;
-        msg.answer = payload.choice;
-        // 触发 chatGroups / activeHitl 重算（数组项 property 变更不会自动触发 ref 重新计算）
+        var queue = pendingClarifyList();
+        var idx = -1;
+        for (var i = 0; i < queue.length; i++) {
+          if (queue[i].requestId === payload.requestId) { idx = i; break; }
+        }
+        var nextId = null;
+        if (idx >= 0) {
+          if (idx + 1 < queue.length) nextId = queue[idx + 1].requestId;
+          else if (idx > 0) nextId = queue[idx - 1].requestId;
+        }
+        var remaining = queue.filter(function (m) { return m.requestId !== payload.requestId; });
+        var isLast = remaining.length === 0;
+
+        msg.answer = payload.choice == null ? '' : payload.choice;
         messages.value = messages.value.slice();
-        var cap = store.getExpertDemoCapabilities ? store.getExpertDemoCapabilities(expert.value.id) : { tool: '数据查询' };
-        store.addMessage(currentTaskId.value, {
-          role: 'expert', type: 'action', expertId: expert.value.id,
-          toolName: cap.tool,
-          params: { dimension: payload.choice },
-          summary: '按「' + payload.choice + '」维度完成分析',
-          duration: 1.5,
-          content: '[' + cap.tool + '] 执行完成 (1.5s)'
-        });
-        store.addMessage(currentTaskId.value, {
-          role: 'expert', type: 'chat', expertId: expert.value.id,
-          content: '已按「' + payload.choice + '」维度完成分析。\n\n（模拟回复 · 对接引擎后将替换为真实推理结果）'
-        });
-        store.mockTaskArtifact(expert.value, currentTaskId.value, payload.choice);
-        store.updateTask(currentTaskId.value, { status: 'pending' });
+        var skipped = msg.answer === '';
+        var drafts = Object.assign({}, clarifyDrafts.value);
+        delete drafts[payload.requestId];
+        clarifyDrafts.value = drafts;
+
+        if (isLast) {
+          var cap = store.getExpertDemoCapabilities ? store.getExpertDemoCapabilities(expert.value.id) : { tool: '数据查询' };
+          store.addMessage(currentTaskId.value, {
+            role: 'expert', type: 'action', expertId: expert.value.id,
+            toolName: cap.tool,
+            params: { dimension: skipped ? null : msg.answer },
+            summary: skipped ? '未指定维度，按默认方式继续分析' : '按「' + msg.answer + '」维度完成分析',
+            duration: 1.5,
+            content: '[' + cap.tool + '] 执行完成 (1.5s)'
+          });
+          store.addMessage(currentTaskId.value, {
+            role: 'expert', type: 'chat', expertId: expert.value.id,
+            content: skipped
+              ? '未指定分析维度，已按默认方式继续。\n\n（模拟回复 · 对接引擎后将替换为真实推理结果）'
+              : '已按「' + msg.answer + '」维度完成分析。\n\n（模拟回复 · 对接引擎后将替换为真实推理结果）'
+          });
+          store.mockTaskArtifact(expert.value, currentTaskId.value, skipped ? '未指定维度' : msg.answer);
+          store.updateTask(currentTaskId.value, { status: 'pending' });
+          refreshTasks();
+        } else {
+          store.updateTask(currentTaskId.value, {});
+        }
         loadMessages();
-        refreshTasks();
+        if (nextId) {
+          var newQueue = pendingClarifyList();
+          var nidx = -1;
+          for (var j = 0; j < newQueue.length; j++) {
+            if (newQueue[j].requestId === nextId) { nidx = j; break; }
+          }
+          clarifyPagerIndex.value = nidx >= 0 ? nidx : 0;
+        } else {
+          clarifyPagerIndex.value = 0;
+        }
         scrollChatToBottom();
       }
 
@@ -362,7 +483,7 @@
         msg.choice = payload.choice;
         // 触发 chatGroups / activeHitl 重算
         messages.value = messages.value.slice();
-        if (payload.choice === 'allow' || payload.choice === 'allow_permanent') {
+        if (payload.choice === 'allow' || payload.choice === 'allow_session' || payload.choice === 'allow_permanent') {
           var reply = '已完成操作，结果已写入工作空间。\n\n（模拟回复 · 对接引擎后将替换为真实结果）';
           store.addMessage(currentTaskId.value, {
             role: 'expert', type: 'chat', expertId: expert.value.id, content: reply
@@ -1252,7 +1373,19 @@
       });
       Vue.watch(function () { return props.taskId; }, function (v) {
         currentTaskId.value = v;
+        resetClarifyPager();
         loadMessages();
+      });
+      Vue.watch(function () {
+        return pendingClarifyList().map(function (m) { return m.requestId; }).join(',');
+      }, function () {
+        var n = pendingClarifyList().length;
+        if (!n) {
+          clarifyPagerIndex.value = 0;
+          return;
+        }
+        if (clarifyPagerIndex.value >= n) clarifyPagerIndex.value = n - 1;
+        if (clarifyPagerIndex.value < 0) clarifyPagerIndex.value = 0;
       });
       Vue.onMounted(function () {
         loadExpert();
@@ -1283,7 +1416,12 @@
         // 阶段2 输入区状态
         expertStatus: expertStatus,
         expertStatusLabel: expertStatusLabel,
+        topBarExpertStatus: topBarExpertStatus,
         activeHitl: activeHitl,
+        currentClarifyDraft: currentClarifyDraft,
+        handleClarifyDraft: handleClarifyDraft,
+        clarifyPagerPrev: clarifyPagerPrev,
+        clarifyPagerNext: clarifyPagerNext,
         sessionModelOverride: sessionModelOverride,
         sessionModelConfigOverride: sessionModelConfigOverride,
         sessionModelDisplayName: sessionModelDisplayName,
@@ -1333,7 +1471,7 @@
           :expert="expert"\
           :running="sending || streaming"\
           :error-state="remoteError"\
-          :expert-status="expertStatus"\
+          :expert-status="topBarExpertStatus"\
           :workspace-open="workspaceOpen"\
           @back="$emit(\'nav\', \'/experts\')"\
           @open-expert="openExpertPreview"\
@@ -1392,14 +1530,20 @@
                class="hitl-pin-wrap"\
                :class="{ \'is-danger\': activeHitl.current.kind === \'approval\' }">\
             <hitl-card\
+              :key="(activeHitl.current.data && activeHitl.current.data.requestId) || activeHitl.current.kind"\
               :variant="activeHitl.current.kind"\
               :data="activeHitl.current.data"\
+              :draft="currentClarifyDraft"\
+              :pager-index="activeHitl.pagerIndex"\
+              :pager-total="activeHitl.pagerTotal"\
+              :pager-can-prev="activeHitl.pagerCanPrev"\
+              :pager-can-next="activeHitl.pagerCanNext"\
               mode="pending"\
               @answer="handleClarifyAnswer"\
-              @resolve="handleApprovalResolve" />\
-            <div v-if="activeHitl.overflow > 0" class="hitl-pin-overflow">\
-              还有 {{ activeHitl.overflow }} 个待回应请求已折叠到对话历史中\
-            </div>\
+              @resolve="handleApprovalResolve"\
+              @draft-change="handleClarifyDraft"\
+              @pager-prev="clarifyPagerPrev"\
+              @pager-next="clarifyPagerNext" />\
           </div>\
           <chat-composer\
             v-model:input-text="inputText"\
