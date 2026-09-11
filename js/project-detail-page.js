@@ -2723,9 +2723,6 @@
             '<span v-if="members.length > 0">项目成员 {{ members.length }}</span>',
             '<span v-else>添加成员</span>',
           '</button>',
-          '<button type="button" class="project-header-action-btn project-header-settings-btn" title="项目设置" aria-label="项目设置" @click="openProjectSettingsDialog">',
-            '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06-2.12 2.12-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V20h-3v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06-2.12-2.12.06-.06A1.65 1.65 0 0 0 7 15a1.65 1.65 0 0 0-1.51-1H5v-3h.09A1.65 1.65 0 0 0 6.6 10a1.65 1.65 0 0 0-.33-1.82l-.06-.06L8.33 6l.06.06a1.65 1.65 0 0 0 1.82.33h.01a1.65 1.65 0 0 0 1-1.51V5h3v.09a1.65 1.65 0 0 0 1 1.51h.01a1.65 1.65 0 0 0 1.82-.33l.06-.06 2.12 2.12-.06.06A1.65 1.65 0 0 0 18.6 10v.01a1.65 1.65 0 0 0 1.51 1H20v3h-.09A1.65 1.65 0 0 0 18.4 15z"/></svg>',
-          '</button>',
         '</div>',
       '</header>'
     ].join('');
