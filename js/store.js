@@ -1994,6 +1994,7 @@
     var tDoneRoot = uid();
     var tRunningDevice = uid();
     var tRunningFdc = uid();
+    var tRetunePlan = uid();
 
     var yieldTasks = [
       projectTaskSeed(p, {
@@ -2019,7 +2020,9 @@
         sortOrder: -20,
         priority: 'medium',
         body: '复盘 12 寸产线关键工序工艺窗口设定，识别偏差来源并输出优化建议。',
+        latestSummary: '已完成 4 项复盘任务，确认 etch 窗口偏差为主要影响因素，并形成加严监控规则。',
         createdAt: daysAgoIso(1, 10, 8),
+        completedAt: daysAgoIso(1, 16, 30),
         updatedAt: daysAgoIso(1, 16, 30)
       }),
       projectTaskSeed(p, {
@@ -2069,8 +2072,8 @@
           { id: uid(), kind: 'created', label: '创建', author: lead.expertId, payload: {}, createdAt: minutesAgoIso(260) }
         ],
         comments: [
-          { id: uid(), author: '工艺专家', expertId: lead.expertId, body: 'etch-3 近 4 周异常点较多，建议优先排查。', createdAt: minutesAgoIso(200) },
-          { id: uid(), author: '质量专家', expertId: quality.expertId, body: '收到，已开始拉取 SPC 数据。', createdAt: minutesAgoIso(180) }
+          { id: uid(), author: '我', body: '请优先排查 etch-3 近 4 周异常点，并补充与设备维护记录的交叉分析。', createdAt: minutesAgoIso(200) },
+          { id: uid(), author: '我', body: '分析完成后请同步更新缺陷 pareto，并标记主要影响批次。', createdAt: minutesAgoIso(180) }
         ],
         createdAt: minutesAgoIso(260),
         updatedAt: minutesAgoIso(40)
@@ -2106,8 +2109,8 @@
         ],
         diagnostics: [],
         comments: [
-          { id: uid(), author: '质量专家', expertId: quality.expertId, body: '建议将 SPC 监控窗口从 4 周扩展到 8 周以覆盖完整周期。', createdAt: minutesAgoIso(100) },
-          { id: uid(), author: '设备运维专家', expertId: device.expertId, body: 'PM 记录显示该 chamber 上月有过维护，可能与偏差有关。', createdAt: minutesAgoIso(120) }
+          { id: uid(), author: '我', body: '请将 SPC 监控窗口从 4 周扩展到 8 周，覆盖完整维护周期。', createdAt: minutesAgoIso(120) },
+          { id: uid(), author: '我', body: '报告中补充 chamber 上月维护记录与参数偏差的关联结论。', createdAt: minutesAgoIso(100) }
         ],
         createdAt: minutesAgoIso(250),
         updatedAt: minutesAgoIso(90)
@@ -2149,8 +2152,8 @@
         ],
         diagnostics: [],
         comments: [
-          { id: uid(), author: '工艺专家', expertId: lead.expertId, body: '建议同步检查冷却系统流量数据，可能与 PM 周期相关。', createdAt: minutesAgoIso(30) },
-          { id: uid(), author: '设备运维专家', expertId: device.expertId, body: '收到，已加入数据拉取范围。', createdAt: minutesAgoIso(25) }
+          { id: uid(), author: '我', body: '同步检查冷却系统流量数据，确认是否与 PM 周期相关。', createdAt: minutesAgoIso(30) },
+          { id: uid(), author: '我', body: '数据范围扩展到近 3 个月，并保留异常时间点明细。', createdAt: minutesAgoIso(25) }
         ],
         createdAt: minutesAgoIso(240),
         updatedAt: minutesAgoIso(20)
@@ -2244,6 +2247,7 @@
         title: '下周 SPC 复测计划',
         status: 'scheduled',
         expertId: quality.expertId,
+        parentTaskId: tRetunePlan,
         sortOrder: 21,
         priority: 'medium',
         lastStatusReason: '夜班窗口',
@@ -2319,9 +2323,11 @@
         updatedAt: minutesAgoIso(10)
       }),
       projectTaskSeed(p, {
+        id: tRetunePlan,
         title: '工艺参数回标方案',
         status: 'review',
         expertId: lead.expertId,
+        parentTaskId: tDoneRoot,
         sortOrder: 26,
         priority: 'high',
         body: '输出 etch 区 3 号 chamber 参数回标方案，提交系统自动评审。',
@@ -2340,9 +2346,18 @@
           }
         ],
         taskEvents: [
-          { id: uid(), kind: 'completed', label: '完成', author: lead.expertId, payload: {}, createdAt: minutesAgoIso(25) },
-          { id: uid(), kind: 'spawned', label: '启动', author: lead.expertId, payload: { assignee: lead.expertId }, createdAt: minutesAgoIso(90) },
-          { id: uid(), kind: 'created', label: '创建', author: lead.expertId, payload: {}, createdAt: minutesAgoIso(100) }
+          { id: uid(), kind: 'commented', label: '添加评论', payload: { author: '我', len: 23 }, createdAt: minutesAgoIso(12) },
+          { id: uid(), kind: 'review_requested', label: '提交评审', author: lead.expertId, payload: { summary: '参数回标方案与验证步骤已提交' }, createdAt: minutesAgoIso(25) },
+          { id: uid(), kind: 'attached', label: '添加文件', author: lead.expertId, payload: { filename: 'chamber-retune-plan.md', size: 11200 }, createdAt: minutesAgoIso(28) },
+          { id: uid(), kind: 'spawned', label: '启动', author: lead.expertId, payload: { assignee: lead.expertId }, createdAt: minutesAgoIso(89) },
+          { id: uid(), kind: 'claimed', label: '领取', author: lead.expertId, payload: { source_status: 'ready', assignee: lead.expertId }, createdAt: minutesAgoIso(90), run_id: 'run-1' },
+          { id: uid(), kind: 'promoted', label: '进入执行队列', payload: { status: 'ready' }, createdAt: minutesAgoIso(94) },
+          { id: uid(), kind: 'assigned', label: '分配负责人', payload: { assignee: lead.expertId }, createdAt: minutesAgoIso(98) },
+          { id: uid(), kind: 'created', label: '创建', author: '我', payload: { assignee: lead.expertId, status: 'todo', parents: [tDoneRoot] }, createdAt: minutesAgoIso(100) }
+        ],
+        comments: [
+          { id: uid(), author: '我', body: '压力目标值按 1.10 ± 0.02 执行，并补充回退条件。', createdAt: minutesAgoIso(45) },
+          { id: uid(), author: '我', body: '评审重点检查回标后的首批次验证步骤和异常回退机制。', createdAt: minutesAgoIso(12) }
         ],
         createdAt: minutesAgoIso(100),
         updatedAt: minutesAgoIso(25)
@@ -2384,8 +2399,8 @@
           { title: 'Agent 连续失败 2 次：能力/权限不足', suggestion: '建议转交给其他专家或联系 IT 开通 MES API 权限', kind: 'capability', severity: 'warn' }
         ],
         comments: [
-          { id: uid(), author: '工艺专家', expertId: lead.expertId, body: 'IT 工单已提交，预计 2 小时内开通。', createdAt: minutesAgoIso(20) },
-          { id: uid(), author: '设备运维专家', expertId: device.expertId, body: '已重试两次均失败，等待权限开通后重启。', createdAt: minutesAgoIso(25) }
+          { id: uid(), author: '我', body: 'IT 权限工单已提交，开通后立即重启任务。', createdAt: minutesAgoIso(25) },
+          { id: uid(), author: '我', body: '权限开通前先整理接口字段映射，避免再次阻塞。', createdAt: minutesAgoIso(20) }
         ],
         commentCount: 4,
         createdAt: minutesAgoIso(200),
@@ -3005,11 +3020,11 @@
   function inferGoalRequestStatus(task) {
     if (!isProjectGoalRoot(task)) return '';
     var explicit = String(task.goalRequestStatus || '').trim();
-    if (explicit) return explicit;
     var s = normalizeProjectTaskStatus(task.status);
-    if (s === 'archived') return 'archived';
-    if (s === 'done') return 'completed';
-    if (s === 'triage') return 'decomposing';
+    if (explicit === 'decompose_failed') return 'decompose_failed';
+    if (explicit === 'submitted' || explicit === 'decomposing') return 'decomposing';
+    if (s === 'done' || s === 'archived') return 'completed';
+    if (!explicit && s === 'triage') return 'decomposing';
     return 'running';
   }
 
@@ -3271,6 +3286,52 @@
         seeded.concat(keepHumanArchive).forEach(function (e) { state.projectEvents.push(e); });
       }
     });
+    state.projectTaskSchemaVersion = SCHEMA;
+    persist();
+  }
+
+  function migrateSelfCommentsAndDetailDemo() {
+    var SCHEMA = 15;
+    if ((state.projectTaskSchemaVersion || 0) >= SCHEMA) return;
+
+    (state.projectTasks || []).forEach(function (task) {
+      (task.comments || []).forEach(function (comment) {
+        comment.author = '我';
+        delete comment.expertId;
+      });
+    });
+
+    (state.projects || []).forEach(function (project) {
+      if (project.name.indexOf('良率') < 0) return;
+      var tasks = (state.projectTasks || []).filter(function (task) {
+        return sameId(task.projectId, project.id);
+      });
+      var rootCause = tasks.find(function (task) { return task.title === '良率根因分析'; });
+      var retune = tasks.find(function (task) { return task.title === '工艺参数回标方案'; });
+      var followUp = tasks.find(function (task) { return task.title === '下周 SPC 复测计划'; });
+      if (!retune) return;
+
+      var assignee = retune.expertId || retune.assignee || null;
+      if (rootCause) retune.parentTaskId = rootCause.id;
+      if (followUp) followUp.parentTaskId = retune.id;
+      retune.comments = [
+        { id: uid(), author: '我', body: '压力目标值按 1.10 ± 0.02 执行，并补充回退条件。', createdAt: minutesAgoIso(45) },
+        { id: uid(), author: '我', body: '评审重点检查回标后的首批次验证步骤和异常回退机制。', createdAt: minutesAgoIso(12) }
+      ];
+      retune.commentCount = retune.comments.length;
+      retune.taskEvents = [
+        { id: uid(), kind: 'commented', label: '添加评论', payload: { author: '我', len: 23 }, createdAt: minutesAgoIso(12) },
+        { id: uid(), kind: 'review_requested', label: '提交评审', author: assignee, payload: { summary: '参数回标方案与验证步骤已提交' }, createdAt: minutesAgoIso(25) },
+        { id: uid(), kind: 'attached', label: '添加文件', author: assignee, payload: { filename: 'chamber-retune-plan.md', size: 11200 }, createdAt: minutesAgoIso(28) },
+        { id: uid(), kind: 'spawned', label: '启动', author: assignee, payload: { assignee: assignee }, createdAt: minutesAgoIso(89) },
+        { id: uid(), kind: 'claimed', label: '领取', author: assignee, payload: { source_status: 'ready', assignee: assignee }, createdAt: minutesAgoIso(90), run_id: 'run-1' },
+        { id: uid(), kind: 'promoted', label: '进入执行队列', payload: { status: 'ready' }, createdAt: minutesAgoIso(94) },
+        { id: uid(), kind: 'assigned', label: '分配负责人', payload: { assignee: assignee }, createdAt: minutesAgoIso(98) },
+        { id: uid(), kind: 'created', label: '创建', author: '我', payload: { assignee: assignee, status: 'todo', parents: rootCause ? [rootCause.id] : [] }, createdAt: minutesAgoIso(100) }
+      ];
+      applyDemoTaskOutputs(retune);
+    });
+
     state.projectTaskSchemaVersion = SCHEMA;
     persist();
   }
@@ -3734,6 +3795,7 @@
       migrateKickbackDemoCards();
       migrateHumanTimelineAndGaveUp();
       migrateStatusVariantDemoCards();
+      migrateSelfCommentsAndDetailDemo();
       migrateDialogueTaskLastActivity();
       migrateProjectFiles();
       migrateProjectMessageTypes();
