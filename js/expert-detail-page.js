@@ -3272,7 +3272,6 @@
                         <el-table-column label="技能名" min-width="140">\
                           <template #default="{ row }">\
                             <div class="toolset-name-cell">{{ row.name || row.skillId }}</div>\
-                            <div class="toolset-id-cell">{{ row.skillId }}</div>\
                           </template>\
                         </el-table-column>\
                         <el-table-column label="描述" min-width="200" show-overflow-tooltip>\

@@ -20,6 +20,9 @@
     'human-robot-collab': ['skill-integration', 'skill-pm']
   };
 
+  var minePreviewEmpty = Vue.ref(false);
+  var projectPreviewEmpty = Vue.ref(false);
+
   var LIST_PAGE_TEMPLATE = [
     '<div class="main-scroll list-page expert-list-page">',
     '  <div class="expert-list-tabs">',
@@ -28,13 +31,18 @@
     '        <svg class="expert-list-tab-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="3.2"/><path d="M5.5 19.2c.8-3.2 3.3-5.2 6.5-5.2s5.7 2 6.5 5.2"/></svg>',
     '        我的专家',
     '      </button>',
+    '      <button type="button" class="expert-list-tab" role="tab" @click="setActiveTab(\'project\')">',
+    '        <svg class="expert-list-tab-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7.5h7l2 2h9v9.5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2"/></svg>',
+    '        项目',
+    '      </button>',
     '      <button type="button" class="expert-list-tab" :class="{ \'is-active\': activeTab === \'template\' }" role="tab" @click="setActiveTab(\'template\')">',
     '        <svg class="expert-list-tab-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1.2"/><rect x="14" y="3" width="7" height="7" rx="1.2"/><rect x="3" y="14" width="7" height="7" rx="1.2"/><rect x="14" y="14" width="7" height="7" rx="1.2"/></svg>',
     '        专家模板',
     '      </button>',
     '    </div>',
     '    <div class="expert-list-tools">',
-    '      <create-action-btn label="新建专家" theme="expert" @click="openCreateDialog" />',
+    '      <create-action-btn label="新建专家" theme="expert" @click="requestCreateExpert" />',
+    '      <create-action-btn label="新建项目" theme="project" @click="requestCreateProject" />',
     '    </div>',
     '  </div>',
     '  <div class="expert-list-scroll">',
@@ -89,16 +97,23 @@
     '    </div>',
     '    <div v-if="filteredExperts.length === 0" class="empty-state">',
     '      <div class="empty-state-icon">{{ activeTab === \'template\' ? \'▦\' : \'👤\' }}</div>',
-    '      <p>{{ activeTab === \'template\' ? \'暂无专家模板\' : \'暂无自建专家\' }}</p>',
+    '      <p>{{ activeTab === \'template\' ? \'暂无专家模板\' : \'暂无专家\' }}</p>',
     '      <create-action-btn v-if="activeTab === \'mine\'" label="创建第一位专家" theme="expert" soft @click="openCreateDialog" />',
     '    </div>',
     '    </div>',
     '  </div>',
-    '  <button type="button" class="expert-preview-toggle expert-preview-toggle-floating" :class="{ \'is-on\': !minePreviewEmpty }" role="switch" :aria-checked="!minePreviewEmpty" title="切换自建专家演示状态" @click="toggleMinePreview">',
-    '    <span>自建专家</span>',
-    '    <span class="expert-preview-toggle-track" aria-hidden="true"><span class="expert-preview-toggle-thumb"></span></span>',
-    '    <span class="expert-preview-toggle-state">{{ minePreviewEmpty ? \'无\' : \'有\' }}</span>',
-    '  </button>',
+    '  <div class="expert-preview-toggle-stack" aria-label="原型演示状态">',
+    '    <button type="button" class="expert-preview-toggle" :class="{ \'is-on\': !minePreviewEmpty }" role="switch" :aria-checked="!minePreviewEmpty" title="切换自建专家演示状态" @click="toggleMinePreview">',
+    '      <span>自建专家</span>',
+    '      <span class="expert-preview-toggle-track" aria-hidden="true"><span class="expert-preview-toggle-thumb"></span></span>',
+    '      <span class="expert-preview-toggle-state">{{ minePreviewEmpty ? \'无\' : \'有\' }}</span>',
+    '    </button>',
+    '    <button type="button" class="expert-preview-toggle" :class="{ \'is-on\': !projectPreviewEmpty }" role="switch" :aria-checked="!projectPreviewEmpty" title="切换自建项目演示状态" @click="toggleProjectPreview">',
+    '      <span>自建项目</span>',
+    '      <span class="expert-preview-toggle-track" aria-hidden="true"><span class="expert-preview-toggle-thumb"></span></span>',
+    '      <span class="expert-preview-toggle-state">{{ projectPreviewEmpty ? \'无\' : \'有\' }}</span>',
+    '    </button>',
+    '  </div>',
     '  <expert-create-page-dialog :wizard="createWizard" :tag-colors="tagColors" :skills="skills" :tools="tools" />',
     '  <expert-edit-page-dialog :edit="expertEdit" header-title="编辑专家" :tag-colors="tagColors" />',
     '  <el-dialog v-model="templateIntro.visible" width="720px" class="template-intro-dialog" :close-on-click-modal="true" append-to-body>',
@@ -170,7 +185,6 @@
     setup: function (props, ctx) {
       var experts = Vue.ref([]);
       var runningCounts = Vue.ref({});
-      var minePreviewEmpty = Vue.ref(false);
       var templateIntro = Vue.ref({ visible: false, expert: null });
       var expertEdit = createExpertEditForm(store, { onSaved: function () { load(); } });
       var createWizard = createExpertCreateForm(store, {
@@ -195,12 +209,33 @@
       });
 
       function setActiveTab(tab) {
+        if (tab === 'project') {
+          ctx.emit('nav', '/projects');
+          return;
+        }
         ctx.emit('nav', tab === 'mine' ? '/experts?tab=mine' : '/experts?tab=template');
+      }
+
+      function requestCreateExpert() {
+        if (activeTab.value === 'mine') {
+          createWizard.openCreateDialog();
+          return;
+        }
+        ctx.emit('nav', '/experts?tab=mine&create=1');
+      }
+
+      function requestCreateProject() {
+        ctx.emit('nav', '/projects?create=1');
       }
 
       function toggleMinePreview() {
         minePreviewEmpty.value = !minePreviewEmpty.value;
         if (activeTab.value !== 'mine') ctx.emit('nav', '/experts?tab=mine');
+      }
+
+      function toggleProjectPreview() {
+        projectPreviewEmpty.value = !projectPreviewEmpty.value;
+        ctx.emit('nav', '/projects');
       }
 
       function isTemplate(expert) {
@@ -346,6 +381,7 @@
         experts: experts,
         filteredExperts: filteredExperts,
         minePreviewEmpty: minePreviewEmpty,
+        projectPreviewEmpty: projectPreviewEmpty,
         activeTab: activeTab,
         runningCounts: runningCounts,
         tagColors: catalog.TAG_COLORS,
@@ -358,7 +394,10 @@
         deleteDialog: deleteDialog,
         isTemplate: isTemplate,
         setActiveTab: setActiveTab,
+        requestCreateExpert: requestCreateExpert,
+        requestCreateProject: requestCreateProject,
         toggleMinePreview: toggleMinePreview,
+        toggleProjectPreview: toggleProjectPreview,
         openExpertCard: openExpertCard,
         useTemplate: useTemplate,
         useTemplateFromIntro: useTemplateFromIntro,
@@ -402,6 +441,19 @@
         allExperts.value = store.getExperts();
       }
 
+      var visibleProjects = Vue.computed(function () {
+        return projectPreviewEmpty.value ? [] : projects.value;
+      });
+
+      function toggleProjectPreview() {
+        projectPreviewEmpty.value = !projectPreviewEmpty.value;
+      }
+
+      function toggleMinePreview() {
+        minePreviewEmpty.value = !minePreviewEmpty.value;
+        ctx.emit('nav', '/experts?tab=mine');
+      }
+
       function resetForm() {
         form.value = { name: '', description: '', expertIds: [], icon: '📁' };
         createStep.value = 0;
@@ -412,6 +464,22 @@
         resetForm();
         allExperts.value = store.getExperts();
         showCreateDialog.value = true;
+      }
+
+      function setActiveTab(tab) {
+        if (tab === 'project') {
+          ctx.emit('nav', '/projects');
+          return;
+        }
+        ctx.emit('nav', tab === 'mine' ? '/experts?tab=mine' : '/experts?tab=template');
+      }
+
+      function requestCreateExpert() {
+        ctx.emit('nav', '/experts?tab=mine&create=1');
+      }
+
+      function requestCreateProject() {
+        openCreateDialog();
       }
 
       function closeCreateDialog() {
@@ -560,7 +628,7 @@
       Vue.onMounted(load);
 
       Vue.watch(function () { return props.openCreate; }, function (v) {
-        if (v === '1') {
+        if (v === '1' || v === true) {
           openCreateDialog();
           ctx.emit('nav', '/projects');
         }
@@ -593,7 +661,9 @@
       });
 
       return {
-        projects: projects, showCreateDialog: showCreateDialog, showEditDialog: showEditDialog,
+        projects: projects, visibleProjects: visibleProjects,
+        minePreviewEmpty: minePreviewEmpty, projectPreviewEmpty: projectPreviewEmpty,
+        showCreateDialog: showCreateDialog, showEditDialog: showEditDialog,
         form: form, editForm: editForm, allExperts: allExperts,
         filteredExperts: filteredExperts,
         memberSearchQuery: memberSearchQuery,
@@ -604,6 +674,11 @@
         editProjectIconInput: editProjectIconInput,
         isProjectIconImage: isProjectIconImage,
         openCreateDialog: openCreateDialog, closeCreateDialog: closeCreateDialog, submitCreate: submitCreate,
+        setActiveTab: setActiveTab,
+        requestCreateExpert: requestCreateExpert,
+        requestCreateProject: requestCreateProject,
+        toggleMinePreview: toggleMinePreview,
+        toggleProjectPreview: toggleProjectPreview,
         goProjectCreateNextStep: goProjectCreateNextStep,
         goProjectCreatePrevStep: goProjectCreatePrevStep,
         triggerProjectIconUpload: triggerProjectIconUpload,
@@ -620,16 +695,30 @@
       };
     },
     template: '\
-      <div class="main-scroll list-page">\
-        <div class="page-header-row">\
-          <div class="page-header-text">\
-            <h1 class="page-title">项目</h1>\
-            <p class="page-subtitle">共 {{ projects.length }} 个项目 · 多专家协同推进</p>\
+      <div class="main-scroll list-page expert-list-page project-list-page">\
+        <div class="expert-list-tabs">\
+          <div class="expert-list-tab-list" role="tablist">\
+            <button type="button" class="expert-list-tab" role="tab" @click="setActiveTab(\'mine\')">\
+              <svg class="expert-list-tab-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="3.2"/><path d="M5.5 19.2c.8-3.2 3.3-5.2 6.5-5.2s5.7 2 6.5 5.2"/></svg>\
+              我的专家\
+            </button>\
+            <button type="button" class="expert-list-tab is-active" role="tab" aria-selected="true" @click="setActiveTab(\'project\')">\
+              <svg class="expert-list-tab-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7.5h7l2 2h9v9.5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2"/></svg>\
+              项目\
+            </button>\
+            <button type="button" class="expert-list-tab" role="tab" @click="setActiveTab(\'template\')">\
+              <svg class="expert-list-tab-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1.2"/><rect x="14" y="3" width="7" height="7" rx="1.2"/><rect x="3" y="14" width="7" height="7" rx="1.2"/><rect x="14" y="14" width="7" height="7" rx="1.2"/></svg>\
+              专家模板\
+            </button>\
           </div>\
-          <create-action-btn label="新建项目" theme="project" @click="openCreateDialog" />\
+          <div class="expert-list-tools">\
+            <create-action-btn label="新建专家" theme="expert" @click="requestCreateExpert" />\
+            <create-action-btn label="新建项目" theme="project" @click="requestCreateProject" />\
+          </div>\
         </div>\
+        <div class="expert-list-scroll">\
         <div class="project-grid">\
-          <div v-for="p in projects" :key="p.id" class="project-card" @click="goProject(p)">\
+          <div v-for="p in visibleProjects" :key="p.id" class="project-card" @click="goProject(p)">\
             <div class="project-card-accent"></div>\
             <el-dropdown trigger="click" @command="handleProjectMenu($event, p)">\
               <button class="card-more-btn" title="更多操作" @click.stop>\
@@ -675,11 +764,24 @@
               </div>\
             </div>\
           </div>\
-          <div v-if="projects.length === 0" class="empty-state">\
+          <div v-if="visibleProjects.length === 0" class="empty-state">\
             <div class="empty-state-icon">📁</div>\
             <p>暂无项目</p>\
             <create-action-btn label="创建第一个项目" theme="project" soft @click="openCreateDialog" />\
           </div>\
+        </div>\
+        </div>\
+        <div class="expert-preview-toggle-stack" aria-label="原型演示状态">\
+          <button type="button" class="expert-preview-toggle" :class="{ \'is-on\': !minePreviewEmpty }" role="switch" :aria-checked="!minePreviewEmpty" title="切换自建专家演示状态" @click="toggleMinePreview">\
+            <span>自建专家</span>\
+            <span class="expert-preview-toggle-track" aria-hidden="true"><span class="expert-preview-toggle-thumb"></span></span>\
+            <span class="expert-preview-toggle-state">{{ minePreviewEmpty ? \'无\' : \'有\' }}</span>\
+          </button>\
+          <button type="button" class="expert-preview-toggle" :class="{ \'is-on\': !projectPreviewEmpty }" role="switch" :aria-checked="!projectPreviewEmpty" title="切换自建项目演示状态" @click="toggleProjectPreview">\
+            <span>自建项目</span>\
+            <span class="expert-preview-toggle-track" aria-hidden="true"><span class="expert-preview-toggle-thumb"></span></span>\
+            <span class="expert-preview-toggle-state">{{ projectPreviewEmpty ? \'无\' : \'有\' }}</span>\
+          </button>\
         </div>\
         <el-dialog v-model="showCreateDialog" width="640px" class="form-dialog form-dialog-project form-dialog-project-wizard" :close-on-click-modal="false" @closed="resetForm">\
           <template #header>\
@@ -861,7 +963,6 @@
   var app = Vue.createApp({
     setup: function () {
       var sidebarActive = Vue.computed(function () {
-        if (route.value.name.indexOf('project') >= 0) return 'projects';
         return 'experts';
       });
 

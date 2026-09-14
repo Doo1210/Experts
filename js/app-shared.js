@@ -152,7 +152,6 @@
       <aside class="platform-sidebar">\
         <nav class="sidebar-nav">\
           <a class="nav-item" :class="{ active: active === \'experts\' }" @click.prevent="$emit(\'nav\', \'/experts\')">👤 专家</a>\
-          <a class="nav-item" :class="{ active: active === \'projects\' }" @click.prevent="$emit(\'nav\', \'/projects\')">📁 项目</a>\
         </nav>\
       </aside>'
   };
