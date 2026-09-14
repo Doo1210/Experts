@@ -97,8 +97,13 @@
       var drawerTaskId = Vue.ref(null);
       var workspaceCurrentFolderId = Vue.ref(null);
       var workspaceFolderDialogVisible = Vue.ref(false);
+      var workspaceFolderDialogMode = Vue.ref('create');
+      var workspaceEditingItem = Vue.ref(null);
       var workspaceFolderName = Vue.ref('');
       var workspaceFileInput = Vue.ref(null);
+      var workspaceDragItem = Vue.ref(null);
+      var workspacePreviewVisible = Vue.ref(false);
+      var workspacePreviewItem = Vue.ref(null);
       var projectWorkspaceMaterials = Vue.ref([]);
       var showAddMemberDialog = Vue.ref(false);
       var addMemberExpertIds = Vue.ref([]);
@@ -1156,6 +1161,7 @@
 
       function taskStatusClass(task) {
         if (isKickbackTriage(task)) return 'status-blocked status-kickback';
+        if (isReviewUi(task)) return 'status-review';
         return 'status-' + normalizeTaskStatus(task && task.status);
       }
 
@@ -1263,12 +1269,12 @@
         var parents;
         if (s === 'todo') {
           parents = unfinishedParents(task);
-          if (parents.length === 1) return truncateCardSummary('等待「' + taskDisplayTitle(parents[0]) + '」');
+          if (parents.length === 1) return truncateCardSummary('等待「' + taskDisplayTitle(parents[0]) + '」完成');
           if (parents.length === 2) {
-            return truncateCardSummary('等待「' + taskDisplayTitle(parents[0]) + '」「' + taskDisplayTitle(parents[1]) + '」');
+            return truncateCardSummary('等待「' + taskDisplayTitle(parents[0]) + '」「' + taskDisplayTitle(parents[1]) + '」完成');
           }
-          if (parents.length >= 3) return truncateCardSummary('等待 ' + parents.length + ' 个父任务');
-          return '';
+          if (parents.length >= 3) return truncateCardSummary('等待 ' + parents.length + ' 个前置任务完成');
+          return '等待前置任务信息同步';
         }
         if (s === 'ready') {
           if (!taskHasAssignee(task)) return '需先指派负责人';
@@ -1619,11 +1625,7 @@
 
       function taskContextChips(task) {
         var chips = [];
-        var parents = parentTaskNames(task);
-        var children = childTaskNames(task);
         var path = workspacePathLabel(task);
-        if (parents.length) chips.push({ key: 'parents', label: '前置任务 ' + parents.length });
-        if (children.length) chips.push({ key: 'children', label: '子任务 ' + children.length });
         if (path) chips.push({ key: 'path', label: path });
         return chips;
       }
@@ -1650,7 +1652,7 @@
       function parentTasksOf(task) {
         if (!task) return [];
         var parent = taskParentTask(task.parentTaskId);
-        return parent ? [parent] : [];
+        return parent && !isGoalRoot(parent) ? [parent] : [];
       }
 
       function taskCreatedByLabel(task) {
@@ -1667,6 +1669,18 @@
 
       function hasTaskDependencyBlock(task) {
         return parentTaskNames(task).length > 0 || childTaskNames(task).length > 0;
+      }
+
+      function isTodoTask(task) {
+        return normalizeTaskStatus(task && task.status) === 'todo';
+      }
+
+      function taskTodoDetailText(task) {
+        var parents = unfinishedParents(task);
+        if (parents.length) {
+          return '正在等待前置任务「' + parents.map(taskDisplayTitle).join('」「') + '」完成；完成后将自动进入可执行状态。';
+        }
+        return '前置任务信息暂不可用，请检查任务的执行依赖配置。';
       }
 
       function toggleShowArchived() {
@@ -1986,19 +2000,19 @@
         var m = manualForm.value;
         if (!trimText(m.title)) return ElementPlus.ElMessage.warning('请填写任务标题');
         if (!m.assignee) return ElementPlus.ElMessage.warning('请选择负责人');
+        var parent = m.parentTaskId ? taskParentTask(m.parentTaskId) : null;
+        var parentStatus = normalizeTaskStatus(parent && parent.status);
+        var waitsForParent = !!(parent && !isGoalRoot(parent) && parentStatus !== 'done' && parentStatus !== 'archived');
         var created = store.createProjectTask(props.projectId, {
           title: trimText(m.title),
           body: trimText(m.body),
           assignee: m.assignee || null,
           priority: m.priority,
           parentTaskId: m.parentTaskId || null,
-          status: m.status || 'todo'
+          status: waitsForParent ? 'todo' : 'ready'
         });
         selectedProjectTaskId.value = created.id;
-        try {
-          store.promoteProjectTask(props.projectId, created.id);
-        } catch (e) { /* noop */ }
-        ElementPlus.ElMessage.success('任务已创建并加入执行队列');
+        ElementPlus.ElMessage.success('任务已创建');
         load();
         closeManualCreateDialog();
       }
@@ -2268,10 +2282,30 @@
       function openWorkspaceBreadcrumb(crumb) {
         workspaceCurrentFolderId.value = crumb && crumb.id ? crumb.id : null;
       }
+      function workspaceBreadcrumbDropTarget(crumb) {
+        if (!crumb || !crumb.id) return null;
+        var folder = projectWorkspaceMaterials.value.find(function (f) {
+          return String(f.id) === String(crumb.id) && f.kind === 'folder';
+        });
+        return folder ? Object.assign({ source: 'upload', raw: folder }, folder) : null;
+      }
+      function canDropWorkspaceBreadcrumb(crumb) {
+        return canDropWorkspaceItem(workspaceBreadcrumbDropTarget(crumb));
+      }
+      function workspaceBreadcrumbClass(index, crumb) {
+        return {
+          active: index === workspaceBreadcrumbs.value.length - 1,
+          'is-drop-target': canDropWorkspaceBreadcrumb(crumb)
+        };
+      }
+      function onWorkspaceBreadcrumbDrop(crumb) {
+        onWorkspaceDrop(workspaceBreadcrumbDropTarget(crumb));
+      }
       function openWorkspaceFile(file) {
         if (!file) return;
         if (file.kind === 'folder') return openWorkspaceFolder(file);
-        ElementPlus.ElMessage.info(file.name || '文件');
+        workspacePreviewItem.value = file;
+        workspacePreviewVisible.value = true;
       }
       function openMaterialUpload() { if (workspaceFileInput.value) workspaceFileInput.value.click(); }
       function handleMaterialFileSelect(e) {
@@ -2303,22 +2337,46 @@
         });
       }
       function openCreateWorkspaceFolderDialog() {
+        workspaceFolderDialogMode.value = 'create';
+        workspaceEditingItem.value = null;
         workspaceFolderName.value = '';
         workspaceFolderDialogVisible.value = true;
       }
+      function openRenameWorkspaceItem(file) {
+        if (!file) return;
+        workspaceFolderDialogMode.value = 'rename';
+        workspaceEditingItem.value = file;
+        workspaceFolderName.value = file.name || '';
+        workspaceFolderDialogVisible.value = true;
+      }
+      var workspaceRenameDialogTitle = Vue.computed(function () {
+        if (workspaceFolderDialogMode.value !== 'rename') return '新建文件夹';
+        return workspaceEditingItem.value && workspaceEditingItem.value.kind === 'folder' ? '重命名文件夹' : '重命名文件';
+      });
+      var workspaceRenameDialogSub = Vue.computed(function () {
+        if (workspaceFolderDialogMode.value !== 'rename') return '整理项目工作空间中的文件与资料';
+        return workspaceEditingItem.value && workspaceEditingItem.value.kind === 'folder' ? '修改文件夹显示名称' : '修改文件显示名称';
+      });
       function submitWorkspaceFolderDialog() {
         var name = trimText(workspaceFolderName.value);
-        if (!name) return ElementPlus.ElMessage.warning('请输入文件夹名称');
+        if (!name) return ElementPlus.ElMessage.warning('请输入名称');
         if (/[\\/:*?"<>|]/.test(name)) return ElementPlus.ElMessage.warning('名称不能包含特殊字符');
-        var parentId = workspaceCurrentFolderId.value || null;
+        var editing = workspaceEditingItem.value;
+        var parentId = workspaceFolderDialogMode.value === 'rename' && editing ? editing.parentId : (workspaceCurrentFolderId.value || null);
         var duplicate = projectWorkspaceMaterials.value.some(function (f) {
+          if (workspaceFolderDialogMode.value === 'rename' && editing && String(f.id) === String(editing.id)) return false;
           return String(f.parentId || '') === String(parentId || '') && trimText(f.name) === name;
         });
         if (duplicate) return ElementPlus.ElMessage.warning('当前目录下已存在同名项目');
-        store.addWorkspaceFolder(projectWorkspaceKey(), { name: name, parentId: parentId });
+        if (workspaceFolderDialogMode.value === 'rename' && editing) {
+          store.renameWorkspaceItem(projectWorkspaceKey(), editing.id, name);
+          ElementPlus.ElMessage.success('已重命名');
+        } else {
+          store.addWorkspaceFolder(projectWorkspaceKey(), { name: name, parentId: parentId });
+          ElementPlus.ElMessage.success('文件夹已创建');
+        }
         workspaceFolderDialogVisible.value = false;
         refreshProjectWorkspace();
-        ElementPlus.ElMessage.success('文件夹已创建');
       }
       function downloadWorkspaceFile(file) {
         if (!file || file.kind === 'folder') return;
@@ -2333,13 +2391,62 @@
         if (!file) return;
         var raw = file.raw || file;
         var title = file.kind === 'folder' ? '删除文件夹' : '删除文件';
-        var text = file.kind === 'folder' ? '确定删除文件夹「' + file.name + '」？仅空文件夹可删除。' : '确定删除文件「' + file.name + '」？';
+        var text = file.kind === 'folder'
+          ? '确定删除文件夹「' + file.name + '」？文件夹内的文件和子文件夹将一并删除，且无法恢复。'
+          : '确定删除文件「' + file.name + '」？删除后无法恢复。';
         ElementPlus.ElMessageBox.confirm(text, title, { confirmButtonText: '删除', cancelButtonText: '取消', type: 'warning' }).then(function () {
           var ok = file.kind === 'folder' ? store.deleteWorkspaceFolder(projectWorkspaceKey(), raw.id) : (store.deleteWorkspaceFile(projectWorkspaceKey(), raw.id), true);
-          if (!ok) return ElementPlus.ElMessage.warning('请先移除文件夹内的内容');
+          if (!ok) return ElementPlus.ElMessage.error('删除失败');
           refreshProjectWorkspace();
-          ElementPlus.ElMessage.success('已删除');
+          ElementPlus.ElMessage.success(file.kind === 'folder' ? '文件夹及其中内容已删除' : '文件已删除');
         }).catch(function () {});
+      }
+      function handleWorkspaceItemCommand(command, file) {
+        if (!file) return;
+        if (command === 'rename') openRenameWorkspaceItem(file);
+        if (command === 'delete') deleteWorkspaceItem(file);
+      }
+      function onWorkspaceDragStart(file, ev) {
+        if (!file) return;
+        workspaceDragItem.value = file;
+        if (ev && ev.dataTransfer) {
+          ev.dataTransfer.effectAllowed = 'move';
+          ev.dataTransfer.setData('text/plain', file.id);
+        }
+      }
+      function onWorkspaceDragEnd() {
+        workspaceDragItem.value = null;
+      }
+      function canDropWorkspaceItem(target) {
+        var drag = workspaceDragItem.value;
+        if (!drag) return false;
+        if (target && target.kind !== 'folder') return false;
+        var targetId = target ? target.id : null;
+        if (String(drag.id) === String(targetId)) return false;
+        if (String(drag.parentId || '') === String(targetId || '')) return false;
+        if (drag.kind === 'folder' && targetId) {
+          var cursor = target;
+          var guard = 0;
+          while (cursor && guard < 20) {
+            if (String(cursor.id) === String(drag.id)) return false;
+            cursor = cursor.parentId ? projectWorkspaceMaterials.value.find(function (f) {
+              return String(f.id) === String(cursor.parentId);
+            }) : null;
+            guard += 1;
+          }
+        }
+        return true;
+      }
+      function onWorkspaceDrop(target) {
+        if (!canDropWorkspaceItem(target)) return;
+        var drag = workspaceDragItem.value;
+        var targetId = target ? target.id : null;
+        var ok = store.moveWorkspaceItem(projectWorkspaceKey(), drag.id, targetId);
+        workspaceDragItem.value = null;
+        if (ok) {
+          refreshProjectWorkspace();
+          ElementPlus.ElMessage.success('已移动到 ' + (target ? target.name : 'workspace'));
+        }
       }
       function openAddMemberDialog() {
         allExperts.value = store.getExperts();
@@ -2366,7 +2473,21 @@
         load();
         ElementPlus.ElMessage.success('项目成员已更新');
       }
-      function removeMember(memberId) { store.removeProjectMember(memberId); load(); }
+      function removeMember(member) {
+        if (!member) return;
+        var memberId = member.id || member;
+        var row = members.value.find(function (m) { return m.id === memberId; }) || member;
+        var name = (row.expert && row.expert.name) || '该成员';
+        ElementPlus.ElMessageBox.confirm(
+          '确定将「' + name + '」移出本项目？移除后该专家将不再出现在成员列表中，已有任务不受影响。',
+          '移除项目成员',
+          { confirmButtonText: '移除', cancelButtonText: '取消', type: 'warning' }
+        ).then(function () {
+          store.removeProjectMember(memberId);
+          load();
+          ElementPlus.ElMessage.success('已将「' + name + '」移出项目');
+        }).catch(function () {});
+      }
       function getMemberTaskStats(expertId) {
         var tasks = projectTasks.value.filter(function (task) {
           if (isGoalRoot(task)) return false;
@@ -2451,8 +2572,15 @@
         selectedProjectTaskId: selectedProjectTaskId,
         workspaceCurrentFolderId: workspaceCurrentFolderId,
         workspaceFolderDialogVisible: workspaceFolderDialogVisible,
+        workspaceFolderDialogMode: workspaceFolderDialogMode,
+        workspaceEditingItem: workspaceEditingItem,
         workspaceFolderName: workspaceFolderName,
         workspaceFileInput: workspaceFileInput,
+        workspaceDragItem: workspaceDragItem,
+        workspacePreviewVisible: workspacePreviewVisible,
+        workspacePreviewItem: workspacePreviewItem,
+        workspaceRenameDialogTitle: workspaceRenameDialogTitle,
+        workspaceRenameDialogSub: workspaceRenameDialogSub,
         workspaceFiles: workspaceFiles,
         workspaceStats: workspaceStats,
         workspaceBreadcrumbs: workspaceBreadcrumbs,
@@ -2528,6 +2656,8 @@
         parentTasksOf: parentTasksOf,
         taskCreatedByLabel: taskCreatedByLabel,
         hasTaskDependencyBlock: hasTaskDependencyBlock,
+        isTodoTask: isTodoTask,
+        taskTodoDetailText: taskTodoDetailText,
         advancedOpen: advancedOpen,
         currentRunOf: currentRunOf,
         latestEndedRun: latestEndedRun,
@@ -2591,13 +2721,22 @@
         workspaceSizeLabel: workspaceSizeLabel,
         openWorkspaceFolder: openWorkspaceFolder,
         openWorkspaceBreadcrumb: openWorkspaceBreadcrumb,
+        workspaceBreadcrumbClass: workspaceBreadcrumbClass,
+        canDropWorkspaceBreadcrumb: canDropWorkspaceBreadcrumb,
+        onWorkspaceBreadcrumbDrop: onWorkspaceBreadcrumbDrop,
         openWorkspaceFile: openWorkspaceFile,
         openMaterialUpload: openMaterialUpload,
         handleMaterialFileSelect: handleMaterialFileSelect,
         openCreateWorkspaceFolderDialog: openCreateWorkspaceFolderDialog,
+        openRenameWorkspaceItem: openRenameWorkspaceItem,
         submitWorkspaceFolderDialog: submitWorkspaceFolderDialog,
         downloadWorkspaceFile: downloadWorkspaceFile,
         deleteWorkspaceItem: deleteWorkspaceItem,
+        handleWorkspaceItemCommand: handleWorkspaceItemCommand,
+        onWorkspaceDragStart: onWorkspaceDragStart,
+        onWorkspaceDragEnd: onWorkspaceDragEnd,
+        canDropWorkspaceItem: canDropWorkspaceItem,
+        onWorkspaceDrop: onWorkspaceDrop,
         expertName: expertName,
         expertById: expertById,
         openAddMemberDialog: openAddMemberDialog,
@@ -2678,6 +2817,7 @@
       taskActionDialogTemplate(),
       projectSettingsDialogTemplate(),
       workspaceFolderDialogTemplate(),
+      workspacePreviewDialogTemplate(),
       addMemberDialogTemplate(),
       '</div>',
       '<div v-else class="main-scroll"><el-empty description="项目不存在"><back-link label="返回项目" @click="$emit(\'nav\', \'/projects\')" /></el-empty></div>'
@@ -2764,7 +2904,10 @@
         '<section v-for="col in statusColumns" :key="col.key" class="project-kanban-column" :class="\'column-\' + col.key">',
           '<header>',
             '<div class="project-kanban-column-title"><span>{{ col.title }}</span><em>{{ col.tasks.length }}</em></div>',
-            '<button v-if="col.key === \'todo\'" type="button" class="project-kanban-column-add" title="创建任务" @click="openManualCreateDialog({ status: \'todo\' })">+</button>',
+            '<button v-if="col.key === \'todo\'" type="button" class="project-kanban-column-add" title="新建任务" aria-label="新建任务" @click="openManualCreateDialog({ status: \'todo\' })">',
+              '<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.4"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>',
+              '<span>新建任务</span>',
+            '</button>',
             '<button v-if="col.key === \'done\'" type="button" class="project-kanban-archived-toggle" :class="{ active: showArchivedInDone }" @click="toggleShowArchived">已归档 {{ col.archivedCount }}</button>',
           '</header>',
           '<div class="project-kanban-column-body">',
@@ -2828,7 +2971,7 @@
         '<div class="detail-action-bar detail-action-bar--split workspace-action-bar project-workspace-action-bar">',
           '<div class="detail-action-left workspace-breadcrumbs">',
             '<template v-for="(crumb, index) in workspaceBreadcrumbs" :key="crumb.id || \'root\'">',
-              '<button type="button" class="workspace-breadcrumb" :class="{ active: index === workspaceBreadcrumbs.length - 1 }" @click="openWorkspaceBreadcrumb(crumb)">{{ crumb.name }}</button>',
+              '<button type="button" class="workspace-breadcrumb" :class="workspaceBreadcrumbClass(index, crumb)" @click="openWorkspaceBreadcrumb(crumb)" @dragover.prevent="canDropWorkspaceBreadcrumb(crumb)" @drop.prevent="onWorkspaceBreadcrumbDrop(crumb)">{{ crumb.name }}</button>',
               '<span v-if="index < workspaceBreadcrumbs.length - 1" class="workspace-breadcrumb-sep">/</span>',
             '</template>',
             '<span class="workspace-stat-pill">{{ workspaceStats }}</span>',
@@ -2869,7 +3012,7 @@
           '<div class="workspace-list-cell workspace-list-size-cell">大小</div>',
           '<div class="workspace-list-cell workspace-list-action-cell">操作</div>',
         '</div>',
-        '<div v-for="file in workspaceFiles" :key="file.id" class="workspace-list-row workspace-list-item project-workspace-list-row" :class="{ \'is-folder\': file.kind === \'folder\' }">',
+        '<div v-for="file in workspaceFiles" :key="file.id" class="workspace-list-row workspace-list-item project-workspace-list-row" :class="{ \'is-folder\': file.kind === \'folder\', \'is-drop-target\': canDropWorkspaceItem(file) }" draggable="true" @dragstart="onWorkspaceDragStart(file, $event)" @dragend="onWorkspaceDragEnd" @dragover.prevent="file.kind === \'folder\' && canDropWorkspaceItem(file)" @drop.prevent="file.kind === \'folder\' && onWorkspaceDrop(file)">',
           '<div class="workspace-list-cell workspace-list-name-cell" @click="file.kind === \'folder\' && openWorkspaceFolder(file)" @dblclick="openWorkspaceFile(file)">',
             '<span class="workspace-file-icon-wrap" :class="workspaceFileTypeClass(file)"><span class="workspace-file-icon">{{ workspaceFileIcon(file) }}</span></span>',
             '<span class="workspace-list-name-text">{{ file.name }}</span>',
@@ -2877,9 +3020,22 @@
           '<div class="workspace-list-cell workspace-list-type-cell">{{ workspaceTypeLabel(file) }}</div>',
           '<div class="workspace-list-cell workspace-list-time-cell">{{ workspaceUpdatedAt(file) }}</div>',
           '<div class="workspace-list-cell workspace-list-size-cell">{{ workspaceSizeLabel(file) }}</div>',
-          '<div class="workspace-list-cell workspace-list-action-cell">',
-            '<el-button v-if="file.kind !== \'folder\'" link type="primary" size="small" @click="downloadWorkspaceFile(file)">下载</el-button>',
-            '<el-button link type="danger" size="small" @click="deleteWorkspaceItem(file)">删除</el-button>',
+          '<div class="workspace-list-cell workspace-list-action-cell detail-table-action-cell">',
+            '<div class="detail-table-actions">',
+              '<template v-if="file.kind !== \'folder\'">',
+                '<el-button link type="primary" size="small" @click="openWorkspaceFile(file)">预览</el-button>',
+                '<el-button link type="primary" size="small" @click="downloadWorkspaceFile(file)">下载</el-button>',
+              '</template>',
+              '<el-dropdown trigger="click" @command="handleWorkspaceItemCommand($event, file)">',
+                '<button type="button" class="workspace-more-btn workspace-more-btn-vertical" aria-label="更多操作">⋮</button>',
+                '<template #dropdown>',
+                  '<el-dropdown-menu>',
+                    '<el-dropdown-item command="rename">重命名</el-dropdown-item>',
+                    '<el-dropdown-item command="delete" class="workspace-danger-dropdown-item">删除</el-dropdown-item>',
+                  '</el-dropdown-menu>',
+                '</template>',
+              '</el-dropdown>',
+            '</div>',
           '</div>',
         '</div>',
       '</div>'
@@ -2888,9 +3044,23 @@
 
   function goalDialogTemplate() {
     return [
-      '<el-dialog v-model="showGoalDialog" title="发起目标" width="640px" class="project-goal-dialog" :close-on-click-modal="false" :before-close="handleGoalDialogBeforeClose" append-to-body>',
-        '<div class="project-goal-dialog-tip">💡 描述你的项目目标，系统会自动拆解为具体任务并分配给相关专家。</div>',
-        '<el-form label-position="top" class="project-goal-dialog-form">',
+      '<el-dialog v-model="showGoalDialog" title="发起目标" width="620px" class="project-goal-dialog project-form-dialog" :close-on-click-modal="false" :before-close="handleGoalDialogBeforeClose" append-to-body>',
+        '<template #header>',
+          '<div class="project-form-dialog-header">',
+            '<span class="project-form-dialog-header-icon">',
+              '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v10M7 12h10"/></svg>',
+            '</span>',
+            '<div class="project-form-dialog-header-copy">',
+              '<strong>发起目标</strong>',
+              '<span>描述业务目标，系统将自动拆解并分派任务</span>',
+            '</div>',
+          '</div>',
+        '</template>',
+        '<div class="project-goal-dialog-tip">',
+          '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18h6"/><path d="M10 22h4"/><path d="M8.7 14.5A7 7 0 1 1 15.3 14.5c-.8.6-1.3 1.5-1.3 2.5h-4c0-1-.5-1.9-1.3-2.5z"/></svg>',
+          '<span>清楚描述目标背景、范围和预期结果，有助于系统生成更准确的执行任务。</span>',
+        '</div>',
+        '<el-form label-position="top" class="project-goal-dialog-form project-form-dialog-form">',
           '<el-form-item label="目标标题" required>',
             '<el-input v-model="goalForm.title" maxlength="100" show-word-limit placeholder="一句话概括要达成的目标" />',
           '</el-form-item>',
@@ -3036,7 +3206,7 @@
             '<p class="project-drawer-member-desc">{{ row.expert.description || \'暂无能力介绍\' }}</p>',
             '<div class="project-drawer-member-actions">',
               '<button type="button" @click="createTaskForMember(row)">给 TA 创建任务</button>',
-              '<button type="button" class="danger" @click="removeMember(row.id)">移除</button>',
+              '<button type="button" class="danger" @click="removeMember(row)">移除</button>',
             '</div>',
           '</article>',
           '<div v-if="members.length === 0" class="project-empty-panel">暂无项目成员</div>',
@@ -3074,6 +3244,10 @@
               '<div v-if="taskContextChips(drawerTask).length" class="project-task-detail-context">',
                 '<span v-for="chip in taskContextChips(drawerTask)" :key="chip.key" class="project-task-detail-context-chip" :class="\'context-chip-\' + chip.key">{{ chip.label }}</span>',
               '</div>',
+              '<div v-if="isTodoTask(drawerTask)" class="project-task-detail-waiting-note">',
+                '<span class="project-task-detail-waiting-note-icon">i</span>',
+                '<span>{{ taskTodoDetailText(drawerTask) }}</span>',
+              '</div>',
               '<div v-if="taskHasBody(drawerTask)" class="project-task-detail-section">',
                 '<div class="project-task-detail-section-title">任务说明</div>',
                 '<div class="project-task-detail-section-body">{{ drawerTask.body }}</div>',
@@ -3094,10 +3268,10 @@
                 '</div>',
               '</div>',
               '<div v-if="hasTaskDependencyBlock(drawerTask)" class="project-task-detail-section">',
-                '<div class="project-task-detail-section-title">依赖关系</div>',
+                '<div class="project-task-detail-section-title">执行依赖</div>',
                 '<div class="project-task-detail-deps">',
-                  '<div v-if="parentTaskNames(drawerTask).length" class="project-task-detail-dep-line"><span class="project-task-detail-dep-label">前置</span><span>{{ parentTaskNames(drawerTask).join(\'、\') }}</span></div>',
-                  '<div v-if="childTaskNames(drawerTask).length" class="project-task-detail-dep-line"><span class="project-task-detail-dep-label">子任务</span><span>{{ childTaskNames(drawerTask).join(\'、\') }}</span></div>',
+                  '<div v-if="parentTaskNames(drawerTask).length" class="project-task-detail-dep-line"><span class="project-task-detail-dep-label">前置任务</span><span>{{ parentTaskNames(drawerTask).join(\'、\') }}</span></div>',
+                  '<div v-if="childTaskNames(drawerTask).length" class="project-task-detail-dep-line"><span class="project-task-detail-dep-label">后续任务</span><span>{{ childTaskNames(drawerTask).join(\'、\') }}</span></div>',
                 '</div>',
               '</div>',
             '</div>',
@@ -3107,7 +3281,7 @@
                 '<div v-for="ev in processEventsForDisplay(drawerTask)" :key="ev.id" class="project-task-process-item">',
                   '<span class="project-task-process-dot" :class="\'ev-\' + ev.kind"></span>',
                   '<div class="project-task-process-body">',
-                    '<div class="project-task-process-head"><span class="project-task-process-time">{{ eventTimeLabel(ev.createdAt) }}</span><span class="project-task-process-title">{{ ev.title }}</span></div>',
+                    '<div class="project-task-process-head"><span class="project-task-process-time">{{ formatTaskTime(ev.createdAt) }}</span><span class="project-task-process-title">{{ ev.title }}</span></div>',
                     '<div v-if="ev.detail" class="project-task-process-detail">{{ ev.detail }}</div>',
                   '</div>',
                 '</div>',
@@ -3167,33 +3341,47 @@
 
   function manualCreateDialogTemplate() {
     return [
-      '<el-dialog v-model="showManualCreateDialog" title="创建任务" width="520px" :close-on-click-modal="false" append-to-body>',
-        '<el-form label-position="top">',
+      '<el-dialog v-model="showManualCreateDialog" title="新建任务" width="560px" class="project-manual-create-dialog project-form-dialog" :close-on-click-modal="false" append-to-body>',
+        '<template #header>',
+          '<div class="project-form-dialog-header">',
+            '<span class="project-form-dialog-header-icon">',
+              '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>',
+            '</span>',
+            '<div class="project-form-dialog-header-copy">',
+              '<strong>新建任务</strong>',
+              '<span>创建一项具体工作，并安排负责人和执行顺序</span>',
+            '</div>',
+          '</div>',
+        '</template>',
+        '<el-form label-position="top" class="project-manual-create-form project-form-dialog-form">',
           '<el-form-item label="任务标题" required>',
-            '<el-input v-model="manualForm.title" placeholder="新任务标题" />',
+            '<el-input v-model="manualForm.title" placeholder="一句话说明需要完成的工作" />',
           '</el-form-item>',
           '<el-form-item label="任务说明">',
-            '<el-input v-model="manualForm.body" type="textarea" :rows="2" placeholder="任务背景、要求和验收标准" />',
+            '<el-input v-model="manualForm.body" type="textarea" :rows="3" resize="vertical" placeholder="补充任务背景、具体要求和验收标准" />',
           '</el-form-item>',
-          '<el-form-item label="负责人" required>',
-            '<el-select v-model="manualForm.assignee" placeholder="从项目成员中选择" filterable clearable>',
-              '<el-option v-for="m in members" :key="m.expertId" :label="m.expert.name" :value="m.expertId" />',
-            '</el-select>',
-          '</el-form-item>',
-          '<el-form-item label="优先级">',
-            '<el-select v-model="manualForm.priority">',
-              '<el-option v-for="p in priorityOptions" :key="p.key" :label="p.label" :value="p.key" />',
-            '</el-select>',
-          '</el-form-item>',
-          '<el-form-item label="父任务">',
-            '<el-select v-model="manualForm.parentTaskId" placeholder="可选，选择已有任务作为依赖" filterable clearable>',
+          '<div class="project-form-dialog-grid">',
+            '<el-form-item label="负责人" required>',
+              '<el-select v-model="manualForm.assignee" placeholder="选择项目成员" filterable clearable>',
+                '<el-option v-for="m in members" :key="m.expertId" :label="m.expert.name" :value="m.expertId" />',
+              '</el-select>',
+            '</el-form-item>',
+            '<el-form-item label="优先级">',
+              '<el-select v-model="manualForm.priority">',
+                '<el-option v-for="p in priorityOptions" :key="p.key" :label="p.label" :value="p.key" />',
+              '</el-select>',
+            '</el-form-item>',
+          '</div>',
+          '<el-form-item label="前置任务">',
+            '<el-select v-model="manualForm.parentTaskId" placeholder="可选；该任务完成后，本任务才能开始" filterable clearable>',
               '<el-option v-for="task in formParentTasks" :key="task.id" :label="taskDisplayTitle(task)" :value="task.id" />',
             '</el-select>',
+            '<div class="project-form-dialog-help">未选择时，任务创建后可直接进入执行队列。</div>',
           '</el-form-item>',
         '</el-form>',
         '<template #footer>',
           '<el-button @click="closeManualCreateDialog">取消</el-button>',
-          '<el-button type="primary" @click="submitManualCreateAndDispatch">创建并加入执行队列</el-button>',
+          '<el-button type="primary" @click="submitManualCreateAndDispatch">创建</el-button>',
         '</template>',
       '</el-dialog>'
     ].join('');
@@ -3307,15 +3495,62 @@
 
   function workspaceFolderDialogTemplate() {
     return [
-      '<el-dialog v-model="workspaceFolderDialogVisible" title="新建文件夹" width="420px" :close-on-click-modal="false" append-to-body>',
-        '<el-form label-position="top">',
-          '<el-form-item label="文件夹名称" required>',
-            '<el-input v-model="workspaceFolderName" placeholder="请输入文件夹名称" maxlength="60" show-word-limit @keyup.enter="submitWorkspaceFolderDialog" />',
-          '</el-form-item>',
-        '</el-form>',
+      '<el-dialog v-model="workspaceFolderDialogVisible" width="420px" class="form-dialog form-dialog-sm ws-folder-dialog ed-dialog" :close-on-click-modal="false" append-to-body>',
+        '<template #header>',
+          '<div class="dialog-header-custom dialog-header-workspace">',
+            '<div class="dialog-header-icon dialog-header-icon-workspace">',
+              '<svg v-if="workspaceFolderDialogMode === \'rename\'" viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>',
+              '<svg v-else viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/><line x1="12" y1="11" x2="12" y2="17"/><line x1="9" y1="14" x2="15" y2="14"/></svg>',
+            '</div>',
+            '<div class="dialog-header-text">',
+              '<div class="dialog-header-title">{{ workspaceRenameDialogTitle }}</div>',
+              '<div class="dialog-header-sub">{{ workspaceRenameDialogSub }}</div>',
+            '</div>',
+          '</div>',
+        '</template>',
+        '<div class="form-dialog-body ws-folder-dialog-body">',
+          '<el-form label-position="top" class="form-dialog-form ws-folder-form" @submit.prevent="submitWorkspaceFolderDialog">',
+            '<el-form-item :label="workspaceFolderDialogMode === \'rename\' ? \'名称\' : \'文件夹名称\'" required>',
+              '<el-input v-model="workspaceFolderName" placeholder="例如：分析报告、原始数据" maxlength="60" show-word-limit clearable @keyup.enter="submitWorkspaceFolderDialog" />',
+            '</el-form-item>',
+          '</el-form>',
+        '</div>',
         '<template #footer>',
-          '<el-button @click="workspaceFolderDialogVisible = false">取消</el-button>',
-          '<el-button type="primary" @click="submitWorkspaceFolderDialog">创建</el-button>',
+          '<div class="dialog-footer-custom dialog-footer-wizard">',
+            '<div class="dialog-footer-actions">',
+              '<el-button class="wizard-btn wizard-btn-cancel" @click="workspaceFolderDialogVisible = false">取消</el-button>',
+              '<el-button type="primary" class="wizard-btn wizard-btn-submit" :disabled="!(workspaceFolderName && workspaceFolderName.trim())" @click="submitWorkspaceFolderDialog">保存</el-button>',
+            '</div>',
+          '</div>',
+        '</template>',
+      '</el-dialog>'
+    ].join('');
+  }
+
+  function workspacePreviewDialogTemplate() {
+    return [
+      '<el-dialog v-model="workspacePreviewVisible" width="580px" class="form-dialog ws-preview-dialog ed-dialog ed-preview-dialog" append-to-body @closed="workspacePreviewItem = null">',
+        '<template #header>',
+          '<div class="dialog-header-custom dialog-header-workspace">',
+            '<div class="dialog-header-icon dialog-header-icon-workspace">',
+              '<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>',
+            '</div>',
+            '<div v-if="workspacePreviewItem" class="dialog-header-text">',
+              '<div class="dialog-header-title">{{ workspacePreviewItem.name }}</div>',
+              '<div class="dialog-header-sub">{{ workspaceTypeLabel(workspacePreviewItem) }} · {{ workspaceUpdatedAt(workspacePreviewItem) }}</div>',
+            '</div>',
+          '</div>',
+        '</template>',
+        '<div v-if="workspacePreviewItem" class="form-dialog-body ws-preview-dialog-body">',
+          '<pre class="ws-preview-text">{{ workspacePreviewItem.content || \'暂无可预览内容\' }}</pre>',
+        '</div>',
+        '<template #footer>',
+          '<div class="dialog-footer-custom dialog-footer-wizard">',
+            '<div class="dialog-footer-actions">',
+              '<el-button class="wizard-btn wizard-btn-cancel" @click="workspacePreviewVisible = false">关闭</el-button>',
+              '<el-button type="primary" class="wizard-btn wizard-btn-submit" @click="downloadWorkspaceFile(workspacePreviewItem)">下载</el-button>',
+            '</div>',
+          '</div>',
         '</template>',
       '</el-dialog>'
     ].join('');

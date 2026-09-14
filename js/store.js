@@ -3336,6 +3336,132 @@
     persist();
   }
 
+  function migrateTodoDemoCards() {
+    var SCHEMA = 16;
+    if ((state.projectTaskSchemaVersion || 0) >= SCHEMA) return;
+    if (!DEV_MOCK) return;
+
+    (state.projects || []).forEach(function (project) {
+      var members = (state.projectMembers || []).filter(function (member) {
+        return sameId(member.projectId, project.id);
+      });
+      if (!members.length) return;
+
+      var projectTasks = (state.projectTasks || []).filter(function (task) {
+        return sameId(task.projectId, project.id);
+      });
+      var todoCount = projectTasks.filter(function (task) {
+        return task && task.isTriage !== true && normalizeProjectTaskStatus(task.status) === 'todo';
+      }).length;
+      if (todoCount >= 3) return;
+
+      var templates;
+      if (project.name.indexOf('良率') >= 0) {
+        templates = [
+          { title: '确认本周良率基线', body: '汇总本周各关键站点良率，确认后续分析使用的统一基线。', priority: 'high' },
+          { title: '整理异常批次清单', body: '整理近期异常批次、影响站点及初步现象，供后续排查使用。', priority: 'medium' },
+          { title: '补充工艺窗口验收标准', body: '补充参数回标后的验收指标、观察周期和异常回退条件。', priority: 'medium' }
+        ];
+      } else if (project.name.indexOf('供应链') >= 0) {
+        templates = [
+          { title: '核对下周需求基线', body: '核对各工厂下周需求计划，确认预测与排产使用的统一口径。', priority: 'high' },
+          { title: '整理缺失主数据清单', body: '整理物料、供应商和工厂维度的缺失主数据，安排补录。', priority: 'medium' },
+          { title: '补充仿真验收指标', body: '明确库存、交付及时率和缺货率等仿真验收指标。', priority: 'medium' }
+        ];
+      } else {
+        templates = [
+          { title: '整理项目输入资料', body: '汇总任务执行所需的背景资料与数据清单。', priority: 'medium' },
+          { title: '确认任务验收标准', body: '补充任务范围、交付物和验收标准。', priority: 'high' },
+          { title: '准备下一轮评审材料', body: '整理阶段成果，准备下一轮评审材料。', priority: 'low' }
+        ];
+      }
+
+      var added = 0;
+      templates.forEach(function (template, index) {
+        if (todoCount + added >= 3) return;
+        var exists = projectTasks.some(function (task) { return task.title === template.title; });
+        if (exists) return;
+        var member = members[(todoCount + added) % members.length];
+        state.projectTasks.push(projectTaskSeed(project, {
+          title: template.title,
+          status: 'todo',
+          expertId: member.expertId,
+          sortOrder: 40 + index,
+          priority: template.priority,
+          body: template.body,
+          taskEvents: [
+            { id: uid(), kind: 'created', label: '创建', author: '我', payload: { assignee: member.expertId, status: 'todo' }, createdAt: minutesAgoIso(18 + index * 7) }
+          ],
+          createdAt: minutesAgoIso(18 + index * 7),
+          updatedAt: minutesAgoIso(18 + index * 7)
+        }));
+        added += 1;
+      });
+    });
+
+    state.projectTaskSchemaVersion = SCHEMA;
+    persist();
+  }
+
+  function migrateTodoDependencyDemo() {
+    var SCHEMA = 17;
+    if ((state.projectTaskSchemaVersion || 0) >= SCHEMA) return;
+    if (!DEV_MOCK) return;
+
+    (state.projects || []).forEach(function (project) {
+      var tasks = (state.projectTasks || []).filter(function (task) {
+        return sameId(task.projectId, project.id);
+      });
+      var predecessors = tasks.filter(function (task) {
+        if (!task || task.isTriage === true) return false;
+        var status = normalizeProjectTaskStatus(task.status);
+        return status === 'running' || status === 'review' || status === 'ready' || status === 'blocked';
+      });
+      var todos = tasks.filter(function (task) {
+        return task && task.isTriage !== true && normalizeProjectTaskStatus(task.status) === 'todo';
+      });
+
+      todos.forEach(function (task, index) {
+        var currentParent = tasks.find(function (candidate) {
+          return sameId(candidate.id, task.parentTaskId);
+        });
+        var currentParentStatus = normalizeProjectTaskStatus(currentParent && currentParent.status);
+        var hasUnfinishedExecutionParent = !!(
+          currentParent &&
+          currentParent.isTriage !== true &&
+          currentParentStatus !== 'done' &&
+          currentParentStatus !== 'archived'
+        );
+        if (hasUnfinishedExecutionParent) return;
+
+        var available = predecessors.filter(function (candidate) {
+          return !sameId(candidate.id, task.id) && !sameId(candidate.parentTaskId, task.id);
+        });
+        var predecessor = available.length ? available[index % available.length] : null;
+        if (!predecessor) {
+          task.status = 'ready';
+          task.updatedAt = nowIso();
+          return;
+        }
+
+        task.parentTaskId = predecessor.id;
+        task.updatedAt = nowIso();
+        if (!Array.isArray(task.taskEvents)) task.taskEvents = [];
+        task.taskEvents.unshift({
+          id: uid(),
+          kind: 'linked',
+          label: '添加前置关系',
+          author: '我',
+          payload: { parent: predecessor.id, child: task.id, reason: '模拟执行依赖' },
+          createdAt: task.updatedAt
+        });
+      });
+    });
+
+    state.projectTaskSchemaVersion = SCHEMA;
+    persist();
+  }
+
   function migrateProjectsKanbanFields() {
     var updated = false;
     (state.projects || []).forEach(function (p) {
@@ -3796,6 +3922,8 @@
       migrateHumanTimelineAndGaveUp();
       migrateStatusVariantDemoCards();
       migrateSelfCommentsAndDetailDemo();
+      migrateTodoDemoCards();
+      migrateTodoDependencyDemo();
       migrateDialogueTaskLastActivity();
       migrateProjectFiles();
       migrateProjectMessageTypes();
@@ -5397,6 +5525,21 @@
         payload: { result: text },
         createdAt: nowIso()
       });
+      (state.projectTasks || []).forEach(function (child) {
+        if (!sameId(child.projectId, projectId) || !sameId(child.parentTaskId, task.id)) return;
+        if (normalizeProjectTaskStatus(child.status) !== 'todo') return;
+        child.status = 'ready';
+        child.updatedAt = task.completedAt;
+        if (!Array.isArray(child.taskEvents)) child.taskEvents = [];
+        child.taskEvents.unshift({
+          id: uid(),
+          kind: 'promoted',
+          label: '进入执行队列',
+          author: '系统',
+          payload: { status: 'ready', reason: '前置任务「' + task.title + '」已完成' },
+          createdAt: task.completedAt
+        });
+      });
       AppStore.addProjectEvent(projectId, {
         type: 'task_completed',
         category: 'task',
@@ -5897,9 +6040,23 @@
     },
     deleteWorkspaceFolder: function (expertId, folderId) {
       if (!state.workspaceFiles[expertId]) return false;
-      var hasChildren = state.workspaceFiles[expertId].some(function (f) { return String(f.parentId || '') === String(folderId); });
-      if (hasChildren) return false;
-      state.workspaceFiles[expertId] = state.workspaceFiles[expertId].filter(function (f) { return String(f.id) !== String(folderId); });
+      var removableIds = {};
+      removableIds[String(folderId)] = true;
+      var changed = true;
+      while (changed) {
+        changed = false;
+        state.workspaceFiles[expertId].forEach(function (item) {
+          var itemId = String(item.id);
+          var parentId = String(item.parentId || '');
+          if (removableIds[parentId] && !removableIds[itemId]) {
+            removableIds[itemId] = true;
+            changed = true;
+          }
+        });
+      }
+      state.workspaceFiles[expertId] = state.workspaceFiles[expertId].filter(function (f) {
+        return !removableIds[String(f.id)];
+      });
       persist();
       return true;
     },

@@ -1540,11 +1540,6 @@
         URL.revokeObjectURL(url);
       }
 
-      function goToArtifactTask(taskId) {
-        if (!taskId) return;
-        ctx.emit('nav', '/experts/' + props.expertId + '/tasks/' + taskId);
-      }
-
       // ---- 资料 Tab 方法 ----
       var filteredMaterials = Vue.computed(function () {
         var list = materials.value;
@@ -1671,10 +1666,6 @@
 
       function workspaceUpdatedAt(file) {
         return (file && (file.updatedAt || file.createdAt)) || '—';
-      }
-
-      function workspaceSourceLabel(file) {
-        return file && file.source === 'generated' ? '任务' : '用户';
       }
 
       function workspaceSizeLabel(file) {
@@ -1836,13 +1827,13 @@
       function deleteWorkspaceFolder(file) {
         if (!file || file.kind !== 'folder') return;
         ElementPlus.ElMessageBox.confirm(
-          '确定删除文件夹「' + file.name + '」？仅空文件夹可删除。', '删除文件夹',
+          '确定删除文件夹「' + file.name + '」？文件夹内的文件和子文件夹将一并删除，且无法恢复。', '删除文件夹',
           { confirmButtonText: '删除', cancelButtonText: '取消', type: 'warning' }
         ).then(function () {
           var ok = store.deleteWorkspaceFolder(props.expertId, file.raw.id);
-          if (!ok) { ElementPlus.ElMessage.warning('请先移除文件夹内的内容'); return; }
+          if (!ok) { ElementPlus.ElMessage.error('文件夹删除失败'); return; }
           materials.value = store.getWorkspaceFiles(props.expertId);
-          ElementPlus.ElMessage.success('文件夹已删除');
+          ElementPlus.ElMessage.success('文件夹及其中内容已删除');
         }).catch(function () {});
       }
 
@@ -1851,7 +1842,6 @@
         if (command === 'open') openWorkspaceFilePreview(file);
         if (command === 'preview') openWorkspaceFilePreview(file);
         if (command === 'download') downloadWorkspaceFile(file);
-        if (command === 'task') goToArtifactTask(file.taskId);
         if (command === 'rename' && (file.source === 'upload' || file.source === 'generated')) {
           openRenameWorkspaceItem(file);
         }
@@ -2779,7 +2769,7 @@
         artifactSearchQuery: artifactSearchQuery, artifactTypeFilter: artifactTypeFilter, artifactTaskFilter: artifactTaskFilter,
         artifactPreviewVisible: artifactPreviewVisible, artifactPreviewItem: artifactPreviewItem,
         filteredArtifacts: filteredArtifacts, artifactStats: artifactStats,
-        openArtifactPreview: openArtifactPreview, downloadArtifact: downloadArtifact, goToArtifactTask: goToArtifactTask,
+        openArtifactPreview: openArtifactPreview, downloadArtifact: downloadArtifact,
         // 资料 Tab
         materialFileInput: materialFileInput, materialTypeFilter: materialTypeFilter, materialSearchQuery: materialSearchQuery,
         materialPreviewVisible: materialPreviewVisible, materialPreviewItem: materialPreviewItem,
@@ -2791,7 +2781,7 @@
         openMaterialUpload: openMaterialUpload, handleMaterialFileSelect: handleMaterialFileSelect,
         openMaterialPreview: openMaterialPreview, downloadMaterial: downloadMaterial, deleteMaterial: deleteMaterial,
         workspaceFileTypeClass: workspaceFileTypeClass, workspaceFileIcon: workspaceFileIcon, workspaceFileMeta: workspaceFileMeta,
-        workspaceTypeLabel: workspaceTypeLabel, workspaceUpdatedAt: workspaceUpdatedAt, workspaceSourceLabel: workspaceSourceLabel, workspaceSizeLabel: workspaceSizeLabel,
+        workspaceTypeLabel: workspaceTypeLabel, workspaceUpdatedAt: workspaceUpdatedAt, workspaceSizeLabel: workspaceSizeLabel,
         openWorkspaceFilePreview: openWorkspaceFilePreview, downloadWorkspaceFile: downloadWorkspaceFile, deleteWorkspaceFile: deleteWorkspaceFile,
         openCreateWorkspaceFolderDialog: openCreateWorkspaceFolderDialog, submitWorkspaceFolderDialog: submitWorkspaceFolderDialog,
         openWorkspaceFolder: openWorkspaceFolder, openWorkspaceBreadcrumb: openWorkspaceBreadcrumb,
@@ -3125,7 +3115,6 @@
                       <div class="workspace-list-row workspace-list-head">\
                         <div class="workspace-list-cell workspace-list-name-cell">名称</div>\
                         <div class="workspace-list-cell workspace-list-type-cell">类型</div>\
-                        <div class="workspace-list-cell workspace-list-updater-cell">来源</div>\
                         <div class="workspace-list-cell workspace-list-time-cell">更新时间</div>\
                         <div class="workspace-list-cell workspace-list-size-cell">大小</div>\
                         <div class="workspace-list-cell workspace-list-action-cell">操作</div>\
@@ -3138,7 +3127,6 @@
                           <span class="workspace-list-name-text">{{ file.name }}</span>\
                         </div>\
                         <div class="workspace-list-cell workspace-list-type-cell">{{ workspaceTypeLabel(file) }}</div>\
-                        <div class="workspace-list-cell workspace-list-updater-cell">{{ workspaceSourceLabel(file) }}</div>\
                         <div class="workspace-list-cell workspace-list-time-cell">{{ workspaceUpdatedAt(file) }}</div>\
                         <div class="workspace-list-cell workspace-list-size-cell">{{ workspaceSizeLabel(file) }}</div>\
                         <div class="workspace-list-cell workspace-list-action-cell detail-table-action-cell">\
@@ -3146,7 +3134,6 @@
                             <template v-if="file.kind !== \'folder\'">\
                               <el-button link type="primary" size="small" @click="openWorkspaceFilePreview(file)">预览</el-button>\
                               <el-button link type="primary" size="small" @click="downloadWorkspaceFile(file)">下载</el-button>\
-                              <el-button v-if="file.taskId" link type="primary" size="small" @click="goToArtifactTask(file.taskId)">跳转至任务</el-button>\
                             </template>\
                             <el-dropdown trigger="click" @command="handleWorkspaceItemCommand($event, file)">\
                               <button type="button" class="workspace-more-btn workspace-more-btn-vertical" aria-label="更多操作">⋮</button>\
