@@ -1258,7 +1258,7 @@ body {
 .task-action-btn:hover { background: #e8ecf0; color: var(--primary); }
 .task-action-btn-danger:hover { background: #fef0f0; color: #f56c6c; }
 
-.chat-main { flex: 1; display: flex; flex-direction: column; min-width: 480px; }
+.chat-main { flex: 1; display: flex; flex-direction: column; min-width: 480px; background: #f9fafb; }
 .chat-header {
   padding: 12px 20px; border-bottom: 1px solid var(--border);
   display: flex; align-items: center; justify-content: space-between; gap: 12px;
@@ -1418,29 +1418,106 @@ body {
 .msg-row.system { justify-content: center; }
 .msg-row.system .msg-bubble { background: transparent; border: none; color: var(--text-muted); font-size: 12px; }
 .chat-input {
-  padding: 12px 16px 14px;
-  border-top: 1px solid var(--border);
-  background: #fff;
+  position: relative;
+  padding: 6px 20px 16px;
+  border-top: none;
+  background: transparent;
 }
 
-/* Chat composer */
+/* 预置问题悬浮入口 */
+.chat-preset-anchor {
+  position: absolute;
+  left: 20px;
+  bottom: calc(100% + 6px);
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  max-width: min(525px, calc(100% - 40px));
+}
+.chat-preset-btn {
+  display: inline-flex;
+  align-items: center;
+  height: 26px;
+  padding: 0 10px;
+  border: none;
+  border-radius: 999px;
+  background: #fff;
+  color: #606266;
+  font-size: 12px;
+  font-weight: 400;
+  cursor: pointer;
+  box-shadow: 0 4px 14px rgba(15, 23, 42, 0.08);
+}
+.chat-preset-btn:hover,
+.chat-preset-btn.is-open {
+  color: var(--primary, #4080ff);
+  box-shadow: 0 6px 16px rgba(64, 128, 255, 0.14);
+}
+.chat-preset-panel {
+  width: 525px;
+  max-height: 280px;
+  overflow-y: auto;
+  padding: 6px;
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: 0 16px 40px rgba(15, 23, 42, 0.16);
+}
+.chat-preset-panel-head {
+  padding: 8px 10px 6px;
+  font-size: 12px;
+  color: #909399;
+}
+.chat-preset-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  width: 100%;
+  padding: 9px 10px;
+  border: none;
+  border-radius: 10px;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  color: var(--text-primary, #303133);
+  font-size: 13px;
+  line-height: 1.5;
+}
+.chat-preset-item:hover { background: #f0f5ff; color: var(--primary, #4080ff); }
+.chat-preset-index {
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  margin-top: 1px;
+  border-radius: 50%;
+  background: #eef3ff;
+  color: var(--primary, #4080ff);
+  font-size: 11px;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.chat-preset-text { min-width: 0; }
+
+/* Chat composer：悬浮卡片，底色区别于对话背景 */
 .chat-composer {
-  border: 1px solid #e0e6ef;
-  border-radius: 12px;
-  background: #fafbfc;
-  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
-  transition: border-color 0.2s, box-shadow 0.2s;
+  border: 1px solid #e4eaf3;
+  border-radius: 16px;
+  background: #fff;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.08);
 }
 .chat-composer:focus-within {
-  border-color: #b8d0ff;
+  border-color: #c5d4f5;
   background: #fff;
-  box-shadow: 0 0 0 3px rgba(64, 128, 255, 0.08), 0 2px 8px rgba(15, 23, 42, 0.06);
+  box-shadow: 0 10px 28px rgba(64, 128, 255, 0.14);
 }
 .chat-composer-main {
   display: flex;
   align-items: flex-end;
   gap: 8px;
-  padding: 8px 10px 8px 12px;
+  padding: 10px 12px 4px;
 }
 .chat-composer-textarea { flex: 1; min-width: 0; }
 .chat-composer-textarea .el-textarea__inner {
@@ -1597,7 +1674,7 @@ body {
 }
 @keyframes chat-send-spin { to { transform: rotate(360deg); } }
 .chat-composer-hint {
-  padding: 0 12px 8px;
+  padding: 0 12px 6px;
   font-size: 11px;
   color: #c0c4cc;
   text-align: right;
@@ -1657,8 +1734,8 @@ body {
 /* 第三层：配置行（模型 + 工作目录） */
 .chat-composer-config {
   display: flex; align-items: center; gap: 16px;
-  padding: 6px 12px 8px;
-  border-top: 1px dashed #e0e6ef;
+  padding: 4px 8px 8px;
+  border-top: none;
   font-size: 12px; color: #909399;
 }
 .chat-config-trigger {
@@ -2335,7 +2412,170 @@ body {
 }
 .persona-editor-card .el-textarea__inner:focus { box-shadow: none; }
 
-/* 人设分栏布局 */
+/* 人设工具条：预置问题与导入导出保存在同一行 */
+.detail-action-bar.persona-toolbar-row {
+  flex-direction: row;
+  flex-wrap: nowrap;
+  justify-content: flex-start;
+  align-items: center;
+  gap: 12px;
+}
+.persona-preset-cluster {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex-shrink: 0;
+}
+.persona-preset-title {
+  font-size: 13px;
+  font-weight: 400;
+  color: var(--text-primary);
+  white-space: nowrap;
+}
+.persona-preset-switch.el-switch {
+  height: 16px;
+  line-height: 16px;
+  --el-switch-on-color: #4080ff;
+  --el-switch-off-color: #dcdfe6;
+}
+.persona-preset-switch.el-switch--small .el-switch__core {
+  min-width: 26px;
+  height: 14px;
+  border: none;
+  border-radius: 999px;
+}
+.persona-preset-switch.el-switch--small .el-switch__core .el-switch__action {
+  width: 10px;
+  height: 10px;
+  left: 2px;
+  box-shadow: none;
+}
+.persona-preset-switch.el-switch--small.is-checked .el-switch__core .el-switch__action {
+  left: calc(100% - 12px);
+}
+.persona-preset-config-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  height: auto;
+  padding: 0;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  color: #606266;
+  cursor: pointer;
+}
+.persona-preset-config-btn:hover {
+  color: var(--primary, #4080ff);
+  background: transparent;
+}
+.persona-preset-num {
+  min-width: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--primary, #4080ff);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1;
+}
+.persona-file-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+.preset-questions-dialog.el-dialog { max-width: calc(100vw - 32px); }
+.preset-question-list { display: flex; flex-direction: column; gap: 10px; }
+.preset-question-row { display: flex; align-items: center; gap: 8px; }
+.preset-question-index {
+  width: 22px;
+  height: 22px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: #eef3ff;
+  color: var(--primary, #4080ff);
+  font-size: 12px;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.preset-question-row .el-input { flex: 1; }
+.preset-question-row.is-dragging { opacity: 0.45; }
+.preset-question-row.is-drag-over {
+  border-radius: 8px;
+  background: #f3f7ff;
+}
+.preset-question-drag {
+  width: 28px;
+  height: 28px;
+  flex-shrink: 0;
+  padding: 0;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: #909399;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: grab;
+}
+.preset-question-drag:hover { color: var(--primary, #4080ff); background: #f3f7ff; }
+.preset-question-drag:active { cursor: grabbing; }
+.preset-question-ghost {
+  position: fixed;
+  left: 0;
+  top: -1000px;
+  z-index: 1;
+  box-sizing: border-box;
+  height: 32px;
+  padding: 0 12px;
+  border: 1px solid #dcdfe6;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.92);
+  opacity: 0.9;
+  color: #303133;
+  font-size: 14px;
+  line-height: 30px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.12);
+  pointer-events: none;
+}
+.preset-question-ghost.is-empty { color: #c0c4cc; }
+.preset-question-remove {
+  width: 28px;
+  height: 28px;
+  flex-shrink: 0;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: #909399;
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+}
+.preset-question-remove:hover { background: #fef0f0; color: #f56c6c; }
+.preset-question-add {
+  align-self: flex-start;
+  margin-top: 2px;
+  border: none;
+  background: transparent;
+  color: var(--primary, #4080ff);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 4px 2px;
+}
+.preset-question-add:disabled { color: #c0c4cc; cursor: not-allowed; }
+.dialog-header-icon-preset {
+  background: linear-gradient(135deg, #ecf3ff, #fff);
+  color: var(--primary, #4080ff);
+  box-shadow: 0 2px 8px rgba(64, 128, 255, 0.15);
+}
 .persona-split-layout {
   display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px;
   min-height: 360px;

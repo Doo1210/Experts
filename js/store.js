@@ -957,7 +957,9 @@
       state.personas[expertId] = {
         coreDutyMd: personaPatch.coreDutyMd != null ? personaPatch.coreDutyMd : (prevPersona.coreDutyMd || ''),
         workflowMd: personaPatch.workflowMd != null ? personaPatch.workflowMd : (prevPersona.workflowMd || ''),
-        behaviorMd: personaPatch.behaviorMd != null ? personaPatch.behaviorMd : (prevPersona.behaviorMd || '')
+        behaviorMd: personaPatch.behaviorMd != null ? personaPatch.behaviorMd : (prevPersona.behaviorMd || ''),
+        presetQuestionsEnabled: !!prevPersona.presetQuestionsEnabled,
+        presetQuestions: Array.isArray(prevPersona.presetQuestions) ? prevPersona.presetQuestions.slice() : []
       };
     }
     if (!skipCapabilities) {
@@ -1178,6 +1180,17 @@
     state.experts.forEach(function (e) { ensureExpertDefaults(e.id); });
     persist();
     window.dispatchEvent(new CustomEvent('app-store-updated'));
+  }
+
+  function normalizePresetQuestions(list) {
+    if (!Array.isArray(list)) return [];
+    var out = [];
+    list.forEach(function (item) {
+      var text = String(item == null ? '' : item).trim();
+      if (!text || out.indexOf(text) >= 0) return;
+      out.push(text);
+    });
+    return out.slice(0, 20);
   }
 
   function persist() {
@@ -4193,13 +4206,24 @@
 
     getPersona: function (expertId) {
       var p = state.personas[expertId];
-      if (!p) return { soulMd: '', onboarded: false };
-      if (p.soulMd !== undefined) return p;
-      var legacy = '';
-      if (p.coreDutyMd) legacy += String(p.coreDutyMd);
-      if (p.workflowMd) legacy += '\n\n' + String(p.workflowMd);
-      if (p.behaviorMd) legacy += '\n\n' + String(p.behaviorMd);
-      return { soulMd: legacy, onboarded: false };
+      var soulMd = '';
+      var onboarded = false;
+      if (p) {
+        if (p.soulMd !== undefined) {
+          soulMd = p.soulMd || '';
+          onboarded = !!p.onboarded;
+        } else {
+          if (p.coreDutyMd) soulMd += String(p.coreDutyMd);
+          if (p.workflowMd) soulMd += (soulMd ? '\n\n' : '') + String(p.workflowMd);
+          if (p.behaviorMd) soulMd += (soulMd ? '\n\n' : '') + String(p.behaviorMd);
+        }
+      }
+      return {
+        soulMd: soulMd,
+        onboarded: onboarded,
+        presetQuestionsEnabled: !!(p && p.presetQuestionsEnabled),
+        presetQuestions: normalizePresetQuestions(p && p.presetQuestions)
+      };
     },
     getExpertDetailMeta: function (expertId) {
       return (state.expertDetailMeta && state.expertDetailMeta[expertId]) || {
@@ -4300,7 +4324,9 @@
       state.personas[expertId] = {
         soulMd: soulMd,
         onboarded: (old && old.onboarded) || false,
-        history: history
+        history: history,
+        presetQuestionsEnabled: !!(old && old.presetQuestionsEnabled),
+        presetQuestions: normalizePresetQuestions(old && old.presetQuestions)
       };
       persist();
       if (!DEV_MOCK && window.SidecarApi && window.SidecarApi.patchExpert) {
@@ -4309,11 +4335,31 @@
         });
       }
     },
+    savePresetQuestions: function (expertId, payload) {
+      payload = payload || {};
+      var old = state.personas[expertId] || {};
+      var soulMd = '';
+      if (old.soulMd !== undefined) soulMd = old.soulMd || '';
+      else soulMd = [old.coreDutyMd, old.workflowMd, old.behaviorMd].filter(Boolean).join('\n\n');
+      state.personas[expertId] = {
+        soulMd: soulMd,
+        onboarded: !!old.onboarded,
+        history: old.history || [],
+        presetQuestionsEnabled: !!payload.enabled,
+        presetQuestions: normalizePresetQuestions(payload.questions)
+      };
+      persist();
+    },
     setPersonaOnboarded: function (expertId, onboarded) {
       var p = state.personas[expertId] || {};
       if (p.soulMd === undefined) {
         var legacy = [p.coreDutyMd, p.workflowMd, p.behaviorMd].filter(Boolean).join('\n\n');
-        p = { soulMd: legacy, onboarded: false };
+        p = {
+          soulMd: legacy,
+          onboarded: false,
+          presetQuestionsEnabled: !!p.presetQuestionsEnabled,
+          presetQuestions: normalizePresetQuestions(p.presetQuestions)
+        };
       }
       p.onboarded = !!onboarded;
       state.personas[expertId] = p;

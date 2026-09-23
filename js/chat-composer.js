@@ -16,12 +16,14 @@
       modelDisplayName: { type: String, default: '' },
       sessionCwd: { type: String, default: '' },
       tokenEstimate: { type: Number, default: 0 },
-      workspaceFiles: { type: Array, default: function () { return []; } }
+      workspaceFiles: { type: Array, default: function () { return []; } },
+      presetQuestions: { type: Array, default: function () { return []; } }
     },
     emits: [
       'update:inputText', 'submit', 'interrupt',
       'fileSelect', 'removeFile',
-      'selectModel', 'selectCwd', 'openWorkspace'
+      'selectModel', 'selectCwd', 'openWorkspace',
+      'applyPreset'
     ],
     data: function () {
       return {
@@ -31,7 +33,8 @@
         pathSelectedIndex: 0,
         pathAnchorPos: -1,
         modelPickerVisible: false,
-        modelPickerTab: 'platform'
+        modelPickerTab: 'platform',
+        presetPanelOpen: false
       };
     },
     computed: {
@@ -245,6 +248,24 @@
       closePathPopover: function () {
         this.showPathPopover = false;
       },
+      togglePresetPanel: function () {
+        this.presetPanelOpen = !this.presetPanelOpen;
+      },
+      applyPreset: function (text) {
+        this.presetPanelOpen = false;
+        this.$emit('applyPreset', text);
+        var self = this;
+        Vue.nextTick(function () {
+          var el = self.$el && self.$el.querySelector('.chat-composer-textarea textarea');
+          if (el) el.focus();
+        });
+      },
+      onPresetDocClick: function (ev) {
+        if (!this.presetPanelOpen) return;
+        var root = this.$el && this.$el.querySelector('.chat-preset-anchor');
+        if (root && ev.target && root.contains(ev.target)) return;
+        this.presetPanelOpen = false;
+      },
       fileIconForPath: function (name) {
         if (!name) return '📄';
         var ext = (name.split('.').pop() || '').toLowerCase();
@@ -257,8 +278,30 @@
         return '📄';
       }
     },
+    mounted: function () {
+      this._onPresetDocClick = this.onPresetDocClick.bind(this);
+      document.addEventListener('mousedown', this._onPresetDocClick);
+    },
+    beforeUnmount: function () {
+      document.removeEventListener('mousedown', this._onPresetDocClick);
+    },
     template: '\
       <div class="chat-input">\
+        <div v-if="presetQuestions.length" class="chat-preset-anchor">\
+          <div v-if="presetPanelOpen" class="chat-preset-panel">\
+            <div class="chat-preset-panel-head">选择一个问题，填入输入框</div>\
+            <button\
+              v-for="(q, idx) in presetQuestions"\
+              :key="idx"\
+              type="button"\
+              class="chat-preset-item"\
+              @click="applyPreset(q)">\
+              <span class="chat-preset-index">{{ idx + 1 }}</span>\
+              <span class="chat-preset-text">{{ q }}</span>\
+            </button>\
+          </div>\
+          <button type="button" class="chat-preset-btn" :class="{ \'is-open\': presetPanelOpen }" @click.stop="togglePresetPanel">预置问题</button>\
+        </div>\
         <div class="chat-composer">\
           <div v-if="pendingFiles.length" class="chat-pending-files">\
             <div v-for="f in pendingFiles" :key="f.id" class="chat-pending-file" :class="{ \'is-image\': f.kind === \'image\' }">\

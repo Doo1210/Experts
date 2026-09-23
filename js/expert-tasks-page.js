@@ -946,8 +946,24 @@
         else if (command === 'delete') deleteTaskItem(task, ev);
       }
 
+      var presetQuestions = Vue.ref([]);
+
+      function syncPresetQuestions() {
+        var persona = store.getPersona ? store.getPersona(props.expertId) : null;
+        if (!persona || !persona.presetQuestionsEnabled) {
+          presetQuestions.value = [];
+          return;
+        }
+        presetQuestions.value = (persona.presetQuestions || []).slice();
+      }
+
+      function applyPresetQuestion(text) {
+        inputText.value = text || '';
+      }
+
       function loadExpert() {
         expert.value = store.getExpert(props.expertId);
+        syncPresetQuestions();
         refreshTasks();
         if (currentTaskId.value) {
           loadMessages();
@@ -1457,6 +1473,8 @@
         toggleWorkspace: toggleWorkspace,
         handleClarifyAnswer: handleClarifyAnswer,
         handleApprovalResolve: handleApprovalResolve,
+        presetQuestions: presetQuestions,
+        applyPresetQuestion: applyPresetQuestion,
         renderMarkdown: window.renderMarkdown
       };
     },
@@ -1558,6 +1576,8 @@
             :session-cwd="sessionCwd"\
             :token-estimate="tokenEstimate"\
             :workspace-files="workspaceFilesFlat"\
+            :preset-questions="presetQuestions"\
+            @apply-preset="applyPresetQuestion"\
             @submit="send"\
             @file-select="handleFileSelect"\
             @remove-file="removePendingFile"\

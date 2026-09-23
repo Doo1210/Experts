@@ -128,6 +128,11 @@
       // ---- 人设 Tab 新增 ----
       var personaPreviewTab = Vue.ref('coreDutyMd');
       var personaImportInput = Vue.ref(null);
+      var presetQuestionsEnabled = Vue.ref(false);
+      var presetQuestions = Vue.ref([]);
+      var presetDialogVisible = Vue.ref(false);
+      var presetDraft = Vue.ref([]);
+      var presetDialogCommitted = false;
 
       var detailMeta = Vue.ref({ skillsDetail: [], skillsCatalog: [], toolsDetail: {}, toolsCatalog: [], memoryMeta: {}, gateway: {} });
       var skillSearchQuery = Vue.ref('');
@@ -178,6 +183,8 @@
         var p = store.getPersona(eid);
         persona.value = normalizePersonaForEditor(p);
         personaOnboardDismissed.value = !!(p && p.onboarded);
+        presetQuestionsEnabled.value = !!(p && p.presetQuestionsEnabled);
+        presetQuestions.value = (p && p.presetQuestions) ? p.presetQuestions.slice() : [];
         tasks.value = store.getTasksByExpert(eid);
         memories.value = store.getMemories(eid);
         if (store.ensureDemoWorkspace) store.ensureDemoWorkspace(eid);
@@ -2120,6 +2127,140 @@
         return '人设内容';
       }
 
+      function presetSeedQuestions() {
+        var name = expert.value && expert.value.name;
+        if (name === '人机协作专家') {
+          return [
+            '帮我分析当前产线的人机协作瓶颈',
+            '给出工位节拍平衡的改进建议',
+            '评估 AGV 调度策略是否需要调整'
+          ];
+        }
+        return [
+          '请说明你能帮我完成哪些工作',
+          '基于现有资料给出下一步建议'
+        ];
+      }
+
+      function openPresetDialog() {
+        var list = presetQuestions.value.slice();
+        if (!list.length) list = presetSeedQuestions();
+        presetDraft.value = list.map(function (text, index) {
+          return { id: 'pq-' + index + '-' + Date.now(), text: text };
+        });
+        presetDialogCommitted = false;
+        presetDialogVisible.value = true;
+      }
+
+      function addPresetDraftRow() {
+        if (presetDraft.value.length >= 20) return;
+        presetDraft.value.push({ id: 'pq-new-' + Date.now(), text: '' });
+      }
+
+      function removePresetDraftRow(id) {
+        presetDraft.value = presetDraft.value.filter(function (item) { return item.id !== id; });
+      }
+
+      var presetDragFrom = Vue.ref(-1);
+      var presetDragOver = Vue.ref(-1);
+      var presetDragGhost = null;
+
+      function clearPresetDragGhost() {
+        if (presetDragGhost && presetDragGhost.parentNode) {
+          presetDragGhost.parentNode.removeChild(presetDragGhost);
+        }
+        presetDragGhost = null;
+      }
+
+      function onPresetDragStart(index, event) {
+        presetDragFrom.value = index;
+        presetDragOver.value = index;
+        clearPresetDragGhost();
+        var dt = event.dataTransfer;
+        if (!dt) return;
+        dt.effectAllowed = 'move';
+        dt.setData('text/plain', String(index));
+        if (!dt.setDragImage) return;
+        var row = event.currentTarget && event.currentTarget.closest
+          ? event.currentTarget.closest('.preset-question-row')
+          : null;
+        var input = row ? row.querySelector('.el-input') : null;
+        var text = (presetDraft.value[index] && presetDraft.value[index].text) || '';
+        var ghost = document.createElement('div');
+        ghost.className = 'preset-question-ghost';
+        ghost.textContent = text || '未填写问题';
+        if (!text) ghost.classList.add('is-empty');
+        var rect = input ? input.getBoundingClientRect() : null;
+        ghost.style.position = 'fixed';
+        ghost.style.left = rect ? rect.left + 'px' : '0';
+        ghost.style.top = rect ? rect.top + 'px' : '0';
+        if (rect) ghost.style.width = Math.round(rect.width) + 'px';
+        document.body.appendChild(ghost);
+        var width = ghost.offsetWidth;
+        var height = ghost.offsetHeight;
+        dt.setDragImage(ghost, width + 12, Math.round(height / 2));
+        presetDragGhost = ghost;
+        requestAnimationFrame(function () {
+          if (presetDragGhost) presetDragGhost.style.top = '-1000px';
+        });
+      }
+
+      function onPresetDragOver(index) {
+        if (presetDragFrom.value < 0) return;
+        presetDragOver.value = index;
+      }
+
+      function onPresetDrop(index) {
+        var from = presetDragFrom.value;
+        presetDragFrom.value = -1;
+        presetDragOver.value = -1;
+        if (from < 0 || from === index) return;
+        var list = presetDraft.value.slice();
+        var item = list.splice(from, 1)[0];
+        if (!item) return;
+        list.splice(index, 0, item);
+        presetDraft.value = list;
+      }
+
+      function onPresetDragEnd() {
+        presetDragFrom.value = -1;
+        presetDragOver.value = -1;
+        clearPresetDragGhost();
+      }
+
+      function onPresetQuestionsToggle(enabled) {
+        presetQuestionsEnabled.value = !!enabled;
+        store.savePresetQuestions(props.expertId, {
+          enabled: !!enabled,
+          questions: presetQuestions.value
+        });
+        if (enabled) openPresetDialog();
+      }
+
+      function savePresetDialog() {
+        var questions = presetDraft.value.map(function (item) {
+          return String(item.text || '').trim();
+        }).filter(Boolean);
+        if (!questions.length) {
+          ElementPlus.ElMessage.warning('请至少填写一个预置问题');
+          return;
+        }
+        presetQuestions.value = questions;
+        presetQuestionsEnabled.value = true;
+        presetDialogCommitted = true;
+        store.savePresetQuestions(props.expertId, { enabled: true, questions: questions });
+        presetDialogVisible.value = false;
+        ElementPlus.ElMessage.success('预置问题已保存');
+      }
+
+      function onPresetDialogClosed() {
+        if (presetDialogCommitted) return;
+        if (!presetQuestions.value.length) {
+          presetQuestionsEnabled.value = false;
+          store.savePresetQuestions(props.expertId, { enabled: false, questions: [] });
+        }
+      }
+
       // ---- 技能 Tab 方法 ----
       var skillsCatalog = Vue.computed(function () {
         var meta = detailMeta.value || {};
@@ -2802,6 +2943,13 @@
         exportPersonaMd: exportPersonaMd, triggerPersonaImport: triggerPersonaImport,
         handlePersonaImport: handlePersonaImport,
         personaPreviewContent: personaPreviewContent, personaPreviewTabLabel: personaPreviewTabLabel,
+        presetQuestionsEnabled: presetQuestionsEnabled, presetQuestions: presetQuestions,
+        presetDialogVisible: presetDialogVisible, presetDraft: presetDraft,
+        openPresetDialog: openPresetDialog, addPresetDraftRow: addPresetDraftRow,
+        removePresetDraftRow: removePresetDraftRow, presetDragFrom: presetDragFrom, presetDragOver: presetDragOver,
+        onPresetDragStart: onPresetDragStart, onPresetDragOver: onPresetDragOver, onPresetDrop: onPresetDrop, onPresetDragEnd: onPresetDragEnd,
+        onPresetQuestionsToggle: onPresetQuestionsToggle,
+        savePresetDialog: savePresetDialog, onPresetDialogClosed: onPresetDialogClosed,
         renderMarkdown: renderMarkdown, insertMarkdown: insertMarkdown, insertPersonaMarkdown: insertPersonaMarkdown,
         // 技能 Tab
         toggleSkillEnabled: toggleSkillEnabled,
@@ -3001,9 +3149,17 @@
                     <h3 class="detail-section-title">人设</h3>\
                     <p class="detail-section-desc">定义专家的核心职责、工作流程与行为准则。保存后默认在新会话生效，不影响已打开的对话。</p>\
                   </div>\
-                  <div class="detail-action-bar detail-action-bar--split">\
+                  <div class="detail-action-bar persona-toolbar-row">\
                     <input ref="personaImportInput" type="file" accept=".md" class="material-file-input-hidden" @change="handlePersonaImport">\
-                    <div class="detail-action-left">\
+                    <div class="persona-preset-cluster">\
+                      <span class="persona-preset-title">预置问题</span>\
+                      <el-switch class="persona-preset-switch" size="small" :model-value="presetQuestionsEnabled" @change="onPresetQuestionsToggle" />\
+                      <button v-if="presetQuestionsEnabled" type="button" class="persona-preset-config-btn" title="配置" aria-label="配置预置问题" @click="openPresetDialog">\
+                        <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>\
+                        <span v-if="presetQuestions.length" class="persona-preset-num">{{ presetQuestions.length }}</span>\
+                      </button>\
+                    </div>\
+                    <div class="persona-file-actions">\
                       <el-button size="small" @click="triggerPersonaImport">\
                         <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" style="margin-right:4px"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>\
                         导入人设\
@@ -3012,8 +3168,6 @@
                         <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" style="margin-right:4px"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>\
                         导出人设\
                       </el-button>\
-                    </div>\
-                    <div class="detail-action-right">\
                       <el-button type="primary" size="small" @click="savePersona">保存</el-button>\
                     </div>\
                   </div>\
@@ -3649,6 +3803,40 @@
                 <el-button type="primary" class="wizard-btn wizard-btn-submit" @click="downloadMaterial(materialPreviewItem); materialPreviewVisible = false">\
                   <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right:4px;vertical-align:-2px"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>下载\
                 </el-button>\
+              </div>\
+            </div>\
+          </template>\
+        </el-dialog>\
+        <el-dialog v-model="presetDialogVisible" width="680px" append-to-body class="form-dialog memory-dialog ed-dialog preset-questions-dialog" :close-on-click-modal="false" @closed="onPresetDialogClosed">\
+          <template #header>\
+            <div class="dialog-header-custom">\
+              <div class="dialog-header-icon dialog-header-icon-preset">\
+                <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>\
+              </div>\
+              <div class="dialog-header-text">\
+                <div class="dialog-header-title">配置预置问题</div>\
+                <div class="dialog-header-sub">对话页点击「预置问题」后，可一键把下列问题填入输入框</div>\
+              </div>\
+            </div>\
+          </template>\
+          <div class="form-dialog-body ed-dialog-body">\
+            <div class="preset-question-list">\
+              <div v-for="(item, idx) in presetDraft" :key="item.id" class="preset-question-row" :class="{ \'is-dragging\': presetDragFrom === idx, \'is-drag-over\': presetDragOver === idx && presetDragFrom !== idx }" @dragover.prevent="onPresetDragOver(idx)" @drop.prevent="onPresetDrop(idx)">\
+                <span class="preset-question-index">{{ idx + 1 }}</span>\
+                <el-input v-model="item.text" placeholder="输入一条常用问题" maxlength="200" />\
+                <button type="button" class="preset-question-drag" draggable="true" title="拖拽调整顺序" aria-label="拖拽调整顺序" @dragstart="onPresetDragStart(idx, $event)" @dragend="onPresetDragEnd">\
+                  <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor" aria-hidden="true"><circle cx="9" cy="7" r="1.4"/><circle cx="15" cy="7" r="1.4"/><circle cx="9" cy="12" r="1.4"/><circle cx="15" cy="12" r="1.4"/><circle cx="9" cy="17" r="1.4"/><circle cx="15" cy="17" r="1.4"/></svg>\
+                </button>\
+                <button type="button" class="preset-question-remove" title="删除" @click="removePresetDraftRow(item.id)">×</button>\
+              </div>\
+              <button type="button" class="preset-question-add" :disabled="presetDraft.length >= 20" @click="addPresetDraftRow">+ 添加问题</button>\
+            </div>\
+          </div>\
+          <template #footer>\
+            <div class="dialog-footer-custom dialog-footer-wizard memory-dialog-footer">\
+              <div class="dialog-footer-actions">\
+                <el-button class="wizard-btn wizard-btn-cancel" @click="presetDialogVisible = false">取消</el-button>\
+                <el-button type="primary" class="wizard-btn wizard-btn-submit wizard-btn-submit-expert" @click="savePresetDialog">保存</el-button>\
               </div>\
             </div>\
           </template>\
