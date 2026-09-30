@@ -20,6 +20,18 @@
     'human-robot-collab': ['skill-integration', 'skill-pm']
   };
 
+  var TEMPLATE_CARD_TAG_ALIASES = {
+    '工艺窗口优化': '工艺优化', 'DOE 实验设计': 'DOE实验',
+    '工业视觉检测': '工业视觉', '缺陷分类模型': '缺陷分类', '边缘推理部署': '边缘部署',
+    '预测性维护': '预测维护', '设备故障诊断': '故障诊断',
+    'S&OP 计划': '产销计划', 'MRP 物料计划': '物料计划', '库存周转优化': '库存周转',
+    '质量体系建设': '质量体系', 'SPC 控制图': 'SPC图', 'FMEA 风险分析': '风险分析',
+    '数字化蓝图规划': '数字蓝图', 'MES 系统集成': 'MES集成', 'WMS 仓储管理': '仓储管理',
+    '碳排放核算': '碳排核算', 'ISO 50001 能源体系': '能源体系',
+    'EHS 管理体系': 'EHS体系', '安全生产标准化': '安全生产', '风险辨识评估': '风险辨识',
+    '协作机器人应用': '协作机器人', 'AGV 调度策略': 'AGV调度', '柔性产线布局': '柔性布局'
+  };
+
   var minePreviewEmpty = Vue.ref(false);
   var projectPreviewEmpty = Vue.ref(false);
 
@@ -49,50 +61,51 @@
     '    <div class="expert-grid">',
     '    <div v-for="expert in filteredExperts" :key="expert.id" class="expert-card" :class="{ \'is-preview\': expert.previewOnly, \'expert-card-template\': isTemplate(expert) }">',
     '      <div class="expert-card-accent"></div>',
-    '      <el-dropdown v-if="!isTemplate(expert)" trigger="click" @command="handleExpertMenu($event, expert)">',
-    '        <button class="card-more-btn" title="更多操作" @click.stop>',
-    '          <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><circle cx="12" cy="5" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="12" cy="19" r="1.8"/></svg>',
-    '        </button>',
-    '        <template #dropdown>',
-    '          <el-dropdown-menu>',
-    '            <el-dropdown-item command="edit">编辑</el-dropdown-item>',
-    '            <el-dropdown-item command="delete" divided>删除</el-dropdown-item>',
-    '          </el-dropdown-menu>',
-    '        </template>',
-    '      </el-dropdown>',
-    '      <div class="expert-card-body" @click="openExpertCard(expert)">',
+    '      <div class="expert-card-body" role="button" tabindex="0" :aria-label="\'打开\' + expert.name + (isTemplate(expert) ? \'模板介绍\' : \'的配置\')" @click="openExpertCard(expert)" @keydown.enter.prevent="openExpertCard(expert)" @keydown.space.prevent="openExpertCard(expert)">',
     '        <div class="card-header">',
     '          <img class="card-avatar" :src="expert.avatar" :alt="expert.name">',
     '          <div class="card-header-text">',
-    '            <div class="card-name">',
-    '              {{ expert.name }}',
-    '              <span v-if="!isTemplate(expert) && runningCounts[expert.id]" class="expert-card-running-indicator" @click.stop="goStartTask(expert)">',
-    '                <span class="expert-card-running-dot"></span>',
-    '                {{ runningCounts[expert.id] }} 个运行中',
-    '              </span>',
-    '            </div>',
-    '          </div>',
-    '        </div>',
-    '        <p class="card-desc">{{ expert.description }}</p>',
-        '        <div class="card-footer">',
-    '          <div class="card-tags">',
-    '            <span v-for="(tag, idx) in expert.expertise.slice(0, 3)" :key="tag" class="expertise-tag" :class="tagColors[idx % tagColors.length]">{{ tag }}</span>',
+    '            <div class="card-name">{{ expert.name }}</div>',
+    '            <p class="card-desc">{{ expert.description }}</p>',
     '          </div>',
     '        </div>',
     '      </div>',
-    '      <div class="expert-card-actions">',
-    '        <button v-if="expert.previewOnly" type="button" class="expert-card-action expert-card-action-primary" @click="goStartTask({ id: expert.sourceExpertId })">',
-    '          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 2L11 13"/><path d="M22 2l-7 20-4-9-9-4 20-7z"/></svg>',
-    '          发起任务',
-    '        </button>',
-    '        <button v-else-if="isTemplate(expert)" type="button" class="expert-card-action expert-card-action-primary" @click="useTemplate(expert)">',
-    '          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>',
-    '          使用模板',
-    '        </button>',
-    '        <button v-else type="button" class="expert-card-action expert-card-action-primary" @click="goStartTask(expert)">',
-    '          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 2L11 13"/><path d="M22 2l-7 20-4-9-9-4 20-7z"/></svg>',
-    '          发起任务',
-    '        </button>',
+    '      <div v-if="isTemplate(expert)" class="expert-card-foot expert-card-template-foot">',
+    '        <div class="expert-card-template-tags" :title="templateCardTags(expert).join(\'、\')">',
+    '          <span v-for="tag in templateCardTags(expert)" :key="tag" class="expertise-tag" :title="tag">{{ shortTemplateTag(tag) }}</span>',
+    '        </div>',
+    '        <div class="expert-card-actions">',
+    '          <button type="button" class="expert-card-action expert-card-action-primary" @click="useTemplate(expert)">',
+    '            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>',
+    '            使用模板',
+    '          </button>',
+    '        </div>',
+    '      </div>',
+    '      <div v-else class="expert-card-foot">',
+    '        <div class="expert-card-info">',
+    '          <span class="expert-card-stat" :title="runningTitle(expert)"><span class="expert-card-stat-label">正在执行</span><span class="expert-card-stat-number">{{ summaryFor(expert).running == null ? \'—\' : summaryFor(expert).running }}</span></span>',
+    '          <span class="expert-card-info-divider" aria-hidden="true">|</span>',
+    '          <span class="expert-card-stat"><span class="expert-card-stat-label">自主任务</span><span class="expert-card-stat-number">{{ summaryFor(expert).autonomousCount == null ? \'—\' : summaryFor(expert).autonomousCount }}</span></span>',
+    '          <span class="expert-card-info-divider" aria-hidden="true">|</span>',
+    '          <span class="expert-card-channel" :title="channelTitle(expert)">',
+    '            <span class="expert-card-stat-label">渠道</span>',
+    '            <span v-if="!summaryFor(expert).channelsAvailable" class="expert-card-channel-empty">—</span>',
+    '            <span v-else-if="!summaryFor(expert).channelIds.length" class="expert-card-channel-empty">未接入</span>',
+    '            <span v-else class="expert-card-channel-icons">',
+    '              <span v-for="channelId in summaryFor(expert).channelIds.slice(0, 3)" :key="channelId" class="expert-card-channel-icon" :title="channelLabel(channelId)"><img v-if="channelIconSrc(channelId)" :src="channelIconSrc(channelId)" :alt="channelLabel(channelId)"><span v-else>{{ channelLabel(channelId).slice(0, 1) }}</span></span>',
+    '              <span v-if="summaryFor(expert).channelIds.length > 3" class="expert-card-channel-extra">+{{ summaryFor(expert).channelIds.length - 3 }}</span>',
+    '            </span>',
+    '          </span>',
+    '        </div>',
+    '        <div class="expert-card-hover-actions">',
+    '          <button type="button" class="expert-card-start-btn" @click.stop="goStartTask(expert.previewOnly ? { id: expert.sourceExpertId } : expert)">',
+    '            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2 11 13"/><path d="m22 2-7 20-4-9-9-4 20-7Z"/></svg>',
+    '            发起任务',
+    '          </button>',
+    '          <button type="button" class="expert-card-icon-btn" title="配置专家" aria-label="配置专家" @click.stop="goManage(expert.previewOnly ? { id: expert.sourceExpertId } : expert)">',
+    '            <img src="assets/icons/settings-filled.svg" width="20" height="20" alt="">',
+    '          </button>',
+    '        </div>',
     '      </div>',
     '    </div>',
     '    <div v-if="filteredExperts.length === 0" class="empty-state">',
@@ -114,8 +127,7 @@
     '      <span class="expert-preview-toggle-state">{{ projectPreviewEmpty ? \'无\' : \'有\' }}</span>',
     '    </button>',
     '  </div>',
-    '  <expert-create-page-dialog :wizard="createWizard" :tag-colors="tagColors" :skills="skills" :tools="tools" />',
-    '  <expert-edit-page-dialog :edit="expertEdit" header-title="编辑专家" :tag-colors="tagColors" />',
+    '  <expert-create-page-dialog :wizard="createWizard" :skills="skills" :tools="tools" />',
     '  <el-dialog v-model="templateIntro.visible" width="720px" class="template-intro-dialog" :close-on-click-modal="true" append-to-body>',
     '    <template #header>',
     '      <div class="template-intro-dialog-title">专家详情</div>',
@@ -184,14 +196,13 @@
     emits: ['nav', 'refresh'],
     setup: function (props, ctx) {
       var experts = Vue.ref([]);
-      var runningCounts = Vue.ref({});
+      var expertSummaries = Vue.ref({});
       var templateIntro = Vue.ref({ visible: false, expert: null });
-      var expertEdit = createExpertEditForm(store, { onSaved: function () { load(); } });
       var createWizard = createExpertCreateForm(store, {
         getExistingExperts: getMineExpertsForDisplay,
         onCreated: function (expert) {
           load();
-          ctx.emit('nav', '/experts/' + expert.id + '?tab=persona');
+          ctx.emit('nav', '/experts/' + expert.id + '?tab=basic');
         }
       });
 
@@ -242,6 +253,18 @@
         return store.isTemplateExpert ? store.isTemplateExpert(expert) : expert.origin === 'template';
       }
 
+      function templateCardTags(expert) {
+        var tags = expert.tags && expert.tags.length ? expert.tags : (expert.expertise || []);
+        return tags.filter(function (tag) {
+          return Array.from(shortTemplateTag(tag)).length >= 2;
+        }).slice(0, 3);
+      }
+
+      function shortTemplateTag(tag) {
+        var text = String(tag || '').trim();
+        return Array.from((TEMPLATE_CARD_TAG_ALIASES[text] || text).replace(/\s+/g, '')).slice(0, 6).join('');
+      }
+
       function getMineExpertsForDisplay() {
         if (minePreviewEmpty.value) return [];
         var matches = experts.value.filter(function (e) {
@@ -269,18 +292,46 @@
 
       function load() {
         experts.value = store.getExperts();
-        var counts = {};
+        var summaries = {};
         experts.value.forEach(function (e) {
-          counts[e.id] = store.getRunningSessionCount(e.id);
+          summaries[e.id] = store.getExpertListSummary(e.id);
         });
-        runningCounts.value = counts;
+        expertSummaries.value = summaries;
+      }
+
+      function summaryFor(expert) {
+        var id = expert.previewOnly ? expert.sourceExpertId : expert.id;
+        return expertSummaries.value[id] || { running: null, autonomousCount: null, channels: [], channelIds: [], channelsAvailable: false };
+      }
+
+      function runningTitle(expert) {
+        var summary = summaryFor(expert);
+        if (summary.running == null) return '运行状态暂不可用';
+        return '正在执行：平台对话 ' + summary.dialogueRunning + ' · 消息渠道 ' + summary.imRunning + ' · 自主任务 ' + summary.autonomousRunning;
+      }
+
+      function channelTitle(expert) {
+        var summary = summaryFor(expert);
+        if (!summary.channelsAvailable) return '渠道状态暂不可用';
+        var channels = summary.channels;
+        return channels.length ? '已启用渠道：' + channels.join('、') : '未接入消息渠道';
+      }
+
+      function channelLabel(id) {
+        return ({ wecom: '企业微信', dingtalk: '钉钉', feishu: '飞书' })[id] || id;
+      }
+
+      function channelIconSrc(id) {
+        return ['wecom', 'dingtalk', 'feishu'].indexOf(id) >= 0
+          ? 'assets/channel-icons/' + id + '.svg'
+          : '';
       }
 
       function goStartTask(expert) {
         var task = store.createTask({ expertId: expert.id, title: '新任务', type: 'dialogue' });
         ctx.emit('nav', '/experts/' + expert.id + '/tasks/' + task.id + '?starting=1');
       }
-      function goManage(expert) { ctx.emit('nav', '/experts/' + expert.id + '?tab=persona'); }
+      function goManage(expert) { ctx.emit('nav', '/experts/' + expert.id + '?tab=basic'); }
 
       function openExpertCard(expert) {
         if (!expert) return;
@@ -342,22 +393,8 @@
         return deleteDialog.value.runningCount > 0 ? '强制删除' : '删除';
       }
 
-      function openExpertEdit(expert) {
-        if (!expert.previewOnly) {
-          expertEdit.openEdit(expert);
-          return;
-        }
-        var editable = Object.assign({}, expert, {
-          id: 'expert_' + Date.now().toString(36),
-          origin: 'mine'
-        });
-        delete editable.previewOnly;
-        delete editable.sourceExpertId;
-        expertEdit.openEdit(editable);
-      }
-
       function handleExpertMenu(command, expert) {
-        if (command === 'edit') openExpertEdit(expert);
+        if (command === 'edit') goManage(expert.previewOnly ? { id: expert.sourceExpertId } : expert);
         else if (command === 'delete') openDeleteDialog(expert);
       }
 
@@ -383,16 +420,22 @@
         minePreviewEmpty: minePreviewEmpty,
         projectPreviewEmpty: projectPreviewEmpty,
         activeTab: activeTab,
-        runningCounts: runningCounts,
+        expertSummaries: expertSummaries,
+        summaryFor: summaryFor,
+        runningTitle: runningTitle,
+        channelTitle: channelTitle,
+        channelLabel: channelLabel,
+        channelIconSrc: channelIconSrc,
         tagColors: catalog.TAG_COLORS,
         skills: catalog.SKILLS_CATALOG,
         tools: catalog.TOOLS_CATALOG,
-        expertEdit: expertEdit,
         createWizard: createWizard,
         templateIntro: templateIntro,
         templateIntroSkills: templateIntroSkills,
         deleteDialog: deleteDialog,
         isTemplate: isTemplate,
+        templateCardTags: templateCardTags,
+        shortTemplateTag: shortTemplateTag,
         setActiveTab: setActiveTab,
         requestCreateExpert: requestCreateExpert,
         requestCreateProject: requestCreateProject,
@@ -404,7 +447,6 @@
         goStartTask: goStartTask,
         goManage: goManage,
         openCreateDialog: createWizard.openCreateDialog,
-        openExpertEdit: openExpertEdit,
         handleExpertMenu: handleExpertMenu,
         openDeleteDialog: openDeleteDialog,
         canConfirmDelete: canConfirmDelete,
@@ -644,6 +686,10 @@
         return store.getProjectMembers(projectId).length;
       }
 
+      function formatProjectTime(value) {
+        return String(value || '').replace('T', ' ').slice(0, 16);
+      }
+
       function getProjectStats(projectId) {
         var tasks = store.getProjectTasks(projectId);
         var done = tasks.filter(function (t) { return t.status === 'done'; }).length;
@@ -691,7 +737,8 @@
         toggleProjectMember: toggleProjectMember,
         submitEdit: submitEdit, handleProjectMenu: handleProjectMenu, goProject: goProject,
         resetForm: resetForm, resetEditForm: resetEditForm,
-        getMembers: getMembers, getMemberCount: getMemberCount, getProjectStats: getProjectStats
+        getMembers: getMembers, getMemberCount: getMemberCount, getProjectStats: getProjectStats,
+        formatProjectTime: formatProjectTime
       };
     },
     template: '\
@@ -755,12 +802,12 @@
               <div class="project-card-footer">\
                 <div class="member-stack-wrap">\
                   <div class="member-stack">\
-                    <img v-for="e in getMembers(p.id).slice(0,4)" :key="e.id" :src="e.avatar" :title="e.name">\
-                    <span v-if="getMemberCount(p.id) > 4" class="member-stack-more">+{{ getMemberCount(p.id) - 4 }}</span>\
+                    <img v-for="e in getMembers(p.id).slice(0,2)" :key="e.id" :src="e.avatar" :title="e.name">\
+                    <span v-if="getMemberCount(p.id) > 2" class="member-stack-more">+{{ getMemberCount(p.id) - 2 }}</span>\
                   </div>\
                   <span class="member-count">{{ getMemberCount(p.id) }} 位专家</span>\
                 </div>\
-                <span class="card-time">{{ p.updatedAt }}</span>\
+                <span class="card-time" :title="p.updatedAt">{{ formatProjectTime(p.updatedAt) }}</span>\
               </div>\
             </div>\
           </div>\
@@ -1058,8 +1105,13 @@
   app.component('model-config-section', window.ModelConfigSection);
   app.component('expert-edit-dialog', window.ExpertEditDialog);
   app.component('expert-edit-page-dialog', window.ExpertEditPageDialog);
+  app.component('expert-basic-info', window.ExpertBasicInfo);
   app.component('expert-create-page-dialog', window.ExpertCreatePageDialog);
   app.component('expert-center-page', ExpertCenterPage);
+  app.component('expert-soul-editor', window.ExpertSoulEditor);
+  app.component('expert-task-overview-1023', window.ExpertTaskOverview1023);
+  app.component('expert-mcp-1023', window.ExpertMcp1023);
+  app.component('expert-im-1023', window.ExpertIm1023);
   app.component('expert-detail-page', window.ExpertDetailPage);
   app.component('expert-tasks-page', window.ExpertTasksPage);
   app.component('project-list-page', ProjectListPage);

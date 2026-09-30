@@ -1,28 +1,67 @@
-﻿/**
- * 专家管理详情页 — 人设 / 工作空间 / 任务 / 记忆 / 技能 / 工具 / MCP / IM渠道
+/**
+ * 专家管理详情页 — 基本信息 / 岗位说明 / 工作空间 / 任务 / 记忆 / 技能 / 工具 / MCP / 消息渠道
  */
 (function () {
   var store = window.AppStore;
   var catalog = window;
-  var createExpertEditForm = window.createExpertEditForm;
   var ExpertDetailPage = {
     props: ['expertId', 'initialTab'],
     emits: ['nav'],
     setup: function (props, ctx) {
       var expert = Vue.ref(null);
-      var activeTab = Vue.ref(props.initialTab || 'persona');
-      if (activeTab.value === 'overview' || activeTab.value === 'basic') activeTab.value = 'persona';
-      if (activeTab.value === 'skills-tools') activeTab.value = 'skills';
-      if (activeTab.value === 'messaging') activeTab.value = 'im';
-      if (activeTab.value === 'mcp-servers') activeTab.value = 'mcp';
-      if (activeTab.value === 'artifacts' || activeTab.value === 'outputs') {
-        activeTab.value = 'workspace';
-      } else if (activeTab.value === 'materials') {
-        activeTab.value = 'workspace';
-      } else if (activeTab.value === 'permissions') {
-        activeTab.value = 'persona';
+      function normalizeDetailTab(tab) {
+        var value = tab || 'basic';
+        if (value === 'overview') return 'basic';
+        if (value === 'skills-tools') return 'skills';
+        if (value === 'messaging') return 'im';
+        if (value === 'mcp-servers') return 'mcp';
+        if (value === 'artifacts' || value === 'outputs' || value === 'materials') return 'workspace';
+        if (value === 'permissions') return 'persona';
+        return value;
       }
+      var activeTab = Vue.ref(normalizeDetailTab(props.initialTab));
+      Vue.watch(function () { return props.initialTab; }, function (tab) {
+        activeTab.value = normalizeDetailTab(tab);
+      });
       var persona = Vue.ref({ soulMd: '', onboarded: false });
+      var soulEditorRef = Vue.ref(null);
+      var basicInfoRef = Vue.ref(null);
+      var navItems = [
+        { key: 'basic', label: '基本信息' },
+        { key: 'persona', label: '岗位说明' },
+        { key: 'workspace', label: '工作空间' },
+        { key: 'tasks', label: '任务' },
+        { key: 'memory', label: '记忆' },
+        { key: 'skills', label: '技能' },
+        { key: 'tools', label: '工具' },
+        { key: 'mcp', label: 'MCP' },
+        { key: 'im', label: '消息渠道' }
+      ];
+      function beforeDetailTabLeave(next, previous) {
+        var dirtyTitle = '';
+        if (previous === 'basic' && basicInfoRef.value && basicInfoRef.value.isDirty()) dirtyTitle = '基本信息';
+        if (previous === 'persona' && store.isDevMock() && soulEditorRef.value && soulEditorRef.value.isDirty()) dirtyTitle = '岗位说明';
+        if (!dirtyTitle) return true;
+        return ElementPlus.ElMessageBox.confirm('放弃未保存的' + dirtyTitle + '？', '未保存的修改', {
+          confirmButtonText: '放弃', cancelButtonText: '继续编辑', type: 'warning'
+        }).then(function () {
+          if (previous === 'basic') basicInfoRef.value.discard();
+          if (previous === 'persona') soulEditorRef.value.discard();
+          return true;
+        }).catch(function () { return false; });
+      }
+      function selectDetailTab(next) {
+        if (next === activeTab.value) return;
+        Promise.resolve(beforeDetailTabLeave(next, activeTab.value)).then(function (allowed) {
+          if (!allowed) return;
+          activeTab.value = next;
+          ctx.emit('nav', '/experts/' + props.expertId + '?tab=' + next);
+          var scroll = document.querySelector('.expert-detail-tabs.detail-main');
+          if (scroll) scroll.scrollTop = 0;
+          var compactScroll = document.querySelector('.expert-detail-scroll');
+          if (compactScroll) compactScroll.scrollTop = 0;
+        });
+      }
       var tasks = Vue.ref([]);
       var memories = Vue.ref([]);
       var memoryInput = Vue.ref('');
@@ -65,11 +104,6 @@
       var materials = Vue.ref([]);
       var expertArtifacts = Vue.ref([]);
       var fileNameInput = Vue.ref('');
-      var expertEdit = createExpertEditForm(store, {
-        getExpert: function () { return expert.value; },
-        onSaved: function () { load(); },
-        getRunningSessionCount: function () { return runningSessionCount.value; }
-      });
       var runningSessionCount = Vue.ref(0);
       var workspaceRootPath = Vue.ref('');
       var workspaceRootDialogVisible = Vue.ref(false);
@@ -77,6 +111,13 @@
       var highlightSessionId = Vue.ref('');
       var memoryMdContent = Vue.ref('');
       var userMdContent = Vue.ref('');
+      var memoryEnabled = Vue.ref(true);
+      function toggleMemoryEnabled(value) {
+        if (!store.isDevMock()) return;
+        store.setMemoryEnabled(props.expertId, value);
+        memoryEnabled.value = !!value;
+        ElementPlus.ElMessage.success(value ? '记忆已开启，将在新会话生效' : '记忆已关闭，将在新会话生效；已有文件仍保留');
+      }
       var personaOnboardDismissed = Vue.ref(false);
       var hubInstallDialogVisible = Vue.ref(false);
       var hubInstallTab = Vue.ref('mine');
@@ -106,6 +147,7 @@
       var materialPreviewVisible = Vue.ref(false);
       var materialPreviewItem = Vue.ref(null);
       var workspaceCurrentFolderId = Vue.ref(null);
+      var workspaceSelectedIds = Vue.ref([]);
       var workspaceFolderDialogVisible = Vue.ref(false);
       var workspaceFolderDialogMode = Vue.ref('create');
       var workspaceEditingItem = Vue.ref(null);
@@ -158,6 +200,26 @@
 
       var isDevMock = Vue.computed(function () { return store.isDevMock(); });
 
+      var deleteExpertDialogVisible = Vue.ref(false);
+      var deleteExpertConfirmName = Vue.ref('');
+      var canDeleteExpert = Vue.computed(function () {
+        return !!expert.value && deleteExpertConfirmName.value.trim() === expert.value.name;
+      });
+
+      function openDeleteExpertDialog() {
+        deleteExpertConfirmName.value = '';
+        deleteExpertDialogVisible.value = true;
+      }
+
+      function confirmDeleteExpert() {
+        if (!canDeleteExpert.value || !expert.value) return;
+        var expertId = expert.value.id;
+        deleteExpertDialogVisible.value = false;
+        store.deleteExpert(expertId);
+        ctx.emit('nav', '/experts');
+        ElementPlus.ElMessage.success('专家已删除');
+      }
+
       function goAssignTask() {
         if (!expert.value) return;
         var task = store.createTask({ expertId: expert.value.id, title: '新任务', type: 'dialogue' });
@@ -194,6 +256,7 @@
         workspaceRootPath.value = store.getWorkspaceRoot(eid);
         memoryMdContent.value = store.getMemoryMd(eid);
         userMdContent.value = store.getUserMd(eid);
+        memoryEnabled.value = store.getMemoryEnabled(eid);
         var localChannels = store.getImChannels(eid);
         imChannels.value = normalizeImChannels(localChannels.length ? localChannels : (store.isDevMock() ? catalog.IM_CHANNEL_TYPES : []));
         return true;
@@ -1631,6 +1694,44 @@
           return (b.createdAt || '').localeCompare(a.createdAt || '');
         });
       });
+      Vue.watch(workspaceCurrentFolderId, function () { workspaceSelectedIds.value = []; });
+      var workspaceAllSelected = Vue.computed(function () {
+        return workspaceFiles.value.length > 0 && workspaceFiles.value.every(function (item) { return workspaceSelectedIds.value.indexOf(String(item.id)) >= 0; });
+      });
+      function toggleWorkspaceSelection(id, checked) {
+        var key = String(id), list = workspaceSelectedIds.value.slice();
+        var index = list.indexOf(key);
+        if (checked && index < 0) list.push(key);
+        if (!checked && index >= 0) list.splice(index, 1);
+        workspaceSelectedIds.value = list;
+      }
+      function toggleAllWorkspace(checked) {
+        workspaceSelectedIds.value = checked ? workspaceFiles.value.map(function (item) { return String(item.id); }) : [];
+      }
+      function deleteSelectedWorkspaceItems() {
+        var selected = workspaceFiles.value.filter(function (item) { return workspaceSelectedIds.value.indexOf(String(item.id)) >= 0; });
+        if (!selected.length) return;
+        var folders = selected.filter(function (item) { return item.kind === 'folder'; }).length;
+        var files = selected.length - folders;
+        var hasCwdRisk = folders > 0 && tasks.value.some(function (task) { return !!task.cwd; });
+        var message = '将永久删除 ' + files + ' 个文件和 ' + folders + ' 个文件夹（含子项）。' +
+          (hasCwdRisk ? ' 若删除任务当前工作目录，任务路径不会自动改变。' : '');
+        ElementPlus.ElMessageBox.confirm(message, '批量删除', {
+          confirmButtonText: '删除', cancelButtonText: '取消', type: 'warning'
+        }).then(function () {
+          var uploadIds = selected.filter(function (item) { return item.source === 'upload'; }).map(function (item) { return String(item.raw.id); });
+          var result = store.deleteWorkspaceItems(props.expertId, uploadIds);
+          var success = result.success.length, failed = result.failed.length;
+          selected.filter(function (item) { return item.source === 'generated'; }).forEach(function (item) {
+            if (item.raw && item.raw.id) { store.deleteTaskArtifact(item.raw.id); success++; } else failed++;
+          });
+          materials.value = store.getWorkspaceFiles(props.expertId);
+          expertArtifacts.value = store.getExpertArtifacts(props.expertId);
+          workspaceSelectedIds.value = result.failed.map(String);
+          if (failed) ElementPlus.ElMessage.warning('已删除 ' + success + ' 项，失败 ' + failed + ' 项；失败项已保留勾选。');
+          else ElementPlus.ElMessage.success('已删除 ' + success + ' 项。');
+        }).catch(function () {});
+      }
 
       var workspaceStats = Vue.computed(function () {
         var folders = workspaceFiles.value.filter(function (f) { return f.kind === 'folder'; }).length;
@@ -2886,13 +2987,13 @@
 
       return {
         expert: expert, activeTab: activeTab, persona: persona,
+        soulEditorRef: soulEditorRef, basicInfoRef: basicInfoRef,
+        navItems: navItems, selectDetailTab: selectDetailTab,
         tasks: tasks, memories: memories, memoryInput: memoryInput,
         skillBindings: skillBindings, toolBindings: toolBindings,
         imChannels: imChannels, materials: materials, expertArtifacts: expertArtifacts,
         fileNameInput: fileNameInput,
-        expertEdit: expertEdit, openEditDialog: expertEdit.openEditDialog,
         skills: catalog.SKILLS_CATALOG, tools: catalog.TOOLS_CATALOG,
-        tagColors: catalog.TAG_COLORS,
         taskLastActivityLabel: taskLastActivityLabel,
         taskTabStatusLabel: taskTabStatusLabel,
         taskTabStatusType: taskTabStatusType,
@@ -2900,6 +3001,11 @@
         savePersona: savePersona, saveSkillBindings: saveSkillBindings, saveToolBindings: saveToolBindings,
         addMemory: addMemory, removeMemory: removeMemory, saveIm: saveIm, addMaterial: addMaterial,
         goAssignTask: goAssignTask,
+        deleteExpertDialogVisible: deleteExpertDialogVisible,
+        deleteExpertConfirmName: deleteExpertConfirmName,
+        canDeleteExpert: canDeleteExpert,
+        openDeleteExpertDialog: openDeleteExpertDialog,
+        confirmDeleteExpert: confirmDeleteExpert,
         // 任务 Tab
         taskSearchQuery: taskSearchQuery, taskStatusFilter: taskStatusFilter,
         newTaskDialogVisible: newTaskDialogVisible, newTaskTitle: newTaskTitle,
@@ -2915,6 +3021,9 @@
         materialFileInput: materialFileInput, materialTypeFilter: materialTypeFilter, materialSearchQuery: materialSearchQuery,
         materialPreviewVisible: materialPreviewVisible, materialPreviewItem: materialPreviewItem,
         workspaceCurrentFolderId: workspaceCurrentFolderId, workspaceFolderDialogVisible: workspaceFolderDialogVisible,
+        workspaceSelectedIds: workspaceSelectedIds, workspaceAllSelected: workspaceAllSelected,
+        toggleWorkspaceSelection: toggleWorkspaceSelection, toggleAllWorkspace: toggleAllWorkspace,
+        deleteSelectedWorkspaceItems: deleteSelectedWorkspaceItems,
         workspaceFolderDialogMode: workspaceFolderDialogMode, workspaceFolderName: workspaceFolderName,
         workspaceRenameDialogTitle: workspaceRenameDialogTitle, workspaceRenameDialogSub: workspaceRenameDialogSub,
         workspaceDragItem: workspaceDragItem, workspaceRootDragOver: workspaceRootDragOver,
@@ -3073,7 +3182,7 @@
         openWorkspaceRootDialog: openWorkspaceRootDialog,
         submitWorkspaceRootChange: submitWorkspaceRootChange,
         highlightSessionId: highlightSessionId,
-        memoryMdContent: memoryMdContent,
+        memoryMdContent: memoryMdContent, memoryEnabled: memoryEnabled, toggleMemoryEnabled: toggleMemoryEnabled,
         userMdContent: userMdContent,
         memorySubTab: memorySubTab,
         personaOnboardDismissed: personaOnboardDismissed,
@@ -3104,47 +3213,42 @@
     },
     template: '\
       <div class="expert-detail-layout" v-if="expert">\
-        <div class="expert-manage-banner">\
-          <back-link label="返回专家" inline @click="$emit(\'nav\', \'/experts\')" />\
-          <button type="button" class="expert-assign-btn" @click="goAssignTask">\
-            <span class="expert-assign-btn-icon">\
-              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 2L11 13"/><path d="M22 2l-7 20-4-9-9-4 20-7z"/></svg>\
-            </span>\
-            发起任务\
-          </button>\
-        </div>\
         <div class="expert-detail-scroll">\
-        <div class="expert-detail-page">\
-        <div class="expert-basic-info-card expert-basic-info-card-compact">\
-          <div class="expert-basic-info-body">\
-            <div class="expert-basic-info-avatar-wrap">\
-              <img class="expert-basic-info-avatar" :src="expert.avatar" :alt="expert.name">\
-            </div>\
-            <div class="expert-basic-info-content">\
-              <div class="expert-basic-info-head">\
-                <h2 class="expert-basic-info-name">{{ expert.name }}</h2>\
-                <el-tooltip v-if="defaultModelLabel" :content="defaultModelTooltip" placement="bottom" :show-after="300">\
-                  <span class="detail-model-tag">\
-                    <span class="detail-model-tag-label">默认模型</span>\
-                    <span class="detail-model-tag-value">{{ defaultModelLabel }}</span>\
-                  </span>\
-                </el-tooltip>\
-              </div>\
-              <p v-if="expert.description" class="expert-basic-info-desc">{{ expert.description }}</p>\
-              <div v-if="expert.expertise && expert.expertise.length" class="expert-basic-info-tags">\
-                <span v-for="(tag, idx) in expert.expertise.slice(0, 3)" :key="tag" class="expertise-tag" :class="tagColors[idx % tagColors.length]">{{ tag }}</span>\
-              </div>\
-            </div>\
-            <button type="button" class="section-edit-btn" title="编辑" @click="openEditDialog">\
-              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>\
+        <div class="expert-detail-page expert-manage-workspace">\
+        <aside class="expert-manage-side">\
+          <div class="expert-manage-identity">\
+            <button type="button" class="expert-manage-back" title="返回专家列表" aria-label="返回专家列表" @click="$emit(\'nav\', \'/experts\')">\
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>\
+              <span>{{ expert.name }}</span>\
             </button>\
           </div>\
-        </div>\
+          <div class="expert-manage-side-action">\
+            <button type="button" class="expert-assign-btn" @click="goAssignTask">\
+              <span class="expert-assign-btn-icon">\
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 2L11 13"/><path d="M22 2l-7 20-4-9-9-4 20-7z"/></svg>\
+              </span>\
+              发起任务\
+            </button>\
+            <button type="button" class="expert-manage-delete-btn" title="删除专家" aria-label="删除专家" @click="openDeleteExpertDialog">\
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16"/><path d="M9 7V4h6v3"/><path d="M6 7l1 13h10l1-13"/><path d="M10 11v5M14 11v5"/></svg>\
+            </button>\
+          </div>\
+          <nav class="expert-manage-nav" aria-label="专家配置菜单">\
+            <button v-for="item in navItems" :key="item.key" type="button" class="expert-manage-nav-item" :class="{ active: activeTab === item.key }" :aria-current="activeTab === item.key ? true : null" @click="selectDetailTab(item.key)">\
+              <span>{{ item.label }}</span>\
+              <span v-if="item.key !== \'tasks\' && tabBadges[item.key]" class="expert-manage-nav-badge">{{ tabBadges[item.key].slice(1) }}</span>\
+            </button>\
+          </nav>\
+        </aside>\
         <div class="detail-main expert-detail-tabs">\
           <el-tabs v-model="activeTab" class="expert-detail-tabs-inner">\
+              <el-tab-pane name="basic">\
+                <expert-basic-info ref="basicInfoRef" :expert="expert" :running-count="runningSessionCount" />\
+              </el-tab-pane>\
               <el-tab-pane name="persona">\
-                <template #label>人设 <span v-if="tabBadges.persona" class="tab-count-badge">{{ tabBadges.persona }}</span></template>\
-                <div class="detail-tab-pane">\
+                <template #label>岗位说明</template>\
+                <expert-soul-editor v-if="isDevMock" ref="soulEditorRef" :expert-id="expertId" :expert="expert" :running-count="runningSessionCount" />\
+                <div v-else class="detail-tab-pane">\
                   <div class="detail-section-head">\
                     <h3 class="detail-section-title">人设</h3>\
                     <p class="detail-section-desc">定义专家的核心职责、工作流程与行为准则。保存后默认在新会话生效，不影响已打开的对话。</p>\
@@ -3252,6 +3356,7 @@
                       <span class="workspace-stat-pill">{{ workspaceStats }}</span>\
                     </div>\
                     <div class="detail-action-right">\
+                      <el-button v-if="isDevMock && workspaceSelectedIds.length" type="danger" plain size="small" @click="deleteSelectedWorkspaceItems">删除 {{ workspaceSelectedIds.length }}</el-button>\
                       <el-button size="small" @click="openCreateWorkspaceFolderDialog">新建文件夹</el-button>\
                       <el-button type="primary" size="small" @click="openMaterialUpload">上传文件</el-button>\
                     </div>\
@@ -3266,14 +3371,16 @@
                       </div>\
                     </div>\
                     <div v-else class="workspace-list-table">\
-                      <div class="workspace-list-row workspace-list-head">\
+                      <div class="workspace-list-row workspace-list-head" :class="{ \'is-selectable\': isDevMock }">\
+                        <div v-if="isDevMock" class="workspace-list-cell workspace-select-cell"><el-checkbox :model-value="workspaceAllSelected" aria-label="全选当前列表" @change="toggleAllWorkspace" /></div>\
                         <div class="workspace-list-cell workspace-list-name-cell">名称</div>\
                         <div class="workspace-list-cell workspace-list-type-cell">类型</div>\
                         <div class="workspace-list-cell workspace-list-time-cell">更新时间</div>\
                         <div class="workspace-list-cell workspace-list-size-cell">大小</div>\
                         <div class="workspace-list-cell workspace-list-action-cell">操作</div>\
                       </div>\
-                      <div v-for="file in workspaceFiles" :key="file.id" class="workspace-list-row workspace-list-item" :class="{ \'is-folder\': file.kind === \'folder\', \'is-drop-target\': canDropWorkspaceItem(file), \'workspace-root-highlight-row\': file.kind === \'folder\' && file.name === highlightSessionId }" :draggable="file.source === \'upload\'" @dragstart="onWorkspaceDragStart(file, $event)" @dragend="onWorkspaceDragEnd" @dragover.prevent="file.kind === \'folder\' && canDropWorkspaceItem(file)" @drop.prevent="file.kind === \'folder\' && onWorkspaceDrop(file)">\
+                      <div v-for="file in workspaceFiles" :key="file.id" class="workspace-list-row workspace-list-item" :class="{ \'is-folder\': file.kind === \'folder\', \'is-drop-target\': canDropWorkspaceItem(file), \'workspace-root-highlight-row\': file.kind === \'folder\' && file.name === highlightSessionId, \'is-selectable\': isDevMock }" :draggable="file.source === \'upload\'" @dragstart="onWorkspaceDragStart(file, $event)" @dragend="onWorkspaceDragEnd" @dragover.prevent="file.kind === \'folder\' && canDropWorkspaceItem(file)" @drop.prevent="file.kind === \'folder\' && onWorkspaceDrop(file)">\
+                        <div v-if="isDevMock" class="workspace-list-cell workspace-select-cell" @click.stop><el-checkbox :model-value="workspaceSelectedIds.includes(String(file.id))" :aria-label="\'选择\' + file.name" @change="(checked) => toggleWorkspaceSelection(file.id, checked)" /></div>\
                         <div class="workspace-list-cell workspace-list-name-cell" @click="file.kind === \'folder\' && openWorkspaceFolder(file)" @dblclick="openWorkspaceFilePreview(file)">\
                           <span class="workspace-file-icon-wrap" :class="workspaceFileTypeClass(file)">\
                             <span class="workspace-file-icon">{{ workspaceFileIcon(file) }}</span>\
@@ -3307,7 +3414,8 @@
               </el-tab-pane>\
               <el-tab-pane name="tasks">\
                 <template #label>任务 <span v-if="tabBadges.tasks" class="tab-count-badge">{{ tabBadges.tasks }}</span></template>\
-                <div class="detail-tab-pane">\
+                <expert-task-overview-1023 v-if="isDevMock" :expert-id="expertId" @nav="$emit(\'nav\', $event)" @workspace="goToWorkspaceFromTask($event)" />\
+                <div v-else class="detail-tab-pane">\
                   <div class="detail-section-head">\
                     <h3 class="detail-section-title">对话任务</h3>\
                     <p class="detail-section-desc">当前专家下的对话任务，可新建、打开或管理</p>\
@@ -3362,18 +3470,24 @@
               </el-tab-pane>\
               <el-tab-pane name="memory">\
                 <template #label>记忆</template>\
-                <div class="detail-tab-pane memory-tab">\
+                <div class="detail-tab-pane memory-tab" :class="{ \'is-memory-disabled\': isDevMock && !memoryEnabled }">\
                   <div class="detail-section-head">\
                     <h3 class="detail-section-title">记忆</h3>\
                     <p class="detail-section-desc">专家长期记忆与用户画像，由会话自动沉淀</p>\
                   </div>\
+                  <div v-if="isDevMock" class="memory-1023-switch">\
+                    <strong>启用记忆</strong>\
+                    <span class="memory-1023-switch-desc">关闭后新会话不再使用或写入专家画像和用户画像</span>\
+                    <span class="memory-1023-switch-hint">已有文件保留</span>\
+                    <el-switch :model-value="memoryEnabled" @change="toggleMemoryEnabled" />\
+                  </div>\
                   <el-tabs v-model="memorySubTab" class="memory-sub-tabs">\
                     <el-tab-pane name="memory">\
-                      <template #label>MEMORY.md<span v-if="memoryMdContent" class="memory-sub-dot"></span></template>\
+                      <template #label>专家画像</template>\
                       <div class="memory-readonly-content">{{ memoryMdContent || \'（暂无长期记忆，会话过程中自动沉淀）\' }}</div>\
                     </el-tab-pane>\
                     <el-tab-pane name="user">\
-                      <template #label>USER.md<span v-if="userMdContent" class="memory-sub-dot"></span></template>\
+                      <template #label>用户画像</template>\
                       <div class="memory-readonly-content">{{ userMdContent || \'（暂无用户画像记忆）\' }}</div>\
                     </el-tab-pane>\
                   </el-tabs>\
@@ -3518,7 +3632,8 @@
                     MCP <span v-if="tabBadges.mcp" class="tab-count-badge">{{ tabBadges.mcp }}</span>\
                   </span>\
                 </template>\
-                <div class="detail-tab-pane">\
+                <expert-mcp-1023 v-if="isDevMock" :expert-id="expertId" :running-count="runningSessionCount" />\
+                <div v-else class="detail-tab-pane">\
                   <div class="detail-section-head">\
                     <h3 class="detail-section-title">MCP</h3>\
                     <p class="detail-section-desc">连接 MCP 服务，扩展专家可使用的工具<span v-if="runningSessionCount > 0">。当前有 {{ runningSessionCount }} 个运行中会话，变更将在新会话中生效</span>。</p>\
@@ -3569,7 +3684,8 @@
               </el-tab-pane>\
               <el-tab-pane name="im">\
                 <template #label>消息渠道 <span v-if="tabBadges.im" class="tab-count-badge">{{ tabBadges.im }}</span></template>\
-                <div class="detail-tab-pane im-channel-tab">\
+                <expert-im-1023 v-if="isDevMock" :expert-id="expertId" />\
+                <div v-else class="detail-tab-pane im-channel-tab">\
                   <div class="detail-section-head">\
                     <h3 class="detail-section-title">消息渠道</h3>\
                     <p class="detail-section-desc">配置企业微信、钉钉、飞书等消息渠道。启用后，用户可通过群聊提及或私聊的方式与该专家对话。</p>\
@@ -3688,7 +3804,23 @@
         </div>\
         </div>\
         </div>\
-        <expert-edit-page-dialog :edit="expertEdit" header-title="编辑基本信息" :tag-colors="tagColors" />\
+        <el-dialog v-model="deleteExpertDialogVisible" width="560px" class="form-dialog delete-expert-dialog" :close-on-click-modal="false" append-to-body>\
+          <template #header><div class="dialog-header-custom"><div class="dialog-header-title">删除专家</div></div></template>\
+          <div class="delete-expert-warning" v-if="expert">\
+            <span class="delete-expert-warning-icon">⚠</span>\
+            <div class="delete-expert-warning-text">\
+              即将删除专家「<strong>{{ expert.name }}</strong>」，此操作不可恢复。<br>\
+              所有专家配置、人设、技能、工具绑定将被永久清除。\
+              <div v-if="runningSessionCount > 0" class="delete-expert-running-warn">该专家当前有 {{ runningSessionCount }} 个运行中会话，强制删除可能导致这些会话异常。</div>\
+            </div>\
+          </div>\
+          <label class="delete-expert-input-label" v-if="expert">请输入专家名称「{{ expert.name }}」以确认</label>\
+          <el-input v-if="expert" v-model="deleteExpertConfirmName" placeholder="输入专家名称" />\
+          <template #footer><div class="dialog-footer-custom">\
+            <el-button @click="deleteExpertDialogVisible = false">取消</el-button>\
+            <el-button type="danger" :disabled="!canDeleteExpert" @click="confirmDeleteExpert">{{ runningSessionCount > 0 ? "强制删除" : "删除" }}</el-button>\
+          </div></template>\
+        </el-dialog>\
         <!-- 新建任务 -->\
         <el-dialog v-model="newTaskDialogVisible" width="440px" class="form-dialog form-dialog-sm ed-dialog ed-dialog-task" :close-on-click-modal="false" append-to-body>\
           <template #header>\

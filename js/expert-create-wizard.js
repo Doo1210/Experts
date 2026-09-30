@@ -4,6 +4,7 @@
  */
 (function () {
   var readImageFile = window.readImageFile;
+  var avatarPresetConfig = window.ExpertAvatarPresets || { DEFAULT: 'assets/expert-avatars/default.svg', list: [] };
 
   function pinyinSlug(name) {
     var map = {
@@ -53,12 +54,11 @@
       return {
         source: 'blank',
         cloneFrom: '',
-        avatar: '',
+        avatar: avatarPresetConfig.DEFAULT,
         name: '',
         slug: '',
         slugEdited: false,
         description: '',
-        expertise: [],
         modelInputMode: 'platform',
         selectedModelId: '',
         modelConfig: window.emptyManualModelConfig
@@ -68,13 +68,11 @@
     }
 
     var createForm = Vue.ref(emptyCreateForm());
-    var expertiseTagInput = Vue.ref('');
     var sourcePickerVisible = Vue.ref(false);
     var sourceSearchQuery = Vue.ref('');
 
     function resetCreateForm() {
       createForm.value = emptyCreateForm();
-      expertiseTagInput.value = '';
       showCancelConfirm.value = false;
       sourcePickerVisible.value = false;
       sourceSearchQuery.value = '';
@@ -105,8 +103,7 @@
       if (!q) return sourceExperts.value;
       return sourceExperts.value.filter(function (e) {
         return (e.name || '').toLowerCase().indexOf(q) >= 0 ||
-          (e.description || '').toLowerCase().indexOf(q) >= 0 ||
-          (e.expertise || e.tags || []).join(' ').toLowerCase().indexOf(q) >= 0;
+          (e.description || '').toLowerCase().indexOf(q) >= 0;
       });
     });
 
@@ -115,13 +112,11 @@
     });
 
     function clearBasicInfo() {
-      createForm.value.avatar = '';
+      createForm.value.avatar = avatarPresetConfig.DEFAULT;
       createForm.value.name = '';
       createForm.value.slug = '';
       createForm.value.slugEdited = false;
       createForm.value.description = '';
-      createForm.value.expertise = [];
-      expertiseTagInput.value = '';
     }
 
     function clearModelConfig() {
@@ -136,10 +131,9 @@
       if (!ex) return;
       var nextName = (ex.name || '').trim();
       if (appendCopySuffix && nextName && nextName.length <= 28) nextName += ' 副本';
-      createForm.value.avatar = ex.avatar || '';
+      createForm.value.avatar = ex.avatar || avatarPresetConfig.DEFAULT;
       createForm.value.name = nextName;
       createForm.value.description = ex.description || '';
-      createForm.value.expertise = (ex.expertise || ex.tags || []).slice(0, 3);
       createForm.value.slugEdited = false;
       onNameInput();
     }
@@ -201,36 +195,6 @@
       onSourceChange();
     }
 
-    function addCreateExpertiseTag() {
-      var tag = expertiseTagInput.value.trim();
-      if (!tag) return;
-      if (createForm.value.expertise.length >= 3) {
-        ElementPlus.ElMessage.warning('擅长领域最多添加 3 个');
-        return;
-      }
-      if (tag.length > 20) {
-        ElementPlus.ElMessage.warning('每个标签最多 20 个字符');
-        return;
-      }
-      if (createForm.value.expertise.indexOf(tag) !== -1) {
-        ElementPlus.ElMessage.warning('该标签已存在');
-        return;
-      }
-      createForm.value.expertise = createForm.value.expertise.concat([tag]);
-      expertiseTagInput.value = '';
-    }
-
-    function removeCreateExpertiseTag(tag) {
-      createForm.value.expertise = createForm.value.expertise.filter(function (t) { return t !== tag; });
-    }
-
-    function onExpertiseTagKeydown(e) {
-      if (e.key === 'Enter') {
-        e.preventDefault();
-        addCreateExpertiseTag();
-      }
-    }
-
     function triggerCreateAvatarUpload() {
       if (formFieldsDisabled.value) return;
       if (createAvatarInput.value) createAvatarInput.value.click();
@@ -241,6 +205,11 @@
       if (readImageFile(file, function (url) { createForm.value.avatar = url; })) {
         e.target.value = '';
       }
+    }
+
+    function selectAvatarPreset(src) {
+      if (formFieldsDisabled.value) return;
+      createForm.value.avatar = src;
     }
 
     function openCreateDialog() {
@@ -267,7 +236,7 @@
 
     function attemptClose() {
       var f = createForm.value;
-      var hasContent = f.name || f.description || f.avatar || f.expertise.length > 0;
+      var hasContent = f.name || f.description || (f.avatar && f.avatar !== avatarPresetConfig.DEFAULT);
       if (hasContent) {
         showCancelConfirm.value = true;
       } else {
@@ -347,8 +316,6 @@
         name: f.name.trim(),
         description: f.description.trim(),
         avatar: f.avatar || undefined,
-        expertise: f.expertise.slice(0, 3),
-        tags: f.expertise.slice(0, 3),
         modelConfig: modelConfig,
         source: f.source,
         cloneFrom: f.source === 'blank' ? '' : f.cloneFrom
@@ -363,8 +330,8 @@
     return {
       showCreateDialog: showCreateDialog,
       createForm: createForm,
+      avatarPresets: avatarPresetConfig.list,
       createAvatarInput: createAvatarInput,
-      expertiseTagInput: expertiseTagInput,
       saving: saving,
       showCancelConfirm: showCancelConfirm,
       sourceExperts: sourceExperts,
@@ -392,24 +359,21 @@
       submitCreate: submitCreate,
       triggerCreateAvatarUpload: triggerCreateAvatarUpload,
       handleCreateAvatarChange: handleCreateAvatarChange,
-      addCreateExpertiseTag: addCreateExpertiseTag,
-      removeCreateExpertiseTag: removeCreateExpertiseTag,
-      onExpertiseTagKeydown: onExpertiseTagKeydown
+      selectAvatarPreset: selectAvatarPreset
     };
   };
 
   window.ExpertCreatePageDialog = {
     props: {
-      wizard: { type: Object, required: true },
-      tagColors: { type: Array, default: function () { return window.TAG_COLORS || []; } }
+      wizard: { type: Object, required: true }
     },
     setup: function (props) {
       var w = props.wizard;
       return {
         showCreateDialog: w.showCreateDialog,
         createForm: w.createForm,
+        avatarPresets: w.avatarPresets,
         createAvatarInput: w.createAvatarInput,
-        expertiseTagInput: w.expertiseTagInput,
         saving: w.saving,
         showCancelConfirm: w.showCancelConfirm,
         sourceExperts: w.sourceExperts,
@@ -434,20 +398,13 @@
         submitCreate: w.submitCreate,
         triggerCreateAvatarUpload: w.triggerCreateAvatarUpload,
         handleCreateAvatarChange: w.handleCreateAvatarChange,
-        addCreateExpertiseTag: w.addCreateExpertiseTag,
-        removeCreateExpertiseTag: w.removeCreateExpertiseTag,
-        onExpertiseTagKeydown: w.onExpertiseTagKeydown,
-        tagColors: Vue.computed(function () { return props.tagColors; })
+        selectAvatarPreset: w.selectAvatarPreset
       };
     },
     template: [
-      '<el-dialog v-model="showCreateDialog" width="800px" class="form-dialog form-dialog-expert form-dialog-expert-wizard" :close-on-click-modal="false" @closed="resetCreateForm">',
+      '<el-dialog v-model="showCreateDialog" width="760px" class="form-dialog form-dialog-expert form-dialog-expert-wizard" :close-on-click-modal="false" @closed="resetCreateForm">',
       '  <template #header>',
       '    <div class="dialog-header-custom dialog-header-expert-wizard">',
-      '      <div class="dialog-header-icon dialog-header-icon-create" :class="{ \'dialog-header-icon-has-avatar\': createForm.avatar }">',
-      '        <img v-if="createForm.avatar" :src="createForm.avatar" alt="" class="dialog-header-avatar">',
-      '        <span v-else class="dialog-header-avatar-placeholder">\u{1F464}</span>',
-      '      </div>',
       '      <div class="dialog-header-text">',
       '        <div class="dialog-header-title">新建专家</div>',
       '        <div class="dialog-header-sub">选择创建方式，确认专家基本信息与默认模型配置</div>',
@@ -479,21 +436,18 @@
       '        <el-option v-for="expert in sourceExperts" :key="expert.id" :label="expert.name" :value="String(expert.id)">',
       '          <div class="create-source-option">',
       '            <img :src="expert.avatar" alt="">',
-      '            <span><strong>{{ expert.name }}</strong><small>{{ (expert.expertise || expert.tags || []).slice(0, 3).join(\' · \') || expert.description }}</small></span>',
+      '            <span><strong>{{ expert.name }}</strong><small>{{ expert.description }}</small></span>',
       '          </div>',
       '        </el-option>',
       '      </el-select>',
       '    </section>',
       '    </section>',
-      '    <div v-if="formFieldsDisabled" class="create-disabled-notice" role="status">',
-      '      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 10v6M12 7h.01"/></svg>',
-      '      <span>请先选择{{ sourceModeLabel }}，选择后即可编辑专家基本信息和默认模型配置</span>',
-      '    </div>',
       '    <section class="create-detail-section">',
       '      <div class="create-detail-grid">',
       '        <div class="create-config-panel" :class="{ \'is-form-disabled\': formFieldsDisabled }">',
       '          <div class="create-config-panel-head"><span>专家基本信息</span></div>',
       '          <div class="create-basic-layout">',
+      '            <div class="expert-avatar-column">',
       '            <div class="create-basic-avatar-card create-avatar-upload" role="button" :tabindex="formFieldsDisabled ? -1 : 0" :aria-disabled="formFieldsDisabled" @click="triggerCreateAvatarUpload" @keydown.enter="triggerCreateAvatarUpload">',
       '              <input ref="createAvatarInput" type="file" accept="image/*" class="create-avatar-input" :disabled="formFieldsDisabled" @change="handleCreateAvatarChange" @click.stop>',
       '              <div v-if="createForm.avatar" class="create-avatar-preview-wrap">',
@@ -502,17 +456,17 @@
       '              </div>',
       '              <div v-else class="create-avatar-empty"><div class="create-avatar-empty-icon"><svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg></div><span class="create-avatar-empty-text">上传头像</span><span class="create-avatar-empty-hint">JPG / PNG</span></div>',
       '            </div>',
+      '            <div class="expert-avatar-presets">',
+      '              <div class="expert-avatar-presets-head"><span>预置头像</span></div>',
+      '              <div class="expert-avatar-presets-list" role="group" aria-label="预置头像">',
+      '                <button v-for="preset in avatarPresets" :key="preset.id" type="button" class="expert-avatar-preset" :class="{ \'is-selected\': createForm.avatar === preset.src }" :aria-label="preset.label" :aria-pressed="createForm.avatar === preset.src" :title="preset.label" :disabled="formFieldsDisabled" @click="selectAvatarPreset(preset.src)"><img :src="preset.src" :alt="preset.label"></button>',
+      '              </div>',
+      '            </div>',
+      '            </div>',
       '            <el-form label-position="top" class="form-dialog-form create-basic-form">',
       '              <el-form-item label="专家名称" required><el-input v-model="createForm.name" :disabled="formFieldsDisabled" placeholder="如：首席工艺专家" @input="onNameInput" /></el-form-item>',
-      '              <el-form-item label="专家介绍" required><el-input v-model="createForm.description" :disabled="formFieldsDisabled" type="textarea" :rows="3" placeholder="简要描述专家定位、能力与使用场景" /></el-form-item>',
+      '              <el-form-item label="专家介绍" required><el-input v-model="createForm.description" :disabled="formFieldsDisabled" type="textarea" :rows="6" placeholder="简要描述专家定位、能力与使用场景" /></el-form-item>',
       '            </el-form>',
-      '          </div>',
-      '          <div class="create-expertise-compact">',
-      '            <div class="expertise-tag-editor-head"><span class="expertise-tag-editor-label">擅长领域</span><span class="expertise-tag-editor-optional">选填，最多 3 个</span></div>',
-      '            <div v-if="createForm.expertise.length" class="expertise-tag-chips">',
-      '              <span v-for="(tag, idx) in createForm.expertise" :key="tag" class="expertise-tag-chip expertise-tag" :class="tagColors[idx % tagColors.length]">{{ tag }}<button type="button" class="expertise-tag-chip-remove" :disabled="formFieldsDisabled" aria-label="移除" @click="removeCreateExpertiseTag(tag)"><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M18 6L6 18M6 6l12 12"/></svg></button></span>',
-      '            </div>',
-      '            <div class="expertise-tag-input-row"><el-input v-model="expertiseTagInput" :disabled="formFieldsDisabled" placeholder="输入领域，按 Enter 添加" @keydown="onExpertiseTagKeydown" /><el-button type="primary" plain :disabled="formFieldsDisabled" @click="addCreateExpertiseTag">添加</el-button></div>',
       '          </div>',
       '        </div>',
       '        <div class="create-config-panel create-model-panel" :class="{ \'is-form-disabled\': formFieldsDisabled }">',

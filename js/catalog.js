@@ -846,16 +846,6 @@ window.SKILLS_HUB_CATALOG = [
   { id: 'hub-cost-breakdown', englishId: 'cost-breakdown', nameZh: '成本分解', icon: '💰', scope: 'builtin', category: 'manufacturing', description: '单位成本拆解与降本机会识别', provenance: 'hub' }
 ];
 
-/** Mock 运行中会话数：基于 expertId 稳定哈希返回 0-3 */
-window.getRunningSessionCount = function (expertId) {
-  var s = String(expertId || '');
-  var hash = 0;
-  for (var i = 0; i < s.length; i++) {
-    hash = ((hash << 5) - hash + s.charCodeAt(i)) | 0;
-  }
-  return Math.abs(hash) % 4;
-};
-
 /** Mock MEMORY.md 文本 */
 window.MOCK_MEMORY_MD = '# 专家长期记忆\n\n## 用户偏好\n- 偏好用数据驱动方式做决策，汇报时需附带量化结论\n- 习惯用中文输出，技术术语可保留英文\n\n## 项目背景\n- 当前产线为 12 寸晶圆厂，月产能 5 万片\n- 重点攻关工序：光刻对准精度与刻蚀均匀性\n\n## 领域知识\n- SPC 控制限按 ±3σ 设定，Cpk 目标 ≥ 1.33\n- 异常处理流程：发现 -> 隔离 -> 根因分析 -> 纠正措施 -> 验证关闭';
 

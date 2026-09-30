@@ -3,9 +3,9 @@
  */
 (function () {
   const STORAGE_KEY = 'expert_platform_v1';
-  const DEFAULT_EXPERT_AVATAR = 'data:image/svg+xml,' + encodeURIComponent(
-    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 80 80"><rect width="80" height="80" fill="#e8eef8"/><circle cx="40" cy="29" r="13" fill="#b8c5dc"/><ellipse cx="40" cy="63" rx="21" ry="15" fill="#b8c5dc"/></svg>'
-  );
+  const DEFAULT_EXPERT_AVATAR = window.ExpertAvatarPresets
+    ? window.ExpertAvatarPresets.DEFAULT
+    : 'assets/expert-avatars/default.svg';
   // 任务级默认工作目录：每个对话任务独立绑定 cwd（PRD 10.7 / 2.2 一任务一 session）
   const DEFAULT_TASK_CWD = '';
   var DEV_MOCK = window.DEV_MOCK === true || String(window.DEV_MOCK).toLowerCase() === 'true';
@@ -253,6 +253,7 @@
       transport: transport,
       url: s.url || '',
       command: s.command || '',
+      auth: typeof s.auth === 'string' ? s.auth : '',
       args: Array.isArray(s.args)
         ? s.args.slice()
         : (typeof s.args === 'string' && s.args.trim() ? s.args.trim().split(/[\s,]+/) : []),
@@ -656,6 +657,7 @@
       toolBindings: {},
       toolsetConfigs: {},
       mcpServers: {},
+      mcpSecretFlags: {},
       memories: [],
       tasks: [],
       messages: {},
@@ -667,13 +669,19 @@
       projectEvents: [],
       projectFiles: [],
       imChannels: {},
+      imPrototypeConfigs: {},
+      imSessions: {},
+      autonomousActions: {},
+      autonomousRuns: {},
+      memorySwitches: {},
       permissions: {},
       workspaceFiles: {},
       taskArtifacts: [],
       expertDetailMeta: {},
       demoSyncVersion: null,
       projectTaskSchemaVersion: null,
-      mcpDemoSeedVersion: null
+      mcpDemoSeedVersion: null,
+      prototype1023SeedVersion: null
     };
   }
 
@@ -703,7 +711,35 @@
       snap.skillBindings = {};
       snap.toolBindings = {};
       snap.mcpServers = {};
+      snap.mcpSecretFlags = {};
+      snap.imSessions = {};
+      snap.imPrototypeConfigs = {};
+      snap.autonomousActions = {};
+      snap.autonomousRuns = {};
+      snap.memorySwitches = {};
       snap.expertDetailMeta = {};
+    } else {
+      snap.mcpSecretFlags = snap.mcpSecretFlags || {};
+      Object.keys(snap.mcpServers || {}).forEach(function (expertId) {
+        var flags = snap.mcpSecretFlags[expertId] || (snap.mcpSecretFlags[expertId] = {});
+        (snap.mcpServers[expertId] || []).forEach(function (server) {
+          Object.keys(server.env || {}).forEach(function (name) {
+            var value = String(server.env[name] == null ? '' : server.env[name]);
+            if (/(KEY|TOKEN|SECRET|PASSWORD|AUTH)/i.test(name) && value && !/^\$\{/.test(value)) {
+              flags[name] = true;
+              server.env[name] = '${' + name + '}';
+            }
+          });
+          if (server.auth && !/^(none|oauth|bearer|basic)$/i.test(String(server.auth))) {
+            flags.MCP_AUTH = true;
+            server.auth = '${MCP_AUTH}';
+          }
+        });
+        var detail = snap.expertDetailMeta && snap.expertDetailMeta[expertId];
+        if (detail && detail.toolsDetail) {
+          detail.toolsDetail.mcpServers = JSON.parse(JSON.stringify(snap.mcpServers[expertId]));
+        }
+      });
     }
     (snap.projectFiles || []).forEach(function (f) {
       if (f.content && f.content.length > MAX_FILE_CONTENT_CHARS) {
@@ -1402,9 +1438,12 @@
 
     seedExperts.forEach(function (e, idx) {
       state.personas[e.id] = {
-        coreDutyMd: '## 核心职责\n\n负责「' + e.name + '」职责范围内的专业咨询与方案输出。',
-        workflowMd: '## 工作流程\n\n1. 理解需求\n2. 收集数据\n3. 分析诊断\n4. 输出建议',
-        behaviorMd: '## 行为准则\n\n- 基于事实与数据\n- 结论清晰可执行\n- 主动确认关键假设'
+        soulMd: window.Expert1023Utils.composeSoul({
+          duty: '负责「' + e.name + '」职责范围内的专业咨询与方案输出。',
+          flow: '1. 理解需求\n2. 收集数据\n3. 分析诊断\n4. 输出建议',
+          rules: '- 基于事实与数据\n- 结论清晰可执行\n- 主动确认关键假设'
+        }),
+        onboarded: true, presetQuestionsEnabled: false, presetQuestions: []
       };
       state.skillBindings[e.id] = seedInstalledSkills({
         withDemoUsage: true,
@@ -1482,21 +1521,19 @@
     persist();
   }
 
-  /** 已有本地数据时补种 MCP 示例（仅 DEV_MOCK；种子版本 bump 时刷新有演示配置的专家） */
+  /** 已有本地数据时仅补缺失的 MCP 示例（仅 DEV_MOCK）。 */
   function ensureMcpDemoSeed() {
     if (!DEV_MOCK) return;
     if (!state.mcpServers) state.mcpServers = {};
-    var forceReseed = state.mcpDemoSeedVersion !== MCP_DEMO_SEED_VERSION;
     var updated = false;
     state.experts.forEach(function (e, idx) {
       var key = String(e.id);
       var existing = state.mcpServers[key];
       var seeded = demoMcpServersForSeed(idx);
       var isMissing = existing === undefined;
-      var isEmpty = Array.isArray(existing) && existing.length === 0;
-      // 有演示配置：版本 bump 时覆盖；否则仅补缺失/空列表
+      // 演示种子只填缺失项；用户保存的空列表也是有效配置。
       if (seeded.length) {
-        if (!forceReseed && !isMissing && !isEmpty) return;
+        if (!isMissing) return;
         state.mcpServers[key] = seeded;
         syncMcpServersToDetailMeta(key, seeded);
         updated = true;
@@ -3893,6 +3930,114 @@
     return '当前用户';
   }
 
+  var PROTOTYPE_1023_SEED_VERSION = 3;
+  var MOCK_EVENT_SOURCES = [
+    { id: 'evt-daily-quality', name: '每日良率巡检', type: 'Timer', schedule: '每天 09:00' },
+    { id: 'evt-equipment-alert', name: '设备异常告警', type: 'WebHook', schedule: '收到告警时' },
+    { id: 'evt-production-stream', name: '产线设备事件', type: 'Kafka', schedule: '消息到达时' }
+  ];
+
+  function ensure1023Folder(expertId, name, parentId) {
+    var key = String(expertId);
+    var list = state.workspaceFiles[key] || (state.workspaceFiles[key] = []);
+    var parent = parentId == null ? null : String(parentId);
+    var found = list.find(function (item) {
+      return item.kind === 'folder' && String(item.parentId || '') === String(parent || '') && item.name === name;
+    });
+    if (found) return found;
+    var folder = { id: uid(), name: name, kind: 'folder', type: 'folder', parentId: parent, createdAt: nowIso(), updatedAt: nowIso(), source: 'system' };
+    list.push(folder);
+    return folder;
+  }
+
+  function ensure1023WorkspaceRoots(expertId) {
+    ensure1023Folder(expertId, '消息渠道', null);
+    ensure1023Folder(expertId, '自主任务', null);
+  }
+
+  function ensure1023MockSeed() {
+    if (!DEV_MOCK || state.prototype1023SeedVersion === PROTOTYPE_1023_SEED_VERSION) return;
+    state.imSessions = state.imSessions || {};
+    state.imPrototypeConfigs = state.imPrototypeConfigs || {};
+    state.autonomousActions = state.autonomousActions || {};
+    state.autonomousRuns = state.autonomousRuns || {};
+    state.memorySwitches = state.memorySwitches || {};
+    var visibleOrder = state.experts.slice().sort(function (a, b) { return String(b.updatedAt || '').localeCompare(String(a.updatedAt || '')); });
+    state.experts.forEach(function (expert) {
+      var index = visibleOrder.indexOf(expert);
+      var key = String(expert.id);
+      var oldPersona = state.personas[key];
+      var seededDuty = '## 核心职责\n\n负责「' + expert.name + '」职责范围内的专业咨询与方案输出。';
+      if (oldPersona && oldPersona.soulMd === undefined && oldPersona.coreDutyMd === seededDuty &&
+          oldPersona.workflowMd === '## 工作流程\n\n1. 理解需求\n2. 收集数据\n3. 分析诊断\n4. 输出建议' &&
+          oldPersona.behaviorMd === '## 行为准则\n\n- 基于事实与数据\n- 结论清晰可执行\n- 主动确认关键假设') {
+        state.personas[key] = Object.assign({}, oldPersona, {
+          soulMd: window.Expert1023Utils.composeSoul({
+            duty: seededDuty.replace(/^## 核心职责\s*/, ''),
+            flow: oldPersona.workflowMd.replace(/^## 工作流程\s*/, ''),
+            rules: oldPersona.behaviorMd.replace(/^## 行为准则\s*/, '')
+          }), onboarded: true
+        });
+      }
+      ensure1023WorkspaceRoots(key);
+      if (state.memorySwitches[key] === undefined) state.memorySwitches[key] = true;
+      if (state.imPrototypeConfigs[key] === undefined) {
+        state.imPrototypeConfigs[key] = {
+          wecom: { enabled: index === 0, configured: index === 0, botId: '', home: '', requireMention: false, proactiveEnabled: false, fileEnabled: false, people: [], groups: [], connection: index === 0 ? 'connected' : 'unconfigured' },
+          dingtalk: { enabled: false, configured: false, clientId: '', robotCode: '', home: '', requireMention: true, proactiveEnabled: false, fileEnabled: false, people: [], groups: [], connection: 'unconfigured' },
+          feishu: { enabled: index === 1, configured: index === 1, appId: '', home: '', requireMention: true, proactiveEnabled: false, fileEnabled: false, people: [], groups: [], connection: index === 1 ? 'connected' : 'unconfigured' }
+        };
+      }
+      if (state.imSessions[key] === undefined) {
+        state.imSessions[key] = index === 0 ? [
+          { id: 'im-demo-' + key + '-wecom', expertId: key, platform: 'wecom', chatName: '产线协作群', chatType: 'group', status: 'ready', lastActivityAt: '2026-09-29T09:20:00', cwd: '消息渠道/企微/im-demo-' + key + '-wecom', messages: [
+            { role: 'user', content: '请查看今天的良率数据。' },
+            { role: 'expert', content: '已核对数据，当前良率为 98.1%。异常集中在工位 8。' }
+          ] },
+          { id: 'im-demo-' + key + '-dingtalk', expertId: key, platform: 'dingtalk', chatName: '设备主管（单聊）', chatType: 'dm', status: 'ready', lastActivityAt: '2026-09-28T16:42:00', cwd: '消息渠道/钉钉/im-demo-' + key + '-dingtalk', messages: [
+            { role: 'user', content: '请把巡检结论发给我。' },
+            { role: 'expert', content: '已整理巡检结论：设备整体运行稳定，建议继续观察温度波动。' }
+          ] }
+        ] : index === 1 ? [
+          { id: 'im-demo-' + key + '-feishu', expertId: key, platform: 'feishu', chatName: '研发协同群', chatType: 'group', status: 'running', lastActivityAt: '2026-09-30T10:15:00', cwd: '消息渠道/飞书/im-demo-' + key + '-feishu', messages: [
+            { role: 'user', content: '请排查接口超时。' },
+            { role: 'expert', content: '正在核对最近的请求日志与数据库连接情况。' }
+          ] }
+        ] : [];
+      }
+      if (state.autonomousActions[key] === undefined) {
+        state.autonomousActions[key] = index === 0 ? [
+          { id: 'act-demo-' + key + '-timer', expertId: key, eventId: 'evt-daily-quality', eventName: '每日良率巡检', sourceType: 'Timer', title: '每日良率分析', branchName: '默认分支', version: 'v1.0.0', prompt: '按今日数据分析良率并输出结论', enabled: true, delivery: '仅产品内', updatedAt: '2026-09-29T09:00:00' },
+          { id: 'act-demo-' + key + '-webhook', expertId: key, eventId: 'evt-equipment-alert', eventName: '设备异常告警', sourceType: 'WebHook', title: '设备异常诊断', branchName: '严重异常', version: 'v2.1.0', prompt: '分析设备 {{device_id}} 的告警 {{status}}', enabled: true, delivery: '钉钉 Home', updatedAt: '2026-09-28T14:00:00' }
+        ] : [];
+      }
+      if (state.autonomousRuns[key] === undefined) {
+        state.autonomousRuns[key] = index === 0 ? [
+          { id: 'run-demo-' + key + '-ok', actionId: 'act-demo-' + key + '-timer', expertId: key, status: 'success', startedAt: '2026-09-29T09:00:00', finishedAt: '2026-09-29T09:01:18', input: '2026-09-29 良率数据', response: '今日良率 98.1%，工位 8 波动较大。', cwd: '自主任务/act-demo-' + key + '-timer/runs/run-demo-' + key + '-ok', files: ['良率巡检报告.md'] },
+          { id: 'run-demo-' + key + '-fail', actionId: 'act-demo-' + key + '-webhook', expertId: key, status: 'failed', startedAt: '2026-09-28T14:03:00', finishedAt: '2026-09-28T14:03:12', input: '{"device_id":"EQ-08","status":"critical"}', response: '数据源连接失败，未生成诊断报告。', cwd: '自主任务/act-demo-' + key + '-webhook/runs/run-demo-' + key + '-fail', files: [] }
+        ] : [];
+      }
+      var channelRoot = ensure1023Folder(key, '消息渠道', null);
+      (state.imSessions[key] || []).forEach(function (session) {
+        var platformName = ({ wecom: '企微', dingtalk: '钉钉', feishu: '飞书' })[session.platform] || session.platform;
+        var platformFolder = ensure1023Folder(key, platformName, channelRoot.id);
+        ensure1023Folder(key, session.id, platformFolder.id);
+      });
+      var autonomousRoot = ensure1023Folder(key, '自主任务', null);
+      (state.autonomousRuns[key] || []).forEach(function (run) {
+        var actionFolder = ensure1023Folder(key, run.actionId, autonomousRoot.id);
+        var runsFolder = ensure1023Folder(key, 'runs', actionFolder.id);
+        var runFolder = ensure1023Folder(key, run.id, runsFolder.id);
+        (run.files || []).forEach(function (name) {
+          if (state.workspaceFiles[key].some(function (file) { return String(file.parentId) === String(runFolder.id) && file.name === name; })) return;
+          state.workspaceFiles[key].push({ id: uid(), name: name, kind: 'material', type: 'document', parentId: runFolder.id, content: run.response || '', size: (run.response || '').length, createdAt: run.startedAt, updatedAt: run.finishedAt });
+        });
+      });
+    });
+    state.prototype1023SeedVersion = PROTOTYPE_1023_SEED_VERSION;
+    persist();
+  }
+
   window.AppStore = {
     isDevMock: function () {
       return DEV_MOCK;
@@ -3907,6 +4052,7 @@
       if (DEV_MOCK) {
         seedIfEmpty();
         ensureMcpDemoSeed();
+        ensure1023MockSeed();
       }
       migrateExpertRoleNames();
       if (sanitizeLegacyConversationMessages(state.messages)) persist();
@@ -3953,6 +4099,7 @@
       persist();
       if (DEV_MOCK) {
         seedIfEmpty();
+        ensure1023MockSeed();
         syncDemoData();
       } else {
         syncExpertsFromSidecar();
@@ -4026,7 +4173,24 @@
         updatedAt: nowIso()
       };
       state.experts.unshift(expert);
-      state.personas[expert.id] = { soulMd: '', onboarded: false };
+      var clonedPersona = payload.source === 'clone' && payload.cloneFrom
+        ? state.personas[String(payload.cloneFrom)] : null;
+      state.personas[expert.id] = DEV_MOCK && clonedPersona
+        ? Object.assign({}, cloneJson(clonedPersona), { history: [] })
+        : { soulMd: '', onboarded: false, presetQuestionsEnabled: false, presetQuestions: [] };
+      if (DEV_MOCK) {
+        ensure1023WorkspaceRoots(expert.id);
+        state.memorySwitches[expert.id] = payload.source === 'clone' && payload.cloneFrom
+          ? state.memorySwitches[String(payload.cloneFrom)] !== false : true;
+        state.imSessions[expert.id] = [];
+        state.imPrototypeConfigs[expert.id] = {
+          wecom: { enabled: false, configured: false, botId: '', home: '', requireMention: false, proactiveEnabled: false, fileEnabled: false, people: [], groups: [], connection: 'unconfigured' },
+          dingtalk: { enabled: false, configured: false, clientId: '', robotCode: '', home: '', requireMention: true, proactiveEnabled: false, fileEnabled: false, people: [], groups: [], connection: 'unconfigured' },
+          feishu: { enabled: false, configured: false, appId: '', home: '', requireMention: true, proactiveEnabled: false, fileEnabled: false, people: [], groups: [], connection: 'unconfigured' }
+        };
+        state.autonomousActions[expert.id] = [];
+        state.autonomousRuns[expert.id] = [];
+      }
       // 技能：seed 全部已安装并默认启用；复制来源时清空 .usage.json（不继承热度）
       if (payload.source === 'clone' && payload.cloneFrom && state.skillBindings[String(payload.cloneFrom)]) {
         state.skillBindings[expert.id] = (state.skillBindings[String(payload.cloneFrom)] || [])
@@ -4153,6 +4317,11 @@
       if (state.toolsetConfigs) delete state.toolsetConfigs[id];
       if (state.mcpServers) delete state.mcpServers[id];
       if (state.expertDetailMeta) delete state.expertDetailMeta[id];
+      if (state.imSessions) delete state.imSessions[id];
+      if (state.imPrototypeConfigs) delete state.imPrototypeConfigs[id];
+      if (state.autonomousActions) delete state.autonomousActions[id];
+      if (state.autonomousRuns) delete state.autonomousRuns[id];
+      if (state.memorySwitches) delete state.memorySwitches[id];
       state.favorites = state.favorites.filter(function (f) { return f !== id; });
       persist();
       if (window.SidecarApi && window.SidecarApi.deleteExpert) {
@@ -4161,14 +4330,69 @@
     },
 
     getRunningSessionCount: function (expertId) {
-      if (DEV_MOCK && window.getRunningSessionCount) {
-        return window.getRunningSessionCount(expertId);
+      if (DEV_MOCK) {
+        var key = String(expertId);
+        return (state.tasks || []).filter(function (task) {
+          return String(task.expertId) === key && (!task.type || task.type === 'dialogue') && task.status === 'running';
+        }).length + ((state.imSessions || {})[key] || []).filter(function (session) {
+          return session.status === 'running';
+        }).length + ((state.autonomousRuns || {})[key] || []).filter(function (run) {
+          return run.status === 'running';
+        }).length;
       }
       var count = 0;
       (state.tasks || []).forEach(function (t) {
         if (String(t.expertId) === String(expertId) && t.status === 'running') count++;
       });
       return count;
+    },
+
+    getExpertListSummary: function (expertId) {
+      var key = String(expertId);
+      var configs = (state.imPrototypeConfigs || {})[key] || {};
+      var savedChannels = (state.imChannels || {})[key] || [];
+      var channelLabels = { wecom: '企业微信', dingtalk: '钉钉', feishu: '飞书' };
+      var channels = DEV_MOCK
+        ? Object.keys(configs).filter(function (platform) {
+            return configs[platform] && configs[platform].enabled && configs[platform].configured;
+          })
+        : savedChannels.filter(function (channel) {
+            return channel.enabled && channel.configured;
+          }).map(function (channel) { return channel.id || channel.type; });
+      var channelIds = channels.slice();
+      channels = channels.map(function (platform) { return channelLabels[platform] || platform; });
+
+      // 侧车模式尚无跨来源的实时汇总接口，不把缺失的运行态显示成 0。
+      if (!DEV_MOCK) return {
+        running: null,
+        autonomousCount: null,
+        channels: channels,
+        channelIds: channelIds,
+        channelsAvailable: Object.prototype.hasOwnProperty.call(state.imChannels || {}, key)
+      };
+
+      var dialogueRunning = (state.tasks || []).filter(function (task) {
+        return String(task.expertId) === key && (!task.type || task.type === 'dialogue') && task.status === 'running';
+      }).length;
+      var imRunning = ((state.imSessions || {})[key] || []).filter(function (session) {
+        return session.status === 'running';
+      }).length;
+      var autonomousRunning = ((state.autonomousRuns || {})[key] || []).filter(function (run) {
+        return run.status === 'running';
+      }).length;
+      var autonomousCount = ((state.autonomousActions || {})[key] || []).filter(function (action) {
+        return action.enabled !== false;
+      }).length;
+      return {
+        running: dialogueRunning + imRunning + autonomousRunning,
+        dialogueRunning: dialogueRunning,
+        imRunning: imRunning,
+        autonomousRunning: autonomousRunning,
+        autonomousCount: autonomousCount,
+        channels: channels,
+        channelIds: channelIds,
+        channelsAvailable: true
+      };
     },
 
     getMemoryMd: function (expertId) {
@@ -4638,6 +4862,81 @@
       }
       return (state.mcpServers[key] || []).map(normalizeMcpServer);
     },
+    importMcpJsonMock: function (expertId, rawText) {
+      if (!DEV_MOCK) throw new Error('仅演示模式支持粘贴导入');
+      var entries = window.Expert1023Utils.parseMcpJson(rawText);
+      var key = String(expertId);
+      var current = this.getMcpServers(key);
+      var configured = state.mcpSecretFlags[key] || (state.mcpSecretFlags[key] = {});
+      var added = [], overwritten = [], missing = [];
+      entries.forEach(function (item) {
+        var cfg = item.config;
+        var env = {};
+        Object.keys(cfg.env || {}).forEach(function (envName) {
+          var value = String(cfg.env[envName] == null ? '' : cfg.env[envName]);
+          var reference = value.match(/^\$\{(?:env:)?([A-Za-z_][A-Za-z0-9_]*)\}$/);
+          if (reference) {
+            env[envName] = '${' + reference[1] + '}';
+            if (!configured[reference[1]] && missing.indexOf(reference[1]) < 0) missing.push(reference[1]);
+          } else if (/(KEY|TOKEN|SECRET|PASSWORD|AUTH)/i.test(envName) && value) {
+            configured[envName] = true; // Store presence only; never persist the plaintext.
+            env[envName] = '${' + envName + '}';
+          } else {
+            env[envName] = value;
+          }
+        });
+        var headers = cfg.headers || {};
+        var bearer = String(headers.Authorization || headers.authorization || '').match(/^Bearer\s+(.+)$/i);
+        if (bearer) {
+          var tokenRef = bearer[1].match(/^\$\{(?:env:)?([A-Za-z_][A-Za-z0-9_]*)\}$/);
+          var tokenKey = tokenRef ? tokenRef[1] : 'MCP_' + item.name.toUpperCase().replace(/-/g, '_') + '_TOKEN';
+          env[tokenKey] = '${' + tokenKey + '}';
+          if (tokenRef && !configured[tokenKey] && missing.indexOf(tokenKey) < 0) missing.push(tokenKey);
+          if (!tokenRef) configured[tokenKey] = true;
+        }
+        var server = normalizeMcpServer({
+          name: item.name, type: cfg.command ? 'stdio' : 'http', command: cfg.command || '',
+          args: cfg.args || [], url: cfg.url || '', env: env, auth: cfg.auth || '', enabled: cfg.enabled !== false,
+          missingEnv: Object.keys(env).filter(function (envName) {
+            var ref = String(env[envName]).match(/^\$\{([A-Za-z_][A-Za-z0-9_]*)\}$/);
+            return !!ref && !configured[ref[1]];
+          }), status: 'unverified'
+        });
+        var index = current.findIndex(function (old) { return old.name === item.name; });
+        if (index >= 0) { current.splice(index, 1, server); overwritten.push(item.name); }
+        else { current.push(server); added.push(item.name); }
+      });
+      setMcpServersInternal(key, current);
+      persist();
+      return { added: added, overwritten: overwritten, renamed: entries.filter(function (item) { return item.originalName !== item.name; }).map(function (item) { return item.originalName + ' → ' + item.name; }), missing: missing.filter(function (name) { return !configured[name]; }) };
+    },
+    configureMcpSecretsMock: function (expertId, serverNames, values) {
+      if (!DEV_MOCK) return false;
+      var key = String(expertId), configured = state.mcpSecretFlags[key] || (state.mcpSecretFlags[key] = {});
+      Object.keys(values || {}).forEach(function (name) { if (String(values[name] || '').trim()) configured[name] = true; });
+      var list = this.getMcpServers(key);
+      list.forEach(function (server) {
+        if (serverNames && serverNames.indexOf(server.name) < 0) return;
+        server.missingEnv = server.missingEnv.filter(function (name) { return !configured[name]; });
+        server.status = server.missingEnv.length ? 'unavailable' : 'unverified';
+      });
+      setMcpServersInternal(key, list);
+      persist();
+      return true;
+    },
+    testMcpServerMock: function (expertId, name) {
+      if (!DEV_MOCK) return null;
+      var server = this.getMcpServers(expertId).find(function (item) { return item.name === name; });
+      if (!server) return null;
+      var failed = /fail|invalid|offline/i.test(server.url || server.command);
+      var patch = server.missingEnv.length
+        ? { status: 'unavailable', errorSummary: '未配置密钥', testedAt: nowIso() }
+        : server.auth === 'oauth' ? { status: 'unavailable', errorSummary: '需 OAuth，本期请用 CLI 登录', testedAt: nowIso() }
+        : failed ? { status: 'unavailable', errorSummary: '连接失败：演示服务不可达', testedAt: nowIso() }
+          : { status: 'available', errorSummary: '', toolCount: server.toolCount || 4, testedAt: nowIso() };
+      this.updateMcpServer(expertId, name, patch);
+      return patch;
+    },
     getMcpEnabledCount: function (expertId) {
       return this.getMcpServers(expertId).filter(function (s) { return s.enabled; }).length;
     },
@@ -4930,8 +5229,10 @@
       var expertKey = String(expertId);
       // 保留本地已设置的 cwd（任务级工作目录），避免远程同步覆盖
       var prevByExpert = {};
+      var pinnedByExpert = {};
       state.tasks.forEach(function (t) {
         if (String(t.expertId) === expertKey && t.cwd) prevByExpert[t.id] = t.cwd;
+        if (String(t.expertId) === expertKey && t.pinned) pinnedByExpert[t.id] = true;
       });
       var mapped = remote.map(function (t) {
         return {
@@ -4942,6 +5243,7 @@
           expertId: String(expertId),
           ownerId: 'admin',
           archived: false,
+          pinned: !!pinnedByExpert[t.id],
           cwd: t.cwd || prevByExpert[t.id] || DEFAULT_TASK_CWD,
           titleSet: !!t.titleSet,
           createdAt: t.createdAt || nowIso(),
@@ -4971,6 +5273,7 @@
         projectId: payload.projectId || null,
         ownerId: 'admin',
         archived: false,
+        pinned: false,
         cwd: payload.cwd || DEFAULT_TASK_CWD,
         createdAt: nowIso(),
         updatedAt: nowIso(),
@@ -4993,6 +5296,7 @@
         expertId: String(expertId),
         ownerId: 'admin',
         archived: false,
+        pinned: false,
         cwd: remote.cwd || DEFAULT_TASK_CWD,
         titleSet: !!remote.titleSet,
         createdAt: remote.createdAt || nowIso(),
@@ -5053,6 +5357,84 @@
       t.updatedAt = nowIso();
       persist();
       return t;
+    },
+
+    getImSessions: function (expertId) {
+      return cloneJson((state.imSessions || {})[String(expertId)] || []).sort(function (a, b) {
+        return String(b.lastActivityAt || '').localeCompare(String(a.lastActivityAt || ''));
+      });
+    },
+    getMockEventSources: function () { return cloneJson(MOCK_EVENT_SOURCES); },
+    getAutonomousActions: function (expertId) {
+      return cloneJson((state.autonomousActions || {})[String(expertId)] || []);
+    },
+    getAutonomousRuns: function (expertId, actionId) {
+      return cloneJson((state.autonomousRuns || {})[String(expertId)] || []).filter(function (run) {
+        return !actionId || run.actionId === actionId;
+      }).sort(function (a, b) { return String(b.startedAt || '').localeCompare(String(a.startedAt || '')); });
+    },
+    saveAutonomousAction: function (expertId, payload) {
+      if (!DEV_MOCK) return null;
+      var key = String(expertId);
+      var list = state.autonomousActions[key] || (state.autonomousActions[key] = []);
+      var source = MOCK_EVENT_SOURCES.find(function (item) { return item.id === payload.eventId; });
+      if (!source) return null;
+      var id = payload.id || ('act-' + uid());
+      var action = {
+        id: id, expertId: key, eventId: source.id, eventName: source.name,
+        sourceType: source.type, title: String(payload.title || '').trim(),
+        branchName: String(payload.branchName || '默认分支').trim(), version: 'v1.0.0',
+        prompt: String(payload.prompt || '').trim(), enabled: payload.enabled !== false,
+        delivery: payload.delivery || '仅产品内', updatedAt: nowIso()
+      };
+      var index = list.findIndex(function (item) { return item.id === id; });
+      if (index >= 0) list.splice(index, 1, action); else list.unshift(action);
+      var root = ensure1023Folder(key, '自主任务', null);
+      ensure1023Folder(key, id, root.id);
+      persist();
+      return cloneJson(action);
+    },
+    deleteAutonomousAction: function (expertId, actionId) {
+      if (!DEV_MOCK) return false;
+      var key = String(expertId);
+      var list = state.autonomousActions[key] || [];
+      var next = list.filter(function (item) { return item.id !== actionId; });
+      if (next.length === list.length) return false;
+      state.autonomousActions[key] = next;
+      persist();
+      return true;
+    },
+    triggerAutonomousAction: function (expertId, actionId) {
+      if (!DEV_MOCK) return null;
+      var key = String(expertId);
+      var action = (state.autonomousActions[key] || []).find(function (item) { return item.id === actionId; });
+      if (!action || !action.enabled) return null;
+      var id = 'run-' + uid();
+      var cwd = '自主任务/' + action.id + '/runs/' + id;
+      var run = {
+        id: id, actionId: action.id, expertId: key, status: 'success',
+        startedAt: nowIso(), finishedAt: nowIso(), input: action.prompt,
+        response: '模拟执行完成：已处理「' + action.eventName + '」并生成分析结果。',
+        cwd: cwd, files: ['执行结果.md']
+      };
+      var runs = state.autonomousRuns[key] || (state.autonomousRuns[key] = []);
+      runs.unshift(run);
+      var root = ensure1023Folder(key, '自主任务', null);
+      var actionFolder = ensure1023Folder(key, action.id, root.id);
+      var runRoot = ensure1023Folder(key, 'runs', actionFolder.id);
+      var runFolder = ensure1023Folder(key, id, runRoot.id);
+      state.workspaceFiles[key].push({ id: uid(), name: '执行结果.md', kind: 'material', type: 'document', parentId: runFolder.id, content: run.response, size: run.response.length, createdAt: nowIso(), updatedAt: nowIso() });
+      persist();
+      return cloneJson(run);
+    },
+    getMemoryEnabled: function (expertId) {
+      return (state.memorySwitches || {})[String(expertId)] !== false;
+    },
+    setMemoryEnabled: function (expertId, enabled) {
+      if (!DEV_MOCK) return false;
+      state.memorySwitches[String(expertId)] = !!enabled;
+      persist();
+      return true;
     },
 
     getMessages: function (taskId) {
@@ -5920,6 +6302,22 @@
     getImChannels: function (expertId) {
       return state.imChannels[expertId] || [];
     },
+    getImPrototypeConfigs: function (expertId) {
+      return cloneJson((state.imPrototypeConfigs || {})[String(expertId)] || {});
+    },
+    saveImPrototypeConfig: function (expertId, platform, config) {
+      if (!DEV_MOCK) return false;
+      var key = String(expertId);
+      if (!state.imPrototypeConfigs[key]) state.imPrototypeConfigs[key] = {};
+      var sanitized = cloneJson(config || {});
+      delete sanitized.clientSecret;
+      delete sanitized.appSecret;
+      delete sanitized.botSecret;
+      delete sanitized.secret;
+      state.imPrototypeConfigs[key][platform] = sanitized;
+      persist();
+      return true;
+    },
     findImCredentialConflict: function (expertId, lockField, lockValue) {
       // dev mock：前端不持久化凭据明文，无法精确比对，默认不报冲突。
       // 真实场景由后端 acquire_scoped_lock 校验（PUT /im-channels/<platform> 返回 409 + conflict_profile）。
@@ -6105,6 +6503,39 @@
       });
       persist();
       return true;
+    },
+    deleteWorkspaceItems: function (expertId, ids) {
+      if (!DEV_MOCK) return { success: [], failed: (ids || []).slice() };
+      var key = String(expertId);
+      var list = state.workspaceFiles[key] || [];
+      var selected = Array.from(new Set((ids || []).map(String)));
+      var byId = {};
+      list.forEach(function (item) { byId[String(item.id)] = item; });
+      var success = [], failed = [], removed = {};
+      selected.forEach(function (id) {
+        var item = byId[id];
+        if (!item || item.outsideRoot || item.protected) { failed.push(id); return; }
+        var parent = item.parentId ? String(item.parentId) : '';
+        var covered = false;
+        while (parent) {
+          if (selected.indexOf(parent) >= 0 && byId[parent] && !byId[parent].protected && !byId[parent].outsideRoot) { covered = true; break; }
+          parent = byId[parent] && byId[parent].parentId ? String(byId[parent].parentId) : '';
+        }
+        if (covered) return;
+        success.push(id);
+        removed[id] = true;
+      });
+      var changed = true;
+      while (changed) {
+        changed = false;
+        list.forEach(function (item) {
+          var id = String(item.id), parent = String(item.parentId || '');
+          if (!removed[id] && removed[parent]) { removed[id] = true; changed = true; }
+        });
+      }
+      state.workspaceFiles[key] = list.filter(function (item) { return !removed[String(item.id)]; });
+      persist();
+      return { success: success, failed: failed };
     },
 
     getExpertArtifacts: function (expertId) {

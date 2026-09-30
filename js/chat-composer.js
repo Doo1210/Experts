@@ -54,7 +54,7 @@
         if (this.expertStatus === 'hitl') return '请先回应专家的提问';
         if (this.expertStatus === 'error') return '专家出错，请重试';
         if (this.expertStatus === 'running') return '专家执行中，可点击停止';
-        return '向专家发起任务指令…';
+        return '向专家输入任务指令…';
       },
       resolvedModelList: function () {
         var list = this.modelList && this.modelList.length

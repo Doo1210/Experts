@@ -1,6 +1,6 @@
 /**
  * 顶部状态栏组件
- * 展示：返回按钮、专家头像名称、运行状态、发起任务、工作空间按钮
+ * 展示：返回按钮、专家头像名称、运行状态、新建任务、工作空间按钮
  * 注：模型与工作目录与对话任务绑定，由对话输入区（ChatComposer）维护，不在顶部展示
  * PRD 6.1 对应
  */
@@ -14,7 +14,7 @@
       expertStatus: { type: String, default: '' },
       workspaceOpen: { type: Boolean, default: false }
     },
-    emits: ['back', 'open-expert', 'new-task', 'toggle-workspace'],
+    emits: ['back', 'manage-expert', 'new-task', 'toggle-workspace'],
     computed: {
       statusLabel: function () {
         if (this.expertStatus) {
@@ -37,7 +37,7 @@
       <div class="task-top-bar">\
         <div class="task-top-bar-left">\
           <back-link label="返回专家" inline @click="$emit(\'back\')" />\
-          <button type="button" class="task-top-bar-expert-trigger" title="查看专家信息" @click="$emit(\'open-expert\')">\
+          <button type="button" class="task-top-bar-expert-trigger" title="打开专家管理页" @click="$emit(\'manage-expert\')">\
             <img class="task-top-bar-avatar" :src="expert.avatar" :alt="expert.name">\
             <span class="task-top-bar-info">\
               <span class="task-top-bar-name">{{ expert.name }}</span>\
@@ -53,12 +53,12 @@
           <button\
             type="button"\
             class="project-header-action-btn task-top-bar-new-task-btn"\
-            title="发起任务"\
+            title="新建任务"\
             @click="$emit(\'new-task\')">\
             <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">\
               <path d="M12 5v14M5 12h14"/>\
             </svg>\
-            <span>发起任务</span>\
+            <span>新建任务</span>\
           </button>\
           <button\
             type="button"\

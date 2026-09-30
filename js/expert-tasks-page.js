@@ -32,6 +32,7 @@
       var expert = Vue.ref(null);
       var tasks = Vue.ref([]);
       var currentTaskId = Vue.ref(props.taskId);
+      var archivedCurrent = Vue.ref(false);
       var messages = Vue.ref([]);
       var inputText = Vue.ref('');
       var sending = Vue.ref(false);
@@ -288,8 +289,6 @@
         });
         return list;
       });
-      var showExpertPreviewDialog = Vue.ref(false);
-      var previewStats = Vue.ref({ tasks: 0, projects: 0, skills: 0, tools: 0 });
       // 顶部状态栏状态（阶段0先用默认值，阶段2接 session.info）
       var sessionModel = Vue.ref('gpt-4o');
       // 工作目录按任务隔离：每个对话任务独立绑定 cwd（PRD 2.2 一任务一 session / 10.7）
@@ -511,6 +510,7 @@
           }
           chatBox.value.scrollTop = chatBox.value.scrollHeight;
           hasNewMessage.value = false;
+          updateActiveQuestion();
         });
       }
 
@@ -524,6 +524,7 @@
         } else {
           userScrolledUp.value = true;
         }
+        updateActiveQuestion();
       }
 
       function backToLatest() {
@@ -618,7 +619,7 @@
         list.sort(function (a, b) {
           return store.resolveTaskLastActivityAt(b).localeCompare(store.resolveTaskLastActivityAt(a));
         });
-        tasks.value = list;
+        tasks.value = list.map(function (t) { return Object.assign({}, t); });
       }
 
       function startTitlePoll(taskId) {
@@ -789,7 +790,7 @@
 
       function refreshTasks() {
         var all = store.getTasksByExpert(props.expertId, 'dialogue', true);
-        tasks.value = all.filter(function (t) { return !t.archived; });
+        tasks.value = all.filter(function (t) { return !t.archived; }).map(function (t) { return Object.assign({}, t); });
         if (store.fetchTasksByExpertRemote) {
           store.fetchTasksByExpertRemote(props.expertId).then(function (remote) {
             if (!remote) {
@@ -868,6 +869,84 @@
         return groups;
       });
 
+      // A visual index of user questions. The scroll container remains the source of truth.
+      var questionClusters = Vue.ref([]);
+      var railHovered = Vue.ref(null);
+      var activeQuestionId = Vue.ref('');
+      var questionOffsets = [];
+      var railFrame = 0;
+      var railObserver = null;
+      var railResizeObserver = null;
+      function questionSummary(group, index) {
+        var message = group.message || {};
+        var title = String(message.content || '').trim();
+        if (!title && message.attachments && message.attachments.length) {
+          title = message.attachments.map(function (item) { return item.name || '附件'; }).join('、');
+        }
+        var answer = '';
+        for (var i = index + 1; i < chatGroups.value.length; i++) {
+          var next = chatGroups.value[i];
+          if (next.kind === 'message' && next.message && next.message.role === 'user') break;
+          if (next.kind !== 'expert-turn') continue;
+          var reply = next.items.find(function (item) { return item.type === 'chat' || !item.type; });
+          if (reply) { answer = String(reply.content || '').trim(); break; }
+        }
+        return { id: String(group.id), title: title || '发送了文件', answer: answer || '正在处理或等待回复', index: index };
+      }
+      function measureQuestionRail() {
+        if (!store.isDevMock() || !chatBox.value) return;
+        var box = chatBox.value;
+        var anchors = Array.from(box.querySelectorAll('[data-question-id]'));
+        var summaries = chatGroups.value.map(function (group, index) {
+          return group.kind === 'message' && group.message && group.message.role === 'user' && group.message.displayKind !== 'internal_notification'
+            ? questionSummary(group, index) : null;
+        }).filter(Boolean);
+        if (!anchors.length || !summaries.length) { questionClusters.value = []; questionOffsets = []; return; }
+        var boxTop = box.getBoundingClientRect().top;
+        questionOffsets = anchors.map(function (element, index) {
+          return { item: summaries[index], y: element.getBoundingClientRect().top - boxTop + box.scrollTop };
+        }).filter(function (record) { return record.item; });
+        // 标记按问题顺序紧凑排列；真实滚动位置仅用于判断当前问题与点击跳转。
+        questionClusters.value = questionOffsets.map(function (record) { return { items: [record.item] }; });
+        updateActiveQuestion();
+      }
+      function scheduleQuestionRail() {
+        if (railFrame) cancelAnimationFrame(railFrame);
+        railFrame = requestAnimationFrame(function () { railFrame = 0; Vue.nextTick(measureQuestionRail); });
+      }
+      function updateActiveQuestion() {
+        if (!chatBox.value || !questionOffsets.length) return;
+        var line = chatBox.value.scrollTop + Math.min(chatBox.value.clientHeight * 0.25, 150);
+        var active = questionOffsets[0];
+        questionOffsets.forEach(function (record) { if (record.y <= line) active = record; });
+        activeQuestionId.value = active.item.id;
+      }
+      function showQuestionPreview(cluster, index, event) {
+        var rail = event.currentTarget.closest('.question-rail');
+        var mark = event.currentTarget.getBoundingClientRect();
+        var railRect = rail.getBoundingClientRect();
+        var wrapRect = rail.parentElement.getBoundingClientRect();
+        var top = mark.top - railRect.top - 12;
+        var maxTop = Math.max(0, wrapRect.bottom - railRect.top - 230);
+        var rightSpace = wrapRect.right - (railRect.left + 28) - 12;
+        var leftSpace = (railRect.right - 28) - wrapRect.left - 12;
+        var side = rightSpace > leftSpace ? 'right' : 'left';
+        var width = Math.min(360, Math.max(160, Math.floor(side === 'right' ? rightSpace : leftSpace)));
+        railHovered.value = { items: cluster.items, index: index, side: side, width: width, top: Math.min(Math.max(0, top), maxTop) };
+      }
+      function jumpToQuestion(id) {
+        var element = Array.from(chatBox.value.querySelectorAll('[data-question-id]')).find(function (node) { return node.getAttribute('data-question-id') === id; });
+        if (!element) return;
+        var box = chatBox.value;
+        var top = element.getBoundingClientRect().top - box.getBoundingClientRect().top + box.scrollTop - 12;
+        box.scrollTo({ top: top, behavior: 'smooth' });
+        userScrolledUp.value = true;
+        hasNewMessage.value = true;
+        activeQuestionId.value = id;
+        railHovered.value = null;
+      }
+      Vue.watch(chatGroups, scheduleQuestionRail, { deep: true });
+
       /** 流式进行中内容是否续接在最后一个专家回合内（避免重复头像/名称） */
       var liveAppendsToLastExpertTurn = Vue.computed(function () {
         if (!streaming.value) return false;
@@ -907,8 +986,19 @@
       });
 
       var filteredTasks = Vue.computed(function () {
-        return tasks.value;
+        return tasks.value.slice().sort(function (a, b) {
+          return Number(!!b.pinned) - Number(!!a.pinned);
+        });
       });
+
+      function toggleTaskPin(task) {
+        if (!task) return;
+        var pinned = !task.pinned;
+        store.updateTask(task.id, { pinned: pinned });
+        tasks.value = tasks.value.map(function (item) {
+          return item.id === task.id ? Object.assign({}, item, { pinned: pinned }) : item;
+        });
+      }
 
       var taskStats = Vue.computed(function () {
         var counts = { total: tasks.value.length, running: 0, ready: 0 };
@@ -923,27 +1013,36 @@
         return expert.value && expert.value.expertise ? expert.value.expertise : [];
       });
 
-      function getExpertStats(expertId) {
-        return {
-          tasks: store.getTasksByExpert(expertId).length,
-          projects: store.getProjectsByExpert(expertId).length,
-          skills: store.getEnabledSkillCount
-            ? store.getEnabledSkillCount(expertId)
-            : store.getSkillIds(expertId).length,
-          tools: store.getToolIds(expertId).length
-        };
-      }
-
-      function openExpertPreview() {
+      function goToExpertManagement() {
         if (!expert.value) return;
-        previewStats.value = getExpertStats(expert.value.id);
-        showExpertPreviewDialog.value = true;
+        ctx.emit('nav', '/experts/' + expert.value.id + '?tab=persona');
       }
 
-      function handleTaskMenu(command, task) {
-        var ev = { stopPropagation: function () {} };
-        if (command === 'edit') editTask(task, ev);
-        else if (command === 'delete') deleteTaskItem(task, ev);
+      function archiveTaskItem(task) {
+        function perform() {
+          var wasCurrent = currentTaskId.value === task.id;
+          store.archiveTask(task.id, true);
+          refreshTasks();
+          if (wasCurrent) {
+            archivedCurrent.value = false;
+            inputText.value = '';
+            if (tasks.value.length) selectTask(tasks.value[0].id);
+            else { currentTaskId.value = null; messages.value = []; ctx.emit('nav', '/experts/' + props.expertId + '/tasks'); }
+          }
+          ElementPlus.ElMessage.success('已归档，可在专家管理的「已归档」中恢复');
+        }
+        if (currentTaskId.value === task.id && inputText.value.trim()) {
+          ElementPlus.ElMessageBox.confirm('归档当前任务将放弃未发送的输入，确定继续？', '归档任务', { type: 'warning', confirmButtonText: '归档' })
+            .then(perform).catch(function () {});
+        } else perform();
+      }
+
+      function restoreArchivedCurrent() {
+        if (!currentTaskId.value || !store.isDevMock()) return;
+        store.archiveTask(currentTaskId.value, false);
+        archivedCurrent.value = false;
+        refreshTasks();
+        ElementPlus.ElMessage.success('任务已恢复');
       }
 
       var presetQuestions = Vue.ref([]);
@@ -958,6 +1057,11 @@
       }
 
       function applyPresetQuestion(text) {
+        if (inputText.value.trim() && inputText.value !== text) {
+          ElementPlus.ElMessageBox.confirm('选择预置问题将覆盖当前未发送的内容，确定继续？', '替换草稿', { type: 'warning', confirmButtonText: '替换' })
+            .then(function () { inputText.value = text || ''; }).catch(function () {});
+          return;
+        }
         inputText.value = text || '';
       }
 
@@ -965,6 +1069,7 @@
         expert.value = store.getExpert(props.expertId);
         syncPresetQuestions();
         refreshTasks();
+        archivedCurrent.value = !!(currentTaskId.value && store.getTask(currentTaskId.value) && store.getTask(currentTaskId.value).archived);
         if (currentTaskId.value) {
           loadMessages();
         } else if (tasks.value.length) {
@@ -1047,6 +1152,7 @@
 
       function selectTask(id) {
         currentTaskId.value = id;
+        archivedCurrent.value = !!(store.getTask(id) && store.getTask(id).archived);
         ctx.emit('nav', '/experts/' + props.expertId + '/tasks/' + id);
         loadMessages();
       }
@@ -1055,7 +1161,7 @@
         if (!store.isDevMock() && store.createTaskRemote) {
           return store.createTaskRemote(props.expertId, '新任务').then(function (remoteTask) {
             if (!remoteTask) {
-              remoteError.value = sidecarErrorMessage('发起任务失败');
+              remoteError.value = sidecarErrorMessage('新建任务失败');
               return null;
             }
             remoteError.value = '';
@@ -1273,7 +1379,7 @@
             sendToTask(task.id, text, chatFiles.takePendingFiles());
           }).catch(function () {
             sending.value = false;
-            remoteError.value = sidecarErrorMessage('发起任务失败');
+            remoteError.value = sidecarErrorMessage('新建任务失败');
           });
           return;
         }
@@ -1317,8 +1423,8 @@
       }
 
       function editTask(task, ev) {
-        ev.stopPropagation();
-        ElementPlus.ElMessageBox.prompt('请输入任务名称', '编辑任务', {
+        if (ev && ev.stopPropagation) ev.stopPropagation();
+        ElementPlus.ElMessageBox.prompt('请输入新的任务名称', '修改任务名称', {
           confirmButtonText: '确定',
           cancelButtonText: '取消',
           inputValue: task.title,
@@ -1389,6 +1495,7 @@
       });
       Vue.watch(function () { return props.taskId; }, function (v) {
         currentTaskId.value = v;
+        archivedCurrent.value = !!(v && store.getTask(v) && store.getTask(v).archived);
         resetClarifyPager();
         loadMessages();
       });
@@ -1407,8 +1514,23 @@
         loadExpert();
         beginExpertStartup();
         window.addEventListener('app-store-updated', loadExpert);
+        if (store.isDevMock()) Vue.nextTick(function () {
+          if (!chatBox.value) return;
+          railObserver = new MutationObserver(scheduleQuestionRail);
+          railObserver.observe(chatBox.value, { childList: true, subtree: true, characterData: true });
+          if (window.ResizeObserver) {
+            railResizeObserver = new ResizeObserver(scheduleQuestionRail);
+            railResizeObserver.observe(chatBox.value);
+          }
+          window.addEventListener('resize', scheduleQuestionRail);
+          scheduleQuestionRail();
+        });
       });
       Vue.onBeforeUnmount(function () {
+        if (railFrame) cancelAnimationFrame(railFrame);
+        if (railObserver) railObserver.disconnect();
+        if (railResizeObserver) railResizeObserver.disconnect();
+        window.removeEventListener('resize', scheduleQuestionRail);
         if (expertStartupTimer) clearTimeout(expertStartupTimer);
         stopTitlePoll();
         stopStream();
@@ -1425,8 +1547,7 @@
         liveOnlySegments: liveOnlySegments,
         expertTags: expertTags,
         tagColors: catalog.TAG_COLORS,
-        showExpertPreviewDialog: showExpertPreviewDialog, previewStats: previewStats,
-        openExpertPreview: openExpertPreview,
+        goToExpertManagement: goToExpertManagement,
         inputText: inputText, sending: sending, streaming: streaming,
         liveThought: liveThought, liveReply: liveReply, liveSteps: liveSteps,
         // 阶段2 输入区状态
@@ -1451,6 +1572,8 @@
         statusContent: statusContent,
         shouldShowConversationStatus: shouldShowConversationStatus,
         chatBox: chatBox,
+        questionClusters: questionClusters, railHovered: railHovered,
+        activeQuestionId: activeQuestionId, jumpToQuestion: jumpToQuestion, showQuestionPreview: showQuestionPreview,
         userScrolledUp: userScrolledUp, hasNewMessage: hasNewMessage,
         onChatScroll: onChatScroll, backToLatest: backToLatest,
         pendingFiles: chatFiles.pendingFiles, fileInputRef: chatFiles.fileInputRef,
@@ -1459,8 +1582,10 @@
         formatTaskCreatedAt: formatTaskCreatedAt, formatTaskLastActivity: formatTaskLastActivity,
         isTaskRunning: isTaskRunning, taskStatusTip: taskStatusTip,
         selectTask: selectTask, newTask: newTask, send: send,
-        editTask: editTask, deleteTaskItem: deleteTaskItem,
-        handleTaskMenu: handleTaskMenu,
+        editTask: editTask, deleteTaskItem: deleteTaskItem, archiveTaskItem: archiveTaskItem,
+        toggleTaskPin: toggleTaskPin,
+        archivedCurrent: archivedCurrent, restoreArchivedCurrent: restoreArchivedCurrent,
+        isDevMock: store.isDevMock(),
         filteredTasks: filteredTasks, taskStats: taskStats,
         // 顶部状态栏
         sessionModel: sessionModel, sessionCwd: sessionCwd, workspaceOpen: workspaceOpen,
@@ -1492,13 +1617,14 @@
           :expert-status="topBarExpertStatus"\
           :workspace-open="workspaceOpen"\
           @back="$emit(\'nav\', \'/experts\')"\
-          @open-expert="openExpertPreview"\
+          @manage-expert="goToExpertManagement"\
           @new-task="newTask"\
           @toggle-workspace="toggleWorkspace" />\
         <div class="task-body">\
         <div class="chat-main">\
+          <div v-if="isDevMock && archivedCurrent" class="chat-archived-banner">此任务已归档，不会出现在右侧任务列表。<el-button link type="primary" @click="restoreArchivedCurrent">恢复任务</el-button></div>\
           <div class="chat-messages-wrap">\
-            <div class="chat-messages" ref="chatBox" @scroll="onChatScroll">\
+            <div class="chat-messages" :class="{ \'question-rail-enabled\': isDevMock && questionClusters.length }" ref="chatBox" @scroll="onChatScroll">\
             <div v-if="showExpertIntro" class="chat-empty-expert-card">\
               <div class="chat-empty-expert-avatar-wrap">\
                 <img class="chat-empty-expert-avatar" :src="expert.avatar" :alt="expert.name">\
@@ -1524,7 +1650,7 @@
                     <expert-turn-flow :segments="turnSegmentsFor(group, groupIndex)" :render-markdown="renderMarkdown" @preview-file="handleGeneratedFilePreview" @download-file="handleGeneratedFileDownload" />\
                   </div>\
                 </div>\
-                <user-message v-else :message="group.message" />\
+                <div v-else :data-question-id="group.message && group.message.role === \'user\' && group.message.displayKind !== \'internal_notification\' ? String(group.id) : null"><user-message :message="group.message" /></div>\
               </template>\
               <div v-if="streaming && !liveAppendsToLastExpertTurn && liveOnlySegments.length" class="stream-live-block">\
                 <div class="msg-row expert">\
@@ -1539,6 +1665,14 @@
               </div>\
             </template>\
           </div>\
+            <div v-if="isDevMock && questionClusters.length" class="question-rail" @mouseleave="railHovered = null" aria-label="问题快速定位">\
+              <div class="question-rail-marks">\
+                <button v-for="(cluster, index) in questionClusters" :key="cluster.items[0].id" type="button" class="question-rail-mark" :class="{ active: cluster.items[0].id === activeQuestionId, hovered: railHovered && railHovered.index === index, \'near-1\': railHovered && Math.abs(railHovered.index - index) === 1, \'near-2\': railHovered && Math.abs(railHovered.index - index) === 2, \'near-3\': railHovered && Math.abs(railHovered.index - index) === 3 }" :aria-label="\'定位问题：\' + cluster.items[0].title" @mouseenter="showQuestionPreview(cluster, index, $event)" @focus="showQuestionPreview(cluster, index, $event)" @click="jumpToQuestion(cluster.items[0].id)"></button>\
+              </div>\
+              <div v-if="railHovered" class="question-rail-popover" :class="railHovered.side" :style="{ top: railHovered.top + \'px\', width: railHovered.width + \'px\' }">\
+                <button v-for="item in railHovered.items" :key="item.id" type="button" class="question-rail-preview" @click="jumpToQuestion(item.id)"><strong>{{ item.title }}</strong><span>{{ item.answer }}</span></button>\
+              </div>\
+            </div>\
             <button v-if="hasNewMessage" type="button" class="chat-back-to-latest" @click="backToLatest">\
               <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>\
               回到最新\
@@ -1589,12 +1723,13 @@
         <chat-task-list\
           :tasks="filteredTasks"\
           :current-task-id="currentTaskId"\
-          :task-stats="taskStats"\
           :is-running-fn="isTaskRunning"\
-          :task-status-tip-fn="taskStatusTip"\
-          :last-activity-label-fn="formatTaskLastActivity"\
+          :workspace-root="expert.workspaceRoot || \'\'"\
+          :mock-mode="isDevMock"\
           @select="selectTask"\
-          @menu="handleTaskMenu"\
+          @edit="editTask"\
+          @pin="toggleTaskPin"\
+          @archive="archiveTaskItem"\
           @open-workspace="handleOpenWorkspaceFromTask" />\
         <chat-workspace\
           :open="workspaceOpen"\
@@ -1609,53 +1744,6 @@
           @upload-file="handleUploadFile" />\
         </div>\
       </div>\
-      <el-dialog v-model="showExpertPreviewDialog" width="460px" class="expert-preview-dialog expert-preview-dialog--task" append-to-body>\
-        <div class="expert-preview" v-if="expert">\
-          <div class="expert-preview-header">\
-            <div class="expert-preview-avatar-wrap">\
-              <div class="expert-preview-polaroid">\
-                <img :src="expert.avatar" :alt="expert.name">\
-              </div>\
-            </div>\
-            <div class="expert-preview-profile">\
-              <h2 class="expert-preview-name">{{ expert.name }}</h2>\
-              <div class="expert-preview-meta">\
-                <span class="expert-preview-online"><i></i>在线</span>\
-                <span v-if="expert.createdAt || expert.updatedAt" class="expert-preview-dot">·</span>\
-                <span v-if="expert.createdAt || expert.updatedAt">创建时间 {{ expert.createdAt || expert.updatedAt }}</span>\
-              </div>\
-            </div>\
-          </div>\
-          <div class="expert-preview-stats">\
-            <div class="expert-preview-stat">\
-              <span class="expert-preview-stat-value">{{ previewStats.tasks }}</span>\
-              <span class="expert-preview-stat-label">任务</span>\
-            </div>\
-            <div class="expert-preview-stat">\
-              <span class="expert-preview-stat-value">{{ previewStats.projects }}</span>\
-              <span class="expert-preview-stat-label">项目</span>\
-            </div>\
-            <div class="expert-preview-stat">\
-              <span class="expert-preview-stat-value">{{ previewStats.skills }}</span>\
-              <span class="expert-preview-stat-label">技能</span>\
-            </div>\
-            <div class="expert-preview-stat">\
-              <span class="expert-preview-stat-value">{{ previewStats.tools }}</span>\
-              <span class="expert-preview-stat-label">工具</span>\
-            </div>\
-          </div>\
-          <div class="expert-preview-section">\
-            <div class="expert-preview-section-title">能力介绍</div>\
-            <p class="expert-preview-desc">{{ expert.description || \'暂无介绍\' }}</p>\
-          </div>\
-          <div v-if="expertTags.length" class="expert-preview-section">\
-            <div class="expert-preview-section-title">擅长领域</div>\
-            <div class="expert-preview-tags">\
-              <span v-for="(tag, idx) in expertTags.slice(0, 6)" :key="tag" class="expert-preview-tag" :class="tagColors[idx % tagColors.length]">{{ tag }}</span>\
-            </div>\
-          </div>\
-        </div>\
-      </el-dialog>\
       </template>\
       <div v-else class="main-scroll"><el-empty description="专家不存在"><back-link label="返回专家" @click="$emit(\'nav\', \'/experts\')" /></el-empty></div>'
   };

@@ -2,6 +2,7 @@
  * 专家编辑弹窗 — 共享组件与表单逻辑
  */
 (function () {
+  var avatarPresetConfig = window.ExpertAvatarPresets || { DEFAULT: 'assets/expert-avatars/default.svg', list: [] };
   function snapshotModelConfig(mc) {
     var c = mc || {};
     return {
@@ -26,9 +27,8 @@
   window.createExpertEditForm = function (store, options) {
     options = options || {};
     var showEditDialog = Vue.ref(false);
-    var editForm = Vue.ref({ name: '', description: '', avatar: '', expertise: [] });
+    var editForm = Vue.ref({ name: '', description: '', avatar: avatarPresetConfig.DEFAULT });
     var editAvatarInput = Vue.ref(null);
-    var editExpertiseTagInput = Vue.ref('');
     var editingExpert = Vue.ref(null);
     var editModelInputMode = Vue.ref('platform');
     var editSelectedModelId = Vue.ref('');
@@ -40,8 +40,7 @@
     var editOriginalModelConfig = Vue.ref(null);
 
     function resetEditForm() {
-      editForm.value = { name: '', description: '', avatar: '', expertise: [] };
-      editExpertiseTagInput.value = '';
+      editForm.value = { name: '', description: '', avatar: avatarPresetConfig.DEFAULT };
       editingExpert.value = null;
       editModelInputMode.value = 'platform';
       editSelectedModelId.value = '';
@@ -57,10 +56,8 @@
       editForm.value = {
         name: expert.name,
         description: expert.description,
-        avatar: expert.avatar || '',
-        expertise: (expert.expertise || []).slice(0, 10)
+        avatar: expert.avatar || avatarPresetConfig.DEFAULT
       };
-      editExpertiseTagInput.value = '';
       var mc = expert.modelConfig || null;
       var currentModel = (mc && mc.model) || expert.model || '';
       editManualModelConfig.value = {
@@ -98,32 +95,6 @@
       var file = e.target.files && e.target.files[0];
       if (window.readImageFile(file, function (url) { editForm.value.avatar = url; })) {
         e.target.value = '';
-      }
-    }
-
-    function addEditExpertiseTag() {
-      var tag = editExpertiseTagInput.value.trim();
-      if (!tag) return;
-      if (editForm.value.expertise.length >= 10) {
-        ElementPlus.ElMessage.warning('擅长领域最多添加 10 个');
-        return;
-      }
-      if (editForm.value.expertise.indexOf(tag) !== -1) {
-        ElementPlus.ElMessage.warning('该标签已存在');
-        return;
-      }
-      editForm.value.expertise = editForm.value.expertise.concat([tag]).slice(0, 10);
-      editExpertiseTagInput.value = '';
-    }
-
-    function removeEditExpertiseTag(tag) {
-      editForm.value.expertise = editForm.value.expertise.filter(function (t) { return t !== tag; });
-    }
-
-    function onEditExpertiseTagKeydown(e) {
-      if (e.key === 'Enter') {
-        e.preventDefault();
-        addEditExpertiseTag();
       }
     }
 
@@ -197,8 +168,7 @@
       var updated = Object.assign({}, expert, {
         name: editForm.value.name.trim(),
         description: editForm.value.description.trim(),
-        avatar: editForm.value.avatar || expert.avatar,
-        expertise: editForm.value.expertise.slice(0, 10)
+        avatar: editForm.value.avatar || expert.avatar || avatarPresetConfig.DEFAULT
       });
       if (modelChanged) {
         updated.modelConfig = updatedModelConfig;
@@ -222,7 +192,6 @@
       showEditDialog: showEditDialog,
       editForm: editForm,
       editAvatarInput: editAvatarInput,
-      editExpertiseTagInput: editExpertiseTagInput,
       editModelInputMode: editModelInputMode,
       editSelectedModelId: editSelectedModelId,
       editManualModelConfig: editManualModelConfig,
@@ -235,9 +204,6 @@
       closeEditDialog: closeEditDialog,
       triggerEditAvatarUpload: triggerEditAvatarUpload,
       handleEditAvatarChange: handleEditAvatarChange,
-      addEditExpertiseTag: addEditExpertiseTag,
-      removeEditExpertiseTag: removeEditExpertiseTag,
-      onEditExpertiseTagKeydown: onEditExpertiseTagKeydown,
       submitEdit: submitEdit
     };
   };
@@ -246,25 +212,20 @@
     props: {
       visible: { type: Boolean, default: false },
       form: { type: Object, required: true },
-      tagInput: { type: String, default: '' },
+      avatarPresets: { type: Array, default: function () { return avatarPresetConfig.list; } },
       headerTitle: { type: String, default: '编辑专家' },
       headerSubtitle: { type: String, default: '修改专家基本信息与默认模型配置' },
-      tagColors: { type: Array, default: function () { return window.TAG_COLORS || []; } },
       modelInputMode: { type: String, default: 'platform' },
       selectedModelId: { type: String, default: '' },
       manualModelConfig: { type: Object, required: true }
     },
     emits: [
       'update:visible',
-      'update:tagInput',
       'update:modelInputMode',
       'update:selectedModelId',
       'submit',
       'closed',
-      'avatar-change',
-      'add-tag',
-      'remove-tag',
-      'tag-keydown'
+      'avatar-change'
     ],
     setup: function (props, ctx) {
       var editAvatarInput = Vue.ref(null);
@@ -281,22 +242,6 @@
         ctx.emit('avatar-change', e);
       }
 
-      function updateTagInput(val) {
-        ctx.emit('update:tagInput', val);
-      }
-
-      function removeTag(tag) {
-        ctx.emit('remove-tag', tag);
-      }
-
-      function onTagKeydown(e) {
-        ctx.emit('tag-keydown', e);
-      }
-
-      function addTag() {
-        ctx.emit('add-tag');
-      }
-
       function onModelInputMode(val) {
         ctx.emit('update:modelInputMode', val || 'platform');
       }
@@ -310,10 +255,6 @@
         close: close,
         triggerAvatarUpload: triggerAvatarUpload,
         handleAvatarChange: handleAvatarChange,
-        updateTagInput: updateTagInput,
-        removeTag: removeTag,
-        onTagKeydown: onTagKeydown,
-        addTag: addTag,
         onModelInputMode: onModelInputMode,
         onSelectedModelId: onSelectedModelId
       };
@@ -340,6 +281,7 @@
         </template>\
         <div class="form-dialog-body">\
           <div class="create-basic-hero">\
+            <div class="expert-avatar-column">\
             <div class="create-basic-avatar-card create-avatar-upload" role="button" tabindex="0" @click="triggerAvatarUpload" @keydown.enter="triggerAvatarUpload">\
               <input ref="editAvatarInput" type="file" accept="image/*" class="create-avatar-input" @change="handleAvatarChange" @click.stop>\
               <div v-if="form.avatar" class="create-avatar-preview-wrap">\
@@ -357,41 +299,21 @@
                 <span class="create-avatar-empty-hint">支持 JPG、PNG，最大 2MB</span>\
               </div>\
             </div>\
+            <div class="expert-avatar-presets">\
+              <div class="expert-avatar-presets-head"><span>预置头像</span></div>\
+              <div class="expert-avatar-presets-list" role="group" aria-label="预置头像">\
+                <button v-for="preset in avatarPresets" :key="preset.id" type="button" class="expert-avatar-preset" :class="{ \'is-selected\': form.avatar === preset.src }" :aria-label="preset.label" :aria-pressed="form.avatar === preset.src" :title="preset.label" @click="form.avatar = preset.src"><img :src="preset.src" :alt="preset.label"></button>\
+              </div>\
+            </div>\
+            </div>\
             <el-form label-position="top" class="form-dialog-form create-basic-form">\
               <el-form-item label="专家名称" required>\
                 <el-input :model-value="form.name" @update:model-value="form.name = $event" placeholder="如：首席工艺专家" size="large" />\
               </el-form-item>\
               <el-form-item label="专家介绍" required>\
-                <el-input :model-value="form.description" @update:model-value="form.description = $event" type="textarea" :rows="3" placeholder="简要描述专家能力与经验背景" />\
+                <el-input :model-value="form.description" @update:model-value="form.description = $event" type="textarea" :rows="6" placeholder="简要描述专家能力与经验背景" />\
               </el-form-item>\
             </el-form>\
-          </div>\
-          <div class="expertise-tag-editor">\
-            <div class="expertise-tag-editor-head">\
-              <span class="expertise-tag-editor-label">擅长领域</span>\
-              <span class="expertise-tag-editor-optional">选填</span>\
-            </div>\
-            <div v-if="form.expertise.length" class="expertise-tag-chips">\
-              <span\
-                v-for="(tag, idx) in form.expertise"\
-                :key="tag"\
-                class="expertise-tag-chip expertise-tag"\
-                :class="tagColors[idx % tagColors.length]">\
-                {{ tag }}\
-                <button type="button" class="expertise-tag-chip-remove" title="移除" @click="removeTag(tag)">\
-                  <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M18 6L6 18M6 6l12 12"/></svg>\
-                </button>\
-              </span>\
-            </div>\
-            <div class="expertise-tag-input-row">\
-              <el-input\
-                :model-value="tagInput"\
-                @update:model-value="updateTagInput"\
-                placeholder="输入领域标签，按 Enter 添加"\
-                @keydown="onTagKeydown" />\
-              <el-button type="primary" plain @click="addTag">添加</el-button>\
-            </div>\
-            <p class="form-dialog-hint expertise-tag-hint">可添加多个标签，如「SPC」「良率分析」「工艺优化」</p>\
           </div>\
           <div class="edit-model-section">\
             <model-config-section\
@@ -416,42 +338,33 @@
   window.ExpertEditPageDialog = {
     props: {
       edit: { type: Object, required: true },
-      headerTitle: { type: String, default: '编辑专家' },
-      tagColors: { type: Array, default: function () { return window.TAG_COLORS || []; } }
+      headerTitle: { type: String, default: '编辑专家' }
     },
     setup: function (props) {
       return {
         showEditDialog: props.edit.showEditDialog,
         editForm: props.edit.editForm,
-        editExpertiseTagInput: props.edit.editExpertiseTagInput,
+        avatarPresets: avatarPresetConfig.list,
         editModelInputMode: props.edit.editModelInputMode,
         editSelectedModelId: props.edit.editSelectedModelId,
         editManualModelConfig: props.edit.editManualModelConfig,
         resetEditForm: props.edit.resetEditForm,
         submitEdit: props.edit.submitEdit,
         handleEditAvatarChange: props.edit.handleEditAvatarChange,
-        addEditExpertiseTag: props.edit.addEditExpertiseTag,
-        removeEditExpertiseTag: props.edit.removeEditExpertiseTag,
-        onEditExpertiseTagKeydown: props.edit.onEditExpertiseTagKeydown,
-        headerTitle: Vue.computed(function () { return props.headerTitle; }),
-        tagColors: Vue.computed(function () { return props.tagColors; })
+        headerTitle: Vue.computed(function () { return props.headerTitle; })
       };
     },
     template: '\
       <expert-edit-dialog\
         v-model:visible="showEditDialog"\
         :form="editForm"\
-        v-model:tag-input="editExpertiseTagInput"\
+        :avatar-presets="avatarPresets"\
         :header-title="headerTitle"\
-        :tag-colors="tagColors"\
         v-model:model-input-mode="editModelInputMode"\
         v-model:selected-model-id="editSelectedModelId"\
         :manual-model-config="editManualModelConfig"\
         @submit="submitEdit"\
         @closed="resetEditForm"\
-        @avatar-change="handleEditAvatarChange"\
-        @add-tag="addEditExpertiseTag"\
-        @remove-tag="removeEditExpertiseTag"\
-        @tag-keydown="onEditExpertiseTagKeydown" />'
+        @avatar-change="handleEditAvatarChange" />'
   };
 })();
