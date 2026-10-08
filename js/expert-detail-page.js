@@ -68,6 +68,13 @@
       var skillBindings = Vue.ref([]);
       var toolBindings = Vue.ref([]);
       var mcpServers = Vue.ref([]);
+      var mcpSearchQuery = Vue.ref('');
+      var filteredMcpServers = Vue.computed(function () {
+        var query = mcpSearchQuery.value.trim().toLocaleLowerCase();
+        return query ? mcpServers.value.filter(function (server) {
+          return String(server.name || '').toLocaleLowerCase().includes(query);
+        }) : mcpServers.value;
+      });
       var mcpSaving = Vue.ref(false);
       var mcpTesting = Vue.ref(false);
       var mcpRowTestingName = Vue.ref('');
@@ -3568,6 +3575,8 @@
         capabilitiesLoading: capabilitiesLoading,
         // MCP Tab
         mcpServers: mcpServers,
+        mcpSearchQuery: mcpSearchQuery,
+        filteredMcpServers: filteredMcpServers,
         mcpSaving: mcpSaving,
         mcpTesting: mcpTesting,
         mcpRowTestingName: mcpRowTestingName,
@@ -4090,15 +4099,21 @@
                       <span class="detail-action-bar-label">已启用 {{ mcpEnabledCount }} 项<span v-if="mcpNeedsAttentionCount"> · 其中 {{ mcpNeedsAttentionCount }} 项需处理</span></span>\
                     </div>\
                     <div class="detail-action-right">\
+                      <el-input v-model="mcpSearchQuery" placeholder="搜索 MCP 服务名称" aria-label="按名称搜索 MCP 服务" size="small" clearable class="skill-toolbar-search" />\
                       <el-button type="primary" size="small" @click="openMcpPlatformImportDialog">从平台导入</el-button>\
+                      <el-button size="small" @click="openMcpForm">添加</el-button>\
                     </div>\
                   </div>\
                   <div v-if="mcpServers.length === 0" class="profile-empty-state">\
                     <p class="profile-empty-title">尚未连接 MCP 服务</p>\
                     <p class="profile-empty-desc">可从平台导入 GitHub、数据库、文件系统等服务。</p>\
                   </div>\
+                  <div v-else-if="filteredMcpServers.length === 0" class="profile-empty-state">\
+                    <p class="profile-empty-title">没有匹配的 MCP 服务</p>\
+                    <p class="profile-empty-desc">试试其他服务名称。</p>\
+                  </div>\
                   <div v-else class="capability-card-grid">\
-                    <article v-for="row in mcpServers" :key="row.name" class="capability-card" :class="{ \'is-disabled\': row.enabled === false }" role="button" tabindex="0" :aria-label="\'查看 MCP 服务 \' + row.name + \' 详情\'" @click="openMcpDetail(row)" @keydown.enter.prevent="openMcpDetail(row)" @keydown.space.prevent="openMcpDetail(row)">\
+                    <article v-for="row in filteredMcpServers" :key="row.name" class="capability-card" :class="{ \'is-disabled\': row.enabled === false }" role="button" tabindex="0" :aria-label="\'查看 MCP 服务 \' + row.name + \' 详情\'" @click="openMcpDetail(row)" @keydown.enter.prevent="openMcpDetail(row)" @keydown.space.prevent="openMcpDetail(row)">\
                       <div class="capability-card-head">\
                         <strong class="capability-card-title" :title="row.name">{{ row.name }}</strong>\
                         <span class="capability-card-switch" @click.stop @keydown.stop><el-switch :model-value="row.enabled !== false" :disabled="mcpSaving" size="small" :aria-label="(row.enabled === false ? \'启用\' : \'停用\') + row.name" @change="(v) => toggleMcpEnabled(row, v)" /></span>\

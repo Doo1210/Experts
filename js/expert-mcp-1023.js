@@ -4,7 +4,13 @@
   window.ExpertMcp1023 = {
     props: ['expertId', 'runningCount'],
     setup: function (props) {
-      var servers = Vue.ref([]), jsonText = Vue.ref(''), importDialog = Vue.ref(false);
+      var servers = Vue.ref([]), searchQuery = Vue.ref(''), jsonText = Vue.ref(''), importDialog = Vue.ref(false);
+      var filteredServers = Vue.computed(function () {
+        var query = searchQuery.value.trim().toLocaleLowerCase();
+        return query ? servers.value.filter(function (server) {
+          return String(server.name || '').toLocaleLowerCase().includes(query);
+        }) : servers.value;
+      });
       var platformTab = Vue.ref('imported'), platformSelected = Vue.ref({}), platformTableRef = Vue.ref(null);
       var platformImporting = Vue.ref(false), platformSelectionSyncing = false;
       var detailVisible = Vue.ref(false), detailServer = Vue.ref(null);
@@ -392,7 +398,7 @@
         if (server.status === 'unavailable') return server.errorSummary || '连接失败';
         return '未测试';
       }
-      return { servers: servers, jsonText: jsonText, importDialog: importDialog,
+      return { servers: servers, filteredServers: filteredServers, searchQuery: searchQuery, jsonText: jsonText, importDialog: importDialog,
         platformTab: platformTab, platformOptions: platformOptions, platformTableRef: platformTableRef,
         platformSelectedCount: platformSelectedCount, platformImporting: platformImporting,
         openPlatformImport: openPlatformImport, onPlatformSelectionChange: onPlatformSelectionChange,
@@ -415,10 +421,11 @@
     template: `
       <div class="detail-tab-pane mcp-1023">
         <div class="detail-section-head"><h3 class="detail-section-title">MCP</h3><p class="detail-section-desc">添加 Streamable HTTP、SSE 或本地命令服务，也可粘贴配置或从平台导入。变更在新会话生效。</p></div>
-        <div class="mcp-1023-bar"><span>已启用 {{ servers.filter(s => s.enabled).length }} 台 · 需处理 {{ servers.filter(s => s.enabled && s.status !== 'available').length }} 台</span><div class="mcp-1023-bar-actions"><el-button type="primary" size="small" @click="openPlatformImport">从平台导入</el-button><el-button size="small" @click="openAdd">添加</el-button></div></div>
+        <div class="mcp-1023-bar"><span>已启用 {{ servers.filter(s => s.enabled).length }} 台 · 需处理 {{ servers.filter(s => s.enabled && s.status !== 'available').length }} 台</span><div class="mcp-1023-bar-actions"><el-input v-model="searchQuery" class="mcp-1023-search" size="small" clearable placeholder="搜索 MCP 服务名称" aria-label="按名称搜索 MCP 服务" /><el-button type="primary" size="small" @click="openPlatformImport">从平台导入</el-button><el-button size="small" @click="openAdd">添加</el-button></div></div>
         <el-empty v-if="!servers.length" description="尚未接入 MCP 服务，可添加或导入 mcp.json" />
+        <el-empty v-else-if="!filteredServers.length" description="没有匹配的 MCP 服务" />
         <div v-else class="capability-card-grid">
-          <article v-for="server in servers" :key="server.name" class="capability-card" :class="{ 'is-disabled': server.enabled === false }" role="button" tabindex="0" :aria-label="'查看 MCP 服务 ' + server.name + ' 详情'" @click="openDetail(server)" @keydown.enter.prevent="openDetail(server)" @keydown.space.prevent="openDetail(server)">
+          <article v-for="server in filteredServers" :key="server.name" class="capability-card" :class="{ 'is-disabled': server.enabled === false }" role="button" tabindex="0" :aria-label="'查看 MCP 服务 ' + server.name + ' 详情'" @click="openDetail(server)" @keydown.enter.prevent="openDetail(server)" @keydown.space.prevent="openDetail(server)">
             <div class="capability-card-head"><strong class="capability-card-title" :title="server.name">{{ server.name }}</strong><span class="capability-card-switch" @click.stop @keydown.stop><el-switch :model-value="server.enabled !== false" size="small" :aria-label="(server.enabled === false ? '启用' : '停用') + server.name" @change="(v) => toggle(server, v)" /></span></div>
             <p class="capability-card-desc" :title="server.type === 'stdio' ? (server.command || '') : (server.url || '')">{{ connectionLabel(server) }} · {{ server.type === 'stdio' ? (server.command || '命令未填写') : (server.url || '连接地址未填写') }}</p>
             <div class="capability-card-foot"><span class="capability-card-meta" :class="server.status === 'available' ? 'capability-card-state--ok' : server.status === 'unavailable' || (server.missingEnv && server.missingEnv.length) ? 'capability-card-state--warn' : ''">{{ status(server) }}</span><span class="capability-card-menu" @click.stop @keydown.stop><el-dropdown trigger="click" @command="(cmd) => onCardAction(cmd, server)"><button type="button" class="capability-card-more" :aria-label="'更多操作：' + server.name">⋯</button><template #dropdown><el-dropdown-menu><el-dropdown-item command="test">测试连通</el-dropdown-item><el-dropdown-item command="configure">配置操作</el-dropdown-item><el-dropdown-item command="delete" divided>删除服务</el-dropdown-item></el-dropdown-menu></template></el-dropdown></span></div>

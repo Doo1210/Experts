@@ -34,10 +34,9 @@
 .soul-preset-hint { color: #98a5b8; margin-left: auto; font-size: 12px; }
 .soul-toolbar { display: flex; align-items: flex-end; justify-content: space-between; gap: 15px; border-bottom: 1px solid #e5eaf2; margin-bottom: 16px; }
 .soul-tabs { display: flex; align-items: center; gap: 27px; }
-.soul-tab { appearance: none; position: relative; display: inline-flex; align-items: center; gap: 7px; background: none; border: 0; border-bottom: 2px solid transparent; padding: 11px 1px 12px; color: #65748a; font: inherit; font-size: 14px; cursor: pointer; }
+.soul-tab { appearance: none; position: relative; display: inline-flex; align-items: center; background: none; border: 0; border-bottom: 2px solid transparent; padding: 11px 1px 12px; color: #65748a; font: inherit; font-size: 14px; cursor: pointer; }
 .soul-tab:hover, .soul-tab.active { color: #3479f6; }
 .soul-tab.active { border-bottom-color: #3f82ff; font-weight: 600; }
-.soul-tab i { display: block; width: 6px; height: 6px; border-radius: 50%; background: #5dbd82; }
 .soul-actions { display: flex; align-items: center; gap: 7px; padding-bottom: 8px; }
 .soul-source-input textarea { min-height: 360px !important; padding: 18px 20px; border-color: #e2e8f2; font-family: ui-monospace, SFMono-Regular, Consolas, 'Microsoft YaHei', monospace; font-size: 13px; line-height: 1.75; resize: vertical; }
 .soul-footer { display: flex; justify-content: space-between; gap: 15px; color: #8290a3; font-size: 12px; margin-top: 10px; }
@@ -14657,4 +14656,101 @@ body {
   .project-workspace-directory-tab .workspace-list-item .workspace-list-type-cell::before { content: '类型 · '; color: #96a3b5; }
   .project-workspace-directory-tab .workspace-list-item .workspace-list-time-cell::before { content: '更新 · '; color: #96a3b5; }
   .project-workspace-directory-tab .workspace-list-item .workspace-list-size-cell::before { content: '大小 · '; color: #96a3b5; }
+}
+
+/* 专家管理：整项能力开关、列表操作栏和两级内容导航。 */
+.expert-manage-workspace .soul-1023.expert-config-page { gap: 0; }
+.expert-manage-workspace .memory-tab .memory-1023-switch { margin-top: 4px; }
+.expert-manage-workspace :is(.soul-preset-card, .memory-1023-switch, .skill-learning-control) {
+  min-height: 54px;
+  margin: 0;
+  padding: 7px 14px;
+  border: 1px solid #dce7f5;
+  border-radius: 10px;
+  background: #f7faff;
+}
+.expert-manage-workspace :is(.soul-preset-copy h3, .memory-1023-switch strong, .skill-learning-control strong) {
+  margin: 0;
+  color: #28384e;
+  font-size: 13px;
+  font-weight: 650;
+  line-height: 1.45;
+}
+.expert-manage-workspace .skill-learning-control > div {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+.expert-manage-workspace .skill-learning-control p {
+  min-width: 0;
+  overflow: hidden;
+  margin: 0;
+  color: #7f8da1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.expert-manage-workspace .skill-learning-control .el-switch { flex: 0 0 auto; margin-left: auto; }
+.expert-manage-workspace :is(.detail-action-bar, .task-1023 .task-1023-toolbar, .mcp-1023-bar) {
+  min-height: 54px;
+  margin-bottom: 0;
+  padding: 8px 14px;
+  border: 1px solid #e5eaf1;
+  border-radius: 10px;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(30, 52, 85, .03);
+}
+.expert-manage-workspace :is(.detail-action-bar-label, .task-1023-counts, .mcp-1023-bar > span) {
+  color: #28384e;
+  font-size: 13px;
+  font-weight: 600;
+}
+.expert-manage-workspace .skill-toolbar-search { width: 150px; }
+.expert-manage-workspace .skill-toolbar-channel { width: 130px; }
+.expert-manage-workspace .skill-toolbar .el-button + .el-button { margin-left: 0; }
+.mcp-1023-bar-actions { flex-wrap: wrap; }
+.mcp-1023-search { width: 190px; }
+.expert-manage-workspace .task-1023.detail-tab-pane { gap: 12px; }
+.expert-manage-workspace .task-1023 .task-1023-segments,
+.expert-manage-workspace .im-1023 .im-1023-nav {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  min-height: 52px;
+  margin: 0;
+  padding: 4px;
+  border-radius: 11px;
+  background: #f2f5fa;
+}
+.expert-manage-workspace .task-1023 .task-1023-segments { margin-top: 4px; }
+.expert-manage-workspace :is(.task-1023-segments button, .im-1023-nav button) {
+  min-height: 44px;
+  border-radius: 8px;
+  padding: 8px 16px;
+}
+.expert-manage-workspace .task-1023-segments button:focus-visible { outline: 2px solid #85b7ff; outline-offset: 1px; }
+.expert-manage-workspace .memory-tab .memory-sub-tabs {
+  border: 1px solid #e5eaf1;
+  border-radius: 10px;
+  background: #fff;
+  padding: 0 18px 14px;
+}
+.expert-manage-workspace .memory-sub-tabs .el-tabs__header {
+  margin-bottom: 12px;
+  border-bottom-color: #e5eaf2;
+}
+.expert-manage-workspace .memory-sub-tabs .el-tabs__item {
+  height: 44px;
+  padding: 0 14px;
+  font-family: inherit;
+  font-size: 14px;
+}
+.expert-manage-workspace .soul-tab.active { border-bottom-width: 3px; }
+.expert-manage-workspace .memory-sub-tabs .el-tabs__active-bar { height: 3px; }
+@media (max-width: 780px) {
+  .expert-manage-workspace .skill-learning-control > div { align-items: flex-start; flex-direction: column; gap: 4px; }
+  .expert-manage-workspace .skill-learning-control p { white-space: normal; }
+  .mcp-1023-bar-actions { width: 100%; margin-left: 0; }
+  .mcp-1023-search { flex: 1 1 180px; width: auto; }
 }

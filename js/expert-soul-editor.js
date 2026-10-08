@@ -140,7 +140,7 @@
           <section class="expert-config-card soul-editor-card" aria-label="岗位说明正文">
             <div class="soul-toolbar">
               <div class="soul-tabs" role="tablist" aria-label="岗位说明分段">
-                <button v-for="tab in tabs" :key="tab.key" type="button" role="tab" :aria-selected="active === tab.key" class="soul-tab" :class="{ active: active === tab.key }" @click="active = tab.key">{{ tab.label }}<i v-if="sections[tab.key].trim()"></i></button>
+                <button v-for="tab in tabs" :key="tab.key" type="button" role="tab" :aria-selected="active === tab.key" class="soul-tab" :class="{ active: active === tab.key }" @click="active = tab.key">{{ tab.label }}</button>
               </div>
               <div class="soul-actions">
                 <input ref="importInput" type="file" accept=".md,.markdown" hidden @change="importFile" />
