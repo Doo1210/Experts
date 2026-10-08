@@ -1437,7 +1437,7 @@ MCP 优化（§15） ── 专家 MCP Tab 增量；复用 Hermes 探针与 `.en
 
 ## 15. MCP 优化（导入 / 测通 / 填密钥）
 
-> 已拍板（2026-09-22）：1023 只补专家 MCP Tab 上最常用的三步——**粘贴 mcp.json 导入、测连通、填 Key**。不铺 Catalog、OAuth、工具过滤、TLS 等高级项。操作要短：有 JSON 时尽量 **粘贴 → 导入** 一次完成；缺密钥再弹 **一张表** 填齐。
+> 2026-10-08 更新：MCP Tab 保留「添加」与「从平台导入」两个入口。「添加外部 MCP 服务」内提供粘贴配置和手动添加；手动添加支持 Streamable HTTP、SSE、本地命令 stdio。粘贴导入保留原有传输方式，添加后自动测连通；缺密钥仍用一张表填齐。本期不做界面内 OAuth、工具过滤或 TLS 高级项。
 
 相对专家 MVP §8.11：列表 / 启停 / 简化添加 / 删除 / 红点 **保留**。本期加上导入与真探测，并把「填写密钥」收成一次填齐。不新增大核心 tool，不另造绑定表。
 
@@ -1445,52 +1445,28 @@ MCP 优化（§15） ── 专家 MCP Tab 增量；复用 Hermes 探针与 `.en
 
 | # | 决策 | 本期怎么做 |
 |---|---|---|
-| 1 | 主路径 | 粘贴 mcp.json → **导入**。无 JSON 时仍用 MVP「添加」表单 |
+| 1 | 主路径 | 「添加」弹窗内选择粘贴配置或手动添加；另设「从平台导入」选择已有服务 |
 | 2 | 导入形态 | **合并**进该专家已有 `mcp_servers`（不整表替换、不删 JSON 里没出现的服务器） |
 | 3 | 同名 | 导入内容 **覆盖** 同名条目；toast 写清覆盖了谁 |
 | 4 | 测连通 | **每行都有「测试连通」**（不限失败态）。导入成功或保存密钥后另做一次自动测 |
 | 5 | 填 / 改 Key | **每行都有「配置」**（填写或修改密钥）。缺密钥时导入后也会自动弹出同一张表；写入该专家 `.env`，yaml 里只留 `${VAR}` |
-| 6 | 高级项 | **不做**：Catalog、OAuth 登录、`tools.include/exclude`、mTLS / 自定义 CA、JSON 全文编辑器、npx 命令行 / deeplink 粘贴 |
+| 6 | 高级项 | **不做**：Hermes Catalog 一键安装、OAuth 登录、`tools.include/exclude`、mTLS / 自定义 CA、JSON 全文编辑器、npx 命令行 / deeplink 粘贴 |
 | 7 | 生效 | **新会话**（MCP 工具进 schema）。不默认 `/reload-mcp` |
 | 8 | 删除 | 仍不清理 `.env`（同 MVP） |
 
 ### 15.1 用户怎么走（步数要少）
 
-有 mcp.json（文档、Cursor/Claude 导出、同事转发）时，目标是 **两步以内**：
+MCP Tab 顶部保留「添加」和「从平台导入」。从平台导入使用与技能 Tab 相同的选择弹窗，按「我导入的／我创建的」筛选并批量选择已有服务；它与 Hermes Catalog 一键安装不是同一能力。
 
-```text
-MCP Tab
-接入外部 MCP 服务。把 mcp.json 贴进来即可，缺密钥再填一次。
+「添加外部 MCP 服务」弹窗内分「粘贴配置／手动添加」两页：
 
-[ 粘贴 mcp.json 的文本框                              ]
-[ 导入 ]
+1. **粘贴配置**：接受 mcp.json 的三种外壳格式；解析预览列出服务名与 Streamable HTTP、SSE 或 stdio。导入按名称合并，同名覆盖，JSON 未提及的服务保留。解析失败不写盘。
+2. **手动添加**：连接方式提供 Streamable HTTP、SSE、本地命令 stdio 三选一。前两项填写服务地址与认证信息；stdio 填启动命令、参数和环境变量。确认按钮为「添加并测试」。
+3. **从平台导入**：从平台已有服务选择；导入后保留原 transport，并对启用的服务逐台测试。缺密钥时继续使用一次填齐的密钥表。
 
-已启用 N 台 · 需处理 M 台                 [添加]
+列表使用卡片：右上角开关负责启停，卡片主体打开详情；详情区分启用状态与连接状态，展示实际发现的能力。右下角更多操作包括「测试连通」「配置操作」「删除服务」。测试与配置都进入同一详情弹窗，连接失败摘要保持可见。配置修改暂存，保存后自动测试并提示新会话生效。
 
-| 名称        | 类型  | 状态           | 操作 |
-| github      | stdio | 🟢 正常        | 测试连通  配置  禁用  删除 |
-| company-api | HTTP  | 🔴 未配置密钥  | 测试连通  配置  禁用  删除 |
-| old-svc     | HTTP  | — 已禁用       | 测试连通  配置  启用  删除 |
-```
-
-1. 把 JSON 贴进文本框，点 **导入**。解析失败：不写盘，toast 说明原因。成功：合并写入，清空文本框，toast「已导入 A、B；覆盖了 B」。
-2. 若有引用了但 `.env` 里还空的变量：马上弹出 **填写密钥**（列出本次缺的全部变量，标所属服务器）。填完保存 → 自动再测。JSON 里已是明文 token 的，导入时抽进 `.env`，**不必再填**。
-3. 测通结果写在行上：🟢 正常 / 🔴 连接失败（短错误）/ 🔴 未配置密钥。OAuth 条目显示「需 OAuth，本期请用 CLI `hermes mcp login <名>`」，不在 UI 里走浏览器登录。
-
-**列表每行固定四个操作**（状态再差也不藏）：
-
-| 操作 | 谁能点 | 做什么 |
-|---|---|---|
-| **测试连通** | 每一行（含已禁用） | 只测这一台，结果写回该行状态 |
-| **配置** | 每一行 | 打开该服务器用到的变量表：**未配置则填写，已配置可修改** |
-| 禁用 / 启用 | 每一行 | 同 MVP |
-| 删除 | 每一行 | 同 MVP；不清理 `.env` |
-
-文案：列表按钮叫「配置」，不要拆成「填写 / 修改」两个按钮。无关联变量的服务器（纯本地 filesystem、无 env/header）：点「配置」toast「这台服务没有需要填写的密钥」，不要空白弹窗。
-
-不要：先选类型、再填 URL、再勾密钥、再点测试、再进详情。测通和改密钥都在列表上完成。
-
-无 JSON：继续 MVP「添加」（名称 + HTTP/stdio + URL 或 command/args/env）。保存后同样 **自动测**；缺密钥走同一张表。
+测试必须调用该专家 profile 的 Hermes 探针并获取工具列表；原型中的模拟结果仅用于页面演示。已禁用服务可手动测试，批量导入时只自动测试本次导入且已启用的服务。OAuth 条目仍提示使用 CLI `hermes mcp login <名>`。
 
 ### 15.2 粘贴格式（只收 JSON）
 
@@ -1502,7 +1478,7 @@ MCP Tab
 
 也认 `mcp_servers`（Hermes 自己的键名）以及 **没有外壳、直接 name→config** 的 map。单台服务器对象（有 `command` 或 `url` 但没有名字）**拒绝**，toast：「需要服务器名称，请包成 `{"mcpServers": {"名字": {…}}}`」。
 
-每条必须有 `command`（stdio）或 `url`（HTTP），不能两个都无。其它键按 Hermes 原样写入（`args` / `env` / `headers` / `auth` / `enabled`）。`timeout`、`tools`、`ssl_verify` 等若 JSON 里有就存，**UI 不编辑**。
+每条必须有 `command`（stdio）或 `url`（Streamable HTTP / SSE），不能两个都无。`url` 未指定 `transport: sse` 时按 Streamable HTTP 处理；指定 `transport: sse` 时保留 SSE；`command` 按 stdio 处理。其它键按 Hermes 原样写入（`args` / `env` / `headers` / `auth` / `enabled`）。`timeout`、`tools`、`ssl_verify` 等若 JSON 里有就存，**UI 不编辑**。
 
 名字写入 `mcp_servers` 的 key：转成小写，只留 `a-z0-9_-`；非法字符变 `-`。改名时 toast「`Foo Bar` → `foo-bar`」。重名（含改名后撞上已有）走覆盖规则。
 
@@ -1555,10 +1531,10 @@ MCP Tab
 
 ### 15.6 明确不做
 
-- Catalog 一键安装、`hermes mcp install`
+- Hermes Catalog 一键安装、`hermes mcp install`（平台已有服务的选择导入在本期支持）
 - UI 内 OAuth（`mcp login`、Dashboard 授权流）
 - 工具勾选 `tools.include` / `exclude`（JSON 带来的过滤原样保留，界面不改）
-- mTLS、自定义 CA、`ssl_verify`、SSE 传输切换
+- mTLS、自定义 CA、`ssl_verify`
 - 整份 mcp.json 双向编辑器（只要导入，不要当配置 IDE）
 - 粘贴 npx / deeplink / `import-agent`
 - 导入后默认 `/reload-mcp` 或中途改系统提示词

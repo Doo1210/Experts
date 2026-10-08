@@ -97,10 +97,10 @@ Hermes Agent 本地源码仓库：`D:/CodingWorkSpace/PublicProjects/hermes-agen
 
 对应 [prd.md §15](./prd.md#15-mcp-优化导入--测通--填密钥)。
 
-- 保留原有列表、启停、简化添加和删除，增加**粘贴 mcp.json 导入、测试连通、配置密钥**。导入按服务器名称合并；同名覆盖并提示，不删除 JSON 未提及的服务器。
-- 接受 `mcpServers`、`mcp_servers` 或名称到配置的 map；每项必须有 `command` 或 `url`。导入失败不写盘；缺密钥时用一张表一次填齐。
+- 保留原有列表、启停和删除；「添加」弹窗提供粘贴配置与手动添加，另有「从平台导入」选择已有服务。手动添加支持 Streamable HTTP、SSE、本地命令 stdio。导入按服务器名称合并；同名覆盖并提示，不删除 JSON 未提及的服务器。
+- 接受 `mcpServers`、`mcp_servers` 或名称到配置的 map；每项必须有 `command` 或 `url`。`url` 加 `transport: sse` 明确显示为 SSE，未指定时为 Streamable HTTP；`command` 为 stdio。导入失败不写盘；缺密钥时用一张表一次填齐。
 - 明文密钥写入该专家 `.env`，`config.yaml` 仅存变量引用；导入不覆盖已有非空密钥，列表不回传明文。每行始终有「测试连通」「配置」；导入或保存密钥后自动测受影响服务器。
-- 测试必须真实连接并获取工具列表。配置变更仅新会话生效。本期不做 Catalog 安装、界面内 OAuth、工具过滤编辑和 TLS 高级项。
+- 测试必须真实连接并获取工具列表。配置变更仅新会话生效。本期支持 SSE 传输切换与平台已有服务导入；不做 Hermes Catalog 一键安装、界面内 OAuth、工具过滤编辑和 TLS 高级项。
 
 #### 1.2.7 消息渠道 Tab 与在线状态
 

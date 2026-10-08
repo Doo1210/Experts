@@ -4830,7 +4830,10 @@
       var tid = String(toolId || '').trim();
       if (!tid) return Promise.resolve(null);
       var cfg = config || {};
-      var hasConfig = Object.keys(cfg).some(function (k) { return !!cfg[k]; });
+      var required = ((window.TOOL_PARAM_SCHEMAS || {})[tid] || []).filter(function (field) { return field.required; });
+      var hasConfig = required.length
+        ? required.every(function (field) { return !!String(cfg[field.key] || '').trim(); })
+        : Object.keys(cfg).some(function (k) { return k !== 'provider' && k !== 'toolOptions' && !!cfg[k]; });
       setToolsetConfigOverride(key, tid, {
         config: cfg,
         configured: hasConfig
@@ -4896,7 +4899,9 @@
         }
         var server = normalizeMcpServer({
           name: item.name, type: cfg.command ? 'stdio' : 'http', command: cfg.command || '',
-          args: cfg.args || [], url: cfg.url || '', env: env, auth: cfg.auth || '', enabled: cfg.enabled !== false,
+          transport: cfg.command ? '' : (String(cfg.transport || '').toLowerCase() === 'sse' ? 'sse' : 'streamable_http'),
+          args: cfg.args || [], url: cfg.url || '', env: env, auth: cfg.auth || (bearer ? 'bearer' : ''), enabled: cfg.enabled !== false,
+          tools: Array.isArray(cfg.tools) ? cfg.tools : [], toolCount: cfg.toolCount || (Array.isArray(cfg.tools) ? cfg.tools.length : 0),
           missingEnv: Object.keys(env).filter(function (envName) {
             var ref = String(env[envName]).match(/^\$\{([A-Za-z_][A-Za-z0-9_]*)\}$/);
             return !!ref && !configured[ref[1]];
@@ -4929,11 +4934,19 @@
       var server = this.getMcpServers(expertId).find(function (item) { return item.name === name; });
       if (!server) return null;
       var failed = /fail|invalid|offline/i.test(server.url || server.command);
+      var missingEndpoint = server.type === 'stdio' ? !server.command : !/^https?:\/\//i.test(server.url || '');
+      var tools = (server.tools || []).slice();
+      if (!tools.length && !failed && !missingEndpoint && !(server.missingEnv || []).length) {
+        ['search', 'get', 'list', 'export'].forEach(function (verb) {
+          tools.push({ name: server.name.replace(/-/g, '_') + '_' + verb, description: '由 ' + server.name + ' 提供的工具能力' });
+        });
+      }
       var patch = server.missingEnv.length
         ? { status: 'unavailable', errorSummary: '未配置密钥', testedAt: nowIso() }
         : server.auth === 'oauth' ? { status: 'unavailable', errorSummary: '需 OAuth，本期请用 CLI 登录', testedAt: nowIso() }
+        : missingEndpoint ? { status: 'unavailable', errorSummary: server.type === 'stdio' ? '启动命令缺失' : '服务地址无效', testedAt: nowIso() }
         : failed ? { status: 'unavailable', errorSummary: '连接失败：演示服务不可达', testedAt: nowIso() }
-          : { status: 'available', errorSummary: '', toolCount: server.toolCount || 4, testedAt: nowIso() };
+          : { status: 'available', errorSummary: '', toolCount: tools.length, tools: tools, testedAt: nowIso() };
       this.updateMcpServer(expertId, name, patch);
       return patch;
     },
@@ -4961,10 +4974,11 @@
       if (list.some(function (s) { return s.name === name; })) {
         return Promise.reject(new Error('已存在同名 MCP 服务器'));
       }
-      if (!(payload.url || '').trim()) {
-        return Promise.reject(new Error('请填写 URL'));
+      var isStdio = payload.transport === 'stdio' || !!(payload.command || '').trim();
+      if (isStdio ? !(payload.command || '').trim() : !(payload.url || '').trim()) {
+        return Promise.reject(new Error(isStdio ? '请填写启动命令' : '请填写 URL'));
       }
-      var transport = (payload.transport === 'sse') ? 'sse' : 'streamable_http';
+      var transport = isStdio ? '' : (payload.transport === 'sse' ? 'sse' : 'streamable_http');
       var env = {};
       var missingEnv = [];
       if (payload.envText) {
@@ -4984,11 +4998,12 @@
       var validation = payload.validation || {};
       list.push(normalizeMcpServer({
         name: name,
-        type: 'http',
+        type: isStdio ? 'stdio' : 'http',
         transport: transport,
-        url: payload.url || '',
-        command: '',
-        args: [],
+        url: isStdio ? '' : (payload.url || ''),
+        command: isStdio ? (payload.command || '') : '',
+        args: isStdio ? (payload.args || []) : [],
+        auth: payload.auth || '',
         env: env,
         enabled: payload.enabled !== false,
         missingEnv: missingEnv,
@@ -5016,10 +5031,11 @@
       if (list.some(function (s, i) { return i !== idx && s.name === name; })) {
         return Promise.reject(new Error('已存在同名 MCP 服务器'));
       }
-      if (!(payload.url || '').trim()) {
-        return Promise.reject(new Error('请填写 URL'));
+      var isStdio = payload.transport === 'stdio' || !!(payload.command || '').trim();
+      if (isStdio ? !(payload.command || '').trim() : !(payload.url || '').trim()) {
+        return Promise.reject(new Error(isStdio ? '请填写启动命令' : '请填写 URL'));
       }
-      var transport = (payload.transport === 'sse') ? 'sse' : 'streamable_http';
+      var transport = isStdio ? '' : (payload.transport === 'sse' ? 'sse' : 'streamable_http');
       var env = {};
       var missingEnv = [];
       if (payload.envText) {
@@ -5041,11 +5057,12 @@
       var validation = payload.validation || {};
       list[idx] = normalizeMcpServer(Object.assign({}, prev, {
         name: name,
-        type: 'http',
+        type: isStdio ? 'stdio' : 'http',
         transport: transport,
-        url: payload.url || '',
-        command: '',
-        args: [],
+        url: isStdio ? '' : (payload.url || ''),
+        command: isStdio ? (payload.command || '') : '',
+        args: isStdio ? (payload.args || []) : [],
+        auth: payload.auth || '',
         env: env,
         enabled: payload.enabled !== false,
         missingEnv: missingEnv,
@@ -5073,16 +5090,19 @@
     toggleMcpServerEnabled: function (expertId, name, enabled) {
       return this.updateMcpServer(expertId, name, { enabled: !!enabled });
     },
+    /** Prototype probe. Production must call the profile-scoped Hermes MCP test endpoint. */
     testMcpConnection: function (expertId, payload) {
       var p = payload || {};
       var name = String(p.name || '').trim();
       var url = String(p.url || '').trim();
+      var command = String(p.command || '').trim();
+      var isStdio = p.transport === 'stdio' || p.type === 'stdio' || !!command;
       if (!name) return Promise.reject(new Error('请填写服务器名称'));
       if (!/^[a-z0-9][a-z0-9_-]{0,63}$/.test(name)) {
         return Promise.reject(new Error('名称仅支持小写字母、数字、下划线和连字符'));
       }
-      if (!url) return Promise.reject(new Error('请填写 URL'));
-      if (!/^https?:\/\//i.test(url)) return Promise.reject(new Error('URL 须以 http:// 或 https:// 开头'));
+      if (isStdio ? !command : !url) return Promise.reject(new Error(isStdio ? '请填写启动命令' : '请填写 URL'));
+      if (!isStdio && !/^https?:\/\//i.test(url)) return Promise.reject(new Error('URL 须以 http:// 或 https:// 开头'));
 
       var missing = [];
       var env = p.env && typeof p.env === 'object' ? p.env : {};
@@ -5100,11 +5120,11 @@
 
       return new Promise(function (resolve) {
         setTimeout(function () {
-          var failedByUrl = /(legacy|invalid|unreachable|fail)/i.test(url);
-          if (missing.length || failedByUrl) {
+          var failedByEndpoint = /(legacy|invalid|unreachable|fail)/i.test(isStdio ? command : url);
+          if (missing.length || failedByEndpoint) {
             resolve({
               status: 'unavailable',
-              errorSummary: missing.length ? '认证信息不完整，请检查 ' + missing[0] : '连接超时，请检查服务地址',
+              errorSummary: missing.length ? '认证信息不完整，请检查 ' + missing[0] : isStdio ? '启动失败，请检查命令和参数' : '连接超时，请检查服务地址',
               toolCount: 0,
               tools: [],
               testedAt: new Date().toISOString()
