@@ -157,16 +157,37 @@
             </div>
           </section>
           </div>
-        <el-dialog v-model="presetDialog" title="配置预置问题" width="620px" append-to-body>
-          <p class="soul-dialog-intro">对话页点击「预置问题」后，可一键把问题填入输入框。</p>
-          <div class="soul-question-list">
-            <div v-for="(question, index) in presetDraft" :key="index" class="soul-question-row" draggable="true" @dragstart="onDragStart(index, $event)" @dragover.prevent @drop.prevent="onDrop(index)" @dragend="dragged = -1">
-              <span class="soul-drag-handle" title="拖拽排序">⋮⋮</span><el-input v-model="presetDraft[index]" maxlength="200" :placeholder="'预置问题 ' + (index + 1)" />
-              <el-button link type="danger" @click="presetDraft.splice(index, 1)">删除</el-button>
+        <el-dialog v-model="presetDialog" title="配置预置问题" width="680px" append-to-body class="form-dialog ed-dialog preset-questions-dialog soul-preset-dialog" :close-on-click-modal="false">
+          <template #header>
+            <div class="dialog-header-custom">
+              <div class="dialog-header-icon dialog-header-icon-preset">
+                <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+              </div>
+              <div class="dialog-header-text">
+                <div class="dialog-header-title">配置预置问题</div>
+                <div class="dialog-header-sub">对话页点击「预置问题」后，可一键把问题填入输入框</div>
+              </div>
+            </div>
+          </template>
+          <div class="form-dialog-body ed-dialog-body">
+            <div class="preset-question-list">
+              <div v-for="(question, index) in presetDraft" :key="index" class="preset-question-row" :class="{ 'is-dragging': dragged === index }" @dragover.prevent @drop.prevent="onDrop(index)">
+                <span class="preset-question-index">{{ index + 1 }}</span>
+                <el-input v-model="presetDraft[index]" maxlength="200" :placeholder="'预置问题 ' + (index + 1)" />
+                <button type="button" class="preset-question-drag" draggable="true" title="拖拽调整顺序" aria-label="拖拽调整顺序" @dragstart="onDragStart(index, $event)" @dragend="dragged = -1">⋮⋮</button>
+                <button type="button" class="preset-question-remove" title="删除" :aria-label="'删除预置问题 ' + (index + 1)" @click="presetDraft.splice(index, 1)">×</button>
+              </div>
+              <button type="button" class="preset-question-add" :disabled="presetDraft.length >= 20" @click="presetDraft.push('')">+ 添加问题</button>
             </div>
           </div>
-          <el-button link type="primary" :disabled="presetDraft.length >= 20" @click="presetDraft.push('')">+ 添加问题</el-button>
-          <template #footer><el-button @click="presetDialog = false">取消</el-button><el-button type="primary" @click="savePreset">保存</el-button></template>
+          <template #footer>
+            <div class="dialog-footer-custom dialog-footer-wizard memory-dialog-footer">
+              <div class="dialog-footer-actions">
+                <el-button class="wizard-btn wizard-btn-cancel" @click="presetDialog = false">取消</el-button>
+                <el-button type="primary" class="wizard-btn wizard-btn-submit wizard-btn-submit-expert" @click="savePreset">保存</el-button>
+              </div>
+            </div>
+          </template>
         </el-dialog>
       </div>`
   };

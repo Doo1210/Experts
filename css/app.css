@@ -944,7 +944,7 @@ body {
 }
 .expert-card-info {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr) auto minmax(0, 1fr);
+  grid-template-columns: minmax(0, .9fr) auto minmax(0, .9fr) auto minmax(0, 1.2fr);
   padding: 0 4px;
   color: #8b98a8;
   z-index: 1;
@@ -3375,6 +3375,7 @@ body {
   flex-shrink: 0;
 }
 .preset-questions-dialog.el-dialog { max-width: calc(100vw - 32px); }
+.soul-preset-dialog .form-dialog-body { padding: 16px 0 10px; }
 .preset-question-list { display: flex; flex-direction: column; gap: 10px; }
 .preset-question-row { display: flex; align-items: center; gap: 8px; }
 .preset-question-index {

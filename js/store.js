@@ -3956,7 +3956,7 @@
     return '当前用户';
   }
 
-  var PROTOTYPE_1023_SEED_VERSION = 3;
+  var PROTOTYPE_1023_SEED_VERSION = 4;
   var MOCK_EVENT_SOURCES = [
     { id: 'evt-daily-quality', name: '每日良率巡检', type: 'Timer', schedule: '每天 09:00' },
     { id: 'evt-equipment-alert', name: '设备异常告警', type: 'WebHook', schedule: '收到告警时' },
@@ -3983,6 +3983,7 @@
 
   function ensure1023MockSeed() {
     if (!DEV_MOCK || state.prototype1023SeedVersion === PROTOTYPE_1023_SEED_VERSION) return;
+    var previousSeedVersion = state.prototype1023SeedVersion || 0;
     state.imSessions = state.imSessions || {};
     state.imPrototypeConfigs = state.imPrototypeConfigs || {};
     state.autonomousActions = state.autonomousActions || {};
@@ -4062,6 +4063,27 @@
         });
       });
     });
+    if (previousSeedVersion < 4) {
+      // 专家卡片演示：前三张模板分别展示 3、2、1 个消息渠道，第四张保持未接入。
+      var channelExamples = {
+        'human-robot-collab': ['wecom', 'dingtalk', 'feishu'],
+        'ai-architect': ['wecom', 'feishu'],
+        'quality-system-advisor': ['dingtalk']
+      };
+      state.experts.forEach(function (expert) {
+        if (expert.origin !== 'template') return;
+        var desired = channelExamples[expert.slug] || [];
+        var configs = state.imPrototypeConfigs[String(expert.id)] || {};
+        desired.forEach(function (platform) {
+          var config = configs[platform];
+          if (!config || config.enabled || config.configured || config.connection !== 'unconfigured') return;
+          var hasCustomSettings = ['botId', 'clientId', 'robotCode', 'appId', 'home'].some(function (field) { return !!config[field]; }) ||
+            (config.people || []).length > 0 || (config.groups || []).length > 0;
+          if (hasCustomSettings) return;
+          configs[platform] = Object.assign({}, config, { enabled: true, configured: true, connection: 'connected' });
+        });
+      });
+    }
     state.prototype1023SeedVersion = PROTOTYPE_1023_SEED_VERSION;
     persist();
   }
