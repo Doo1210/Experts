@@ -4636,12 +4636,11 @@
               </div>\
               <div class="dialog-header-text">\
                 <div class="dialog-header-title">{{ mcpFormMode === \'edit\' ? \'编辑 MCP 服务\' : \'添加外部 MCP 服务\' }}</div>\
-                <div class="dialog-header-sub">添加到数字员工：{{ expert && expert.name }}</div>\
               </div>\
             </div>\
           </template>\
           <div class="form-dialog-body ed-dialog-body">\
-            <div v-if="mcpFormMode !== \'edit\'" class="hub-skill-tabs mcp-add-tabs" role="tablist"><button type="button" class="hub-skill-tab" :class="{ \'is-active\': mcpAddMode === \'paste\' }" role="tab" :aria-selected="mcpAddMode === \'paste\'" @click="mcpAddMode = \'paste\'">粘贴配置</button><button type="button" class="hub-skill-tab" :class="{ \'is-active\': mcpAddMode === \'manual\' }" role="tab" :aria-selected="mcpAddMode === \'manual\'" @click="mcpAddMode = \'manual\'">手动添加</button></div>\
+            <div v-if="mcpFormMode !== \'edit\'" class="hub-skill-tabs mcp-add-tabs" role="tablist"><button type="button" class="hub-skill-tab" :class="{ \'is-active\': mcpAddMode === \'manual\' }" role="tab" :aria-selected="mcpAddMode === \'manual\'" @click="mcpAddMode = \'manual\'">手动添加</button><button type="button" class="hub-skill-tab" :class="{ \'is-active\': mcpAddMode === \'paste\' }" role="tab" :aria-selected="mcpAddMode === \'paste\'" @click="mcpAddMode = \'paste\'">粘贴配置</button></div>\
             <div v-if="mcpFormMode !== \'edit\' && mcpAddMode === \'paste\'" class="mcp-1023-import"><el-input v-model="mcpPasteText" type="textarea" :rows="8" placeholder=\'粘贴 {"mcpServers": {"服务名": {"url": "https://..."}}}\' /><p class="mcp-1023-import-hint">支持 mcpServers、mcp_servers 或名称到配置的 JSON；SSE 会保留原传输方式。</p><p v-if="mcpPastePreview.error" class="mcp-add-preview-error">{{ mcpPastePreview.error }}</p><div v-else-if="mcpPastePreview.items.length" class="mcp-add-preview"><strong>将导入 {{ mcpPastePreview.items.length }} 项服务</strong><span v-for="item in mcpPastePreview.items" :key="item.name">{{ item.name }} · {{ item.transport }}</span></div></div>\
             <el-form v-else label-position="top" class="mcp-form form-dialog-form">\
               <el-form-item label="名称" required>\

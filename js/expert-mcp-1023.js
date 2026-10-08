@@ -8,7 +8,6 @@
       var platformTab = Vue.ref('imported'), platformSelected = Vue.ref({}), platformTableRef = Vue.ref(null);
       var platformImporting = Vue.ref(false), platformSelectionSyncing = false;
       var detailVisible = Vue.ref(false), detailServer = Vue.ref(null);
-      var profileName = Vue.computed(function () { return ((store.getExpert(props.expertId) || {}).name) || '当前数字员工'; });
       var detailDraft = Vue.ref(null), detailOriginal = Vue.ref('');
       var detailConfigOpen = Vue.ref(false), detailTesting = Vue.ref(false), detailSaving = Vue.ref(false);
       var detailTestResult = Vue.ref(null);
@@ -400,7 +399,7 @@
         importSelectedPlatform: importSelectedPlatform, connectionLabel: connectionLabel,
         addMode: addMode, canAdd: canAdd, pastePreview: pastePreview,
         detailVisible: detailVisible, detailServer: detailServer,
-        profileName: profileName, detailDraft: detailDraft, detailConfigOpen: detailConfigOpen,
+        detailDraft: detailDraft, detailConfigOpen: detailConfigOpen,
         detailTesting: detailTesting, detailSaving: detailSaving, detailTestResult: detailTestResult,
         detailDirty: detailDirty, detailSecretNames: detailSecretNames,
         detailConnectionLabel: detailConnectionLabel, detailConnectionError: detailConnectionError,
@@ -416,7 +415,7 @@
     template: `
       <div class="detail-tab-pane mcp-1023">
         <div class="detail-section-head"><h3 class="detail-section-title">MCP</h3><p class="detail-section-desc">添加 Streamable HTTP、SSE 或本地命令服务，也可粘贴配置或从平台导入。变更在新会话生效。</p></div>
-        <div class="mcp-1023-bar"><span>已启用 {{ servers.filter(s => s.enabled).length }} 台 · 需处理 {{ servers.filter(s => s.enabled && s.status !== 'available').length }} 台</span><div class="mcp-1023-bar-actions"><el-button size="small" @click="openAdd">添加</el-button><el-button size="small" @click="openPlatformImport">从平台导入</el-button></div></div>
+        <div class="mcp-1023-bar"><span>已启用 {{ servers.filter(s => s.enabled).length }} 台 · 需处理 {{ servers.filter(s => s.enabled && s.status !== 'available').length }} 台</span><div class="mcp-1023-bar-actions"><el-button type="primary" size="small" @click="openPlatformImport">从平台导入</el-button><el-button size="small" @click="openAdd">添加</el-button></div></div>
         <el-empty v-if="!servers.length" description="尚未接入 MCP 服务，可添加或导入 mcp.json" />
         <div v-else class="capability-card-grid">
           <article v-for="server in servers" :key="server.name" class="capability-card" :class="{ 'is-disabled': server.enabled === false }" role="button" tabindex="0" :aria-label="'查看 MCP 服务 ' + server.name + ' 详情'" @click="openDetail(server)" @keydown.enter.prevent="openDetail(server)" @keydown.space.prevent="openDetail(server)">
@@ -451,22 +450,21 @@
           <template #footer><div class="capability-detail-footer"><span>变更将在新会话生效</span><div><el-button @click="requestDetailClose">关闭</el-button><el-button type="primary" :disabled="!detailDirty" :loading="detailSaving" @click="saveDetail">保存</el-button></div></div></template>
         </el-dialog>
         <el-dialog v-model="importDialog" width="640px" append-to-body class="form-dialog capability-picker-dialog ed-dialog ed-dialog-hub ed-dialog-mcp-hub">
-          <template #header><div class="dialog-header-custom dialog-header-mcp"><div class="dialog-header-icon dialog-header-icon-mcp"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/><path d="M7 8h2M11 8h6M7 12h10"/></svg></div><div class="dialog-header-text"><div class="dialog-header-title">从平台导入 MCP 服务</div><div class="dialog-header-sub">选择平台中的服务，添加到当前数字员工</div></div></div></template>
+          <template #header><div class="dialog-header-custom dialog-header-mcp"><div class="dialog-header-icon dialog-header-icon-mcp"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/><path d="M7 8h2M11 8h6M7 12h10"/></svg></div><div class="dialog-header-text"><div class="dialog-header-title">从平台导入 MCP 服务</div><div class="dialog-header-sub">选择平台中的服务</div></div></div></template>
           <div class="form-dialog-body ed-dialog-body">
-            <div class="capability-detail-owner">添加到数字员工：{{ profileName }}</div>
             <div class="hub-skill-tabs" role="tablist"><button type="button" class="hub-skill-tab" :class="{ 'is-active': platformTab === 'imported' }" role="tab" :aria-selected="platformTab === 'imported'" @click="platformTab = 'imported'">我导入的</button><button type="button" class="hub-skill-tab" :class="{ 'is-active': platformTab === 'created' }" role="tab" :aria-selected="platformTab === 'created'" @click="platformTab = 'created'">我创建的</button></div>
             <el-table ref="platformTableRef" :data="platformOptions" row-key="id" stripe max-height="480" class="toolset-table capability-picker-table hub-skill-table" empty-text="暂无可导入的 MCP 服务" @selection-change="onPlatformSelectionChange">
               <el-table-column type="selection" width="48" align="center" />
-              <el-table-column label="MCP 服务" min-width="280"><template #default="{ row }"><div class="hub-skill-cell"><span class="hub-skill-icon" aria-hidden="true">{{ row.icon || '🔌' }}</span><span class="hub-skill-title">{{ row.nameZh || row.name || row.englishId }}<span class="hub-skill-eid">({{ connectionLabel(row) }})</span></span></div></template></el-table-column>
+              <el-table-column label="MCP 服务" min-width="280"><template #default="{ row }"><div class="hub-skill-cell"><span class="hub-skill-icon" aria-hidden="true">{{ row.icon || '🔌' }}</span><span class="hub-skill-title">{{ row.nameZh || row.name || row.englishId }}</span></div></template></el-table-column>
             </el-table>
           </div>
           <template #footer><div class="dialog-footer-custom dialog-footer-wizard hub-dialog-footer"><span class="hub-selected-count">已选择 <strong>{{ platformSelectedCount }}</strong> 项服务</span><div class="dialog-footer-actions"><el-button class="wizard-btn wizard-btn-cancel" :disabled="platformImporting" @click="importDialog = false">取消</el-button><el-button type="primary" class="wizard-btn wizard-btn-submit wizard-btn-submit-expert" :loading="platformImporting" :disabled="platformSelectedCount === 0" @click="importSelectedPlatform">导入</el-button></div></div></template>
         </el-dialog>
         <el-dialog v-model="secretDialog" title="配置密钥" width="540px" append-to-body><p class="mcp-1023-hint">密钥只在本次输入中使用，演示数据仅保存「已配置」状态，不保存明文。</p><el-form label-position="top"><el-form-item v-for="key in secretNames" :key="key" :label="key"><el-input v-model="secretValues[key]" type="password" show-password placeholder="已配置时留空则不修改" /></el-form-item></el-form><template #footer><el-button @click="secretDialog = false">取消</el-button><el-button type="primary" @click="saveSecrets">保存并测试</el-button></template></el-dialog>
         <el-dialog v-model="addDialog" width="640px" append-to-body class="form-dialog ed-dialog ed-dialog-mcp mcp-add-dialog" :close-on-click-modal="false">
-          <template #header><div class="dialog-header-custom dialog-header-mcp"><div class="dialog-header-icon dialog-header-icon-mcp"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/><path d="M7 8h2M11 8h6M7 12h10"/></svg></div><div class="dialog-header-text"><div class="dialog-header-title">添加外部 MCP 服务</div><div class="dialog-header-sub">添加到数字员工：{{ profileName }}</div></div></div></template>
+          <template #header><div class="dialog-header-custom dialog-header-mcp"><div class="dialog-header-icon dialog-header-icon-mcp"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/><path d="M7 8h2M11 8h6M7 12h10"/></svg></div><div class="dialog-header-text"><div class="dialog-header-title">添加外部 MCP 服务</div></div></div></template>
           <div class="form-dialog-body ed-dialog-body">
-            <div class="hub-skill-tabs mcp-add-tabs" role="tablist"><button type="button" class="hub-skill-tab" :class="{ 'is-active': addMode === 'paste' }" role="tab" :aria-selected="addMode === 'paste'" @click="addMode = 'paste'">粘贴配置</button><button type="button" class="hub-skill-tab" :class="{ 'is-active': addMode === 'manual' }" role="tab" :aria-selected="addMode === 'manual'" @click="addMode = 'manual'">手动添加</button></div>
+            <div class="hub-skill-tabs mcp-add-tabs" role="tablist"><button type="button" class="hub-skill-tab" :class="{ 'is-active': addMode === 'manual' }" role="tab" :aria-selected="addMode === 'manual'" @click="addMode = 'manual'">手动添加</button><button type="button" class="hub-skill-tab" :class="{ 'is-active': addMode === 'paste' }" role="tab" :aria-selected="addMode === 'paste'" @click="addMode = 'paste'">粘贴配置</button></div>
             <div v-if="addMode === 'paste'" class="mcp-1023-import"><el-input v-model="jsonText" type="textarea" :rows="8" placeholder='粘贴 {"mcpServers": {"服务名": {"url": "https://..."}}}' /><p class="mcp-1023-import-hint">支持 mcpServers、mcp_servers 或名称到配置的 JSON；SSE 会保留原传输方式。</p><p v-if="pastePreview.error" class="mcp-add-preview-error">{{ pastePreview.error }}</p><div v-else-if="pastePreview.items.length" class="mcp-add-preview"><strong>将导入 {{ pastePreview.items.length }} 项服务</strong><span v-for="item in pastePreview.items" :key="item.name">{{ item.name }} · {{ item.transport }}</span></div></div>
             <el-form v-else label-position="top" class="mcp-add-form">
               <el-form-item label="服务名称" required><el-input v-model="addForm.name" placeholder="company-api" maxlength="64" /></el-form-item>

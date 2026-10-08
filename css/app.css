@@ -166,7 +166,7 @@
 .mcp-add-tabs { margin-bottom: 14px; }
 .mcp-add-form .el-form-item { margin-bottom: 12px; }
 .mcp-add-form .el-form-item__label { color: #52647c; font-size: 12px; font-weight: 600; }
-.mcp-add-transport { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; padding: 2px 0; }
+.mcp-add-transport { display: flex; flex-direction: row; flex-wrap: wrap; align-items: center; gap: 8px 24px; padding: 2px 0; }
 .mcp-add-transport .el-radio { margin-right: 0; min-height: 24px; }
 .mcp-add-transport-field, .mcp-add-env-field { grid-column: 1 / -1; }
 .mcp-add-enabled { display: flex; align-items: center; gap: 9px; color: #6f8096; font-size: 12px; }
