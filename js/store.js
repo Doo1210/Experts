@@ -80,6 +80,24 @@
     return params;
   }
 
+  // Explicit prototype fixtures. Legacy provenance alone is not evidence of a product channel.
+  var DEMO_SKILL_CHANNELS = {
+    'apple-notes': 'platform_import',
+    'skill-ehs': 'expert_template',
+    'skill-integration': 'local_upload',
+    'skill-energy': 'learned',
+    'skill-yield': 'expert_template',
+    'skill-spc': 'learned',
+    'skill-vision': 'local_upload',
+    'skill-pm': 'platform_import',
+    'github-code-review': 'platform_import',
+    'plan': 'expert_template',
+    'skill-supply': 'platform_import'
+  };
+  function demoSkillChannel(skillId, provenance) {
+    return DEV_MOCK && provenance === 'bundled' ? (DEMO_SKILL_CHANNELS[skillId] || '') : '';
+  }
+
   /** 将目录项转为已安装技能记录（Hermes opt-out：enabled 默认 true） */
   function catalogEntryToInstalled(entry, opts) {
     opts = opts || {};
@@ -95,6 +113,7 @@
       patchCount: clearUsage ? 0 : (usage.patchCount != null ? usage.patchCount : (entry.patchCount || 0)),
       lastUsedAt: clearUsage ? null : (usage.lastUsedAt !== undefined ? usage.lastUsedAt : (entry.lastUsedAt || null)),
       provenance: entry.provenance || 'bundled',
+      acquisitionChannel: entry.acquisitionChannel || demoSkillChannel(entry.id || entry.skillId, entry.provenance || 'bundled'),
       params: getDefaultSkillParams(entry.id || entry.skillId)
     };
   }
@@ -145,6 +164,7 @@
         patchCount: 0,
         lastUsedAt: null,
         provenance: 'bundled',
+        acquisitionChannel: demoSkillChannel(b, 'bundled'),
         params: getDefaultSkillParams(b)
       };
     }
@@ -160,6 +180,7 @@
       patchCount: b.patchCount || 0,
       lastUsedAt: b.lastUsedAt || null,
       provenance: b.provenance || 'bundled',
+      acquisitionChannel: b.acquisitionChannel || demoSkillChannel(sid, b.provenance || 'bundled'),
       params: b.params || getDefaultSkillParams(sid)
     };
   }
@@ -654,6 +675,7 @@
       personas: {},
       skillBindings: {},
       skillUninstalled: {},
+      skillLearningSwitches: {},
       toolBindings: {},
       toolsetConfigs: {},
       mcpServers: {},
@@ -709,6 +731,7 @@
     var snap = JSON.parse(JSON.stringify(raw));
     if (!DEV_MOCK) {
       snap.skillBindings = {};
+      snap.skillLearningSwitches = {};
       snap.toolBindings = {};
       snap.mcpServers = {};
       snap.mcpSecretFlags = {};
@@ -859,7 +882,8 @@
         useCount: s.useCount || 0,
         patchCount: s.patchCount || 0,
         lastUsedAt: s.lastUsedAt || null,
-        provenance: s.provenance || 'bundled'
+        provenance: s.provenance || 'bundled',
+        acquisitionChannel: s.acquisitionChannel || s.acquisition_channel || ''
       });
     }).filter(Boolean);
     persist();
@@ -1011,7 +1035,8 @@
             useCount: s.useCount || 0,
             patchCount: s.patchCount || 0,
             lastUsedAt: s.lastUsedAt || null,
-            provenance: s.provenance || 'bundled'
+            provenance: s.provenance || 'bundled',
+            acquisitionChannel: s.acquisitionChannel || s.acquisition_channel || ''
           };
         }), expertId);
       } else if (DEV_MOCK && Array.isArray(e.skills) && !detail) {
@@ -1027,7 +1052,8 @@
             useCount: b.useCount || 0,
             patchCount: b.patchCount || 0,
             lastUsedAt: b.lastUsedAt || null,
-            provenance: b.provenance || 'bundled'
+            provenance: b.provenance || 'bundled',
+            acquisitionChannel: b.acquisitionChannel || b.acquisition_channel || ''
           };
         }), expertId);
       }
@@ -3962,6 +3988,7 @@
     state.autonomousActions = state.autonomousActions || {};
     state.autonomousRuns = state.autonomousRuns || {};
     state.memorySwitches = state.memorySwitches || {};
+    state.skillLearningSwitches = state.skillLearningSwitches || {};
     var visibleOrder = state.experts.slice().sort(function (a, b) { return String(b.updatedAt || '').localeCompare(String(a.updatedAt || '')); });
     state.experts.forEach(function (expert) {
       var index = visibleOrder.indexOf(expert);
@@ -3981,6 +4008,7 @@
       }
       ensure1023WorkspaceRoots(key);
       if (state.memorySwitches[key] === undefined) state.memorySwitches[key] = true;
+      if (state.skillLearningSwitches[key] === undefined) state.skillLearningSwitches[key] = true;
       if (state.imPrototypeConfigs[key] === undefined) {
         state.imPrototypeConfigs[key] = {
           wecom: { enabled: index === 0, configured: index === 0, botId: '', home: '', requireMention: false, proactiveEnabled: false, fileEnabled: false, people: [], groups: [], connection: index === 0 ? 'connected' : 'unconfigured' },
@@ -4173,6 +4201,7 @@
         updatedAt: nowIso()
       };
       state.experts.unshift(expert);
+      var copiesExpert = ['clone', 'existing', 'template'].indexOf(payload.source) >= 0 && !!payload.cloneFrom;
       var clonedPersona = payload.source === 'clone' && payload.cloneFrom
         ? state.personas[String(payload.cloneFrom)] : null;
       state.personas[expert.id] = DEV_MOCK && clonedPersona
@@ -4182,6 +4211,8 @@
         ensure1023WorkspaceRoots(expert.id);
         state.memorySwitches[expert.id] = payload.source === 'clone' && payload.cloneFrom
           ? state.memorySwitches[String(payload.cloneFrom)] !== false : true;
+        state.skillLearningSwitches[expert.id] = copiesExpert
+          ? state.skillLearningSwitches[String(payload.cloneFrom)] !== false : true;
         state.imSessions[expert.id] = [];
         state.imPrototypeConfigs[expert.id] = {
           wecom: { enabled: false, configured: false, botId: '', home: '', requireMention: false, proactiveEnabled: false, fileEnabled: false, people: [], groups: [], connection: 'unconfigured' },
@@ -4192,11 +4223,16 @@
         state.autonomousRuns[expert.id] = [];
       }
       // 技能：seed 全部已安装并默认启用；复制来源时清空 .usage.json（不继承热度）
-      if (payload.source === 'clone' && payload.cloneFrom && state.skillBindings[String(payload.cloneFrom)]) {
+      if (copiesExpert && state.skillBindings[String(payload.cloneFrom)]) {
         state.skillBindings[expert.id] = (state.skillBindings[String(payload.cloneFrom)] || [])
           .map(normalizeInstalledSkillRecord)
           .filter(Boolean)
-          .map(clearSkillUsageFields);
+          .map(clearSkillUsageFields)
+          .map(function (skill) {
+            return payload.source === 'template'
+              ? Object.assign({}, skill, { acquisitionChannel: 'expert_template' })
+              : skill;
+          });
         state.skillBindings[expert.id] = ensureFullInstalledSkills(state.skillBindings[expert.id], expert.id)
           .map(clearSkillUsageFields);
       } else if (payload.skillIds && payload.skillIds.length) {
@@ -4264,6 +4300,10 @@
               state.skillBindings[newId] = state.skillBindings[oldId];
               delete state.skillBindings[oldId];
             }
+            if (state.skillLearningSwitches[oldId] !== undefined) {
+              state.skillLearningSwitches[newId] = state.skillLearningSwitches[oldId];
+              delete state.skillLearningSwitches[oldId];
+            }
             if (state.toolBindings[oldId]) {
               state.toolBindings[newId] = state.toolBindings[oldId];
               delete state.toolBindings[oldId];
@@ -4313,6 +4353,7 @@
       delete state.personas[id];
       delete state.skillBindings[id];
       if (state.skillUninstalled) delete state.skillUninstalled[id];
+      if (state.skillLearningSwitches) delete state.skillLearningSwitches[id];
       delete state.toolBindings[id];
       if (state.toolsetConfigs) delete state.toolsetConfigs[id];
       if (state.mcpServers) delete state.mcpServers[id];
@@ -4727,7 +4768,8 @@
         name: (skill && (skill.nameZh || skill.name)) || sid,
         description: (skill && skill.description) || '',
         category: (skill && skill.category) || '',
-        provenance: source
+        provenance: source,
+        acquisitionChannel: source === 'hub' ? 'platform_import' : source === 'local' ? 'local_upload' : (skill && skill.acquisitionChannel) || ''
       }, { clearUsage: true, enabled: true });
       list.push(entry);
       state.skillBindings[key] = list;
@@ -5449,6 +5491,16 @@
     },
     getMemoryEnabled: function (expertId) {
       return (state.memorySwitches || {})[String(expertId)] !== false;
+    },
+    getSkillLearningEnabled: function (expertId) {
+      return (state.skillLearningSwitches || {})[String(expertId)] !== false;
+    },
+    setSkillLearningEnabled: function (expertId, enabled) {
+      if (!DEV_MOCK) return false;
+      state.skillLearningSwitches[String(expertId)] = !!enabled;
+      persist();
+      window.dispatchEvent(new CustomEvent('app-store-updated', { detail: { expertId: String(expertId) } }));
+      return true;
     },
     setMemoryEnabled: function (expertId, enabled) {
       if (!DEV_MOCK) return false;

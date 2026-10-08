@@ -200,6 +200,8 @@
       var detailMeta = Vue.ref({ skillsDetail: [], skillsCatalog: [], toolsDetail: {}, toolsCatalog: [], memoryMeta: {}, gateway: {} });
       var skillSearchQuery = Vue.ref('');
       var skillEnabledFilter = Vue.ref('all');
+      var skillChannelFilter = Vue.ref('all');
+      var skillLearningEnabled = Vue.ref(true);
       var skillDetailVisible = Vue.ref(false);
       var skillDetailTarget = Vue.ref(null);
       var skillFileTree = Vue.ref([]);
@@ -296,6 +298,7 @@
         memoryMdContent.value = store.getMemoryMd(eid);
         userMdContent.value = store.getUserMd(eid);
         memoryEnabled.value = store.getMemoryEnabled(eid);
+        skillLearningEnabled.value = store.getSkillLearningEnabled(eid);
         var localChannels = store.getImChannels(eid);
         imChannels.value = normalizeImChannels(localChannels.length ? localChannels : (store.isDevMock() ? catalog.IM_CHANNEL_TYPES : []));
         return true;
@@ -879,18 +882,27 @@
         return new Date(iso).toLocaleDateString();
       }
 
-      function skillProvenanceLabel(p) {
-        if (p === 'hub') return '平台';
-        if (p === 'local') return '本地';
-        if (p === 'agent') return 'agent';
-        return '内置';
+      function skillChannelLabel(channel) {
+        if (channel === 'platform_import') return '从平台导入';
+        if (channel === 'local_upload') return '本地上传';
+        if (channel === 'learned') return '习得';
+        if (channel === 'expert_template') return '专家模板';
+        return '待核实来源';
       }
 
-      function skillProvenanceTagType(p) {
-        if (p === 'hub') return 'success';
-        if (p === 'local') return 'warning';
-        if (p === 'agent') return '';
+      function skillChannelTagType(channel) {
+        if (channel === 'platform_import') return 'success';
+        if (channel === 'local_upload') return 'warning';
+        if (channel === 'learned') return '';
         return 'info';
+      }
+
+      function toggleSkillLearning(enabled) {
+        if (!store.setSkillLearningEnabled(props.expertId, enabled)) return;
+        skillLearningEnabled.value = !!enabled;
+        var sessions = runningSessionCount.value;
+        ElementPlus.ElMessage.success((enabled ? '已开启' : '已关闭') + '主动习得技能。' +
+          (sessions ? '当前 ' + sessions + ' 个运行中会话仍按原设置运行；' : '') + '新会话生效。');
       }
 
       function refreshToolsets() {
@@ -2703,9 +2715,11 @@
       var filteredSkills = Vue.computed(function () {
         var q = skillSearchQuery.value.trim().toLowerCase();
         var en = skillEnabledFilter.value;
+        var channel = skillChannelFilter.value;
         return skillBindings.value.filter(function (s) {
           if (en === 'enabled' && s.enabled === false) return false;
           if (en === 'disabled' && s.enabled !== false) return false;
+          if (channel !== 'all' && (s.acquisitionChannel || 'unverified') !== channel) return false;
           if (!q) return true;
           var name = (s.name || s.skillId || '').toLowerCase();
           var desc = (s.description || '').toLowerCase();
@@ -3488,8 +3502,11 @@
         toggleSkillEnabled: toggleSkillEnabled,
         deleteSkill: deleteSkill,
         formatSkillLastUsed: formatSkillLastUsed,
-        skillProvenanceLabel: skillProvenanceLabel,
-        skillProvenanceTagType: skillProvenanceTagType,
+        skillChannelLabel: skillChannelLabel,
+        skillChannelTagType: skillChannelTagType,
+        skillChannelFilter: skillChannelFilter,
+        skillLearningEnabled: skillLearningEnabled,
+        toggleSkillLearning: toggleSkillLearning,
         getSkillInfo: getSkillInfo, getSkillParamSchema: getSkillParamSchema,
         skillsCatalog: skillsCatalog,
         filteredSkills: filteredSkills,
@@ -3806,7 +3823,7 @@
               </el-tab-pane>\
               <el-tab-pane name="workspace">\
                 <template #label>工作空间 <span v-if="tabBadges.workspace" class="tab-count-badge">{{ tabBadges.workspace }}</span></template>\
-                <div class="detail-tab-pane">\
+                <div class="detail-tab-pane workspace-data-pane">\
                   <div class="detail-section-head">\
                     <h3 class="detail-section-title">工作空间</h3>\
                     <p class="detail-section-desc">集中管理专家执行任务时使用的文件与资料，也可按需要划分不同文件夹。</p>\
@@ -3844,6 +3861,7 @@
                         <div class="workspace-list-cell workspace-list-size-cell">大小</div>\
                         <div class="workspace-list-cell workspace-list-action-cell">操作</div>\
                       </div>\
+                      <div :key="workspaceCurrentFolderId || \'root\'" class="workspace-list-body">\
                       <div v-for="file in workspaceFiles" :key="file.id" class="workspace-list-row workspace-list-item" :class="{ \'is-folder\': file.kind === \'folder\', \'is-drop-target\': canDropWorkspaceItem(file), \'workspace-root-highlight-row\': file.kind === \'folder\' && file.name === highlightSessionId, \'is-selectable\': isDevMock }" :draggable="file.source === \'upload\'" @dragstart="onWorkspaceDragStart(file, $event)" @dragend="onWorkspaceDragEnd" @dragover.prevent="file.kind === \'folder\' && canDropWorkspaceItem(file)" @drop.prevent="file.kind === \'folder\' && onWorkspaceDrop(file)">\
                         <div v-if="isDevMock" class="workspace-list-cell workspace-select-cell" @click.stop><el-checkbox :model-value="workspaceSelectedIds.includes(String(file.id))" :aria-label="\'选择\' + file.name" @change="(checked) => toggleWorkspaceSelection(file.id, checked)" /></div>\
                         <div class="workspace-list-cell workspace-list-name-cell" @click="file.kind === \'folder\' && openWorkspaceFolder(file)" @dblclick="openWorkspaceFilePreview(file)">\
@@ -3872,6 +3890,7 @@
                             </el-dropdown>\
                           </div>\
                         </div>\
+                      </div>\
                       </div>\
                     </div>\
                   </div>\
@@ -3908,7 +3927,7 @@
                       <p class="profile-empty-title">暂无对话任务</p>\
                       <p class="profile-empty-desc">点击「新建任务」创建第一个会话，或在任务页与专家对话。</p>\
                     </div>\
-                    <el-table v-else :data="filteredTasks" stripe empty-text="暂无匹配任务" class="task-tab-table">\
+                    <el-table v-else :data="filteredTasks" stripe height="100%" empty-text="暂无匹配任务" class="task-tab-table">\
                     <el-table-column prop="id" label="任务ID" min-width="160" show-overflow-tooltip />\
                     <el-table-column prop="title" label="任务名称" min-width="200" show-overflow-tooltip />\
                     <el-table-column label="状态" width="88">\
@@ -3960,11 +3979,12 @@
               </el-tab-pane>\
               <el-tab-pane name="skills">\
                 <template #label>技能 <span v-if="tabBadges.skills" class="tab-count-badge">{{ tabBadges.skills }}</span></template>\
-                <div class="detail-tab-pane">\
+                <div class="detail-tab-pane capability-tab-pane">\
                   <div class="detail-section-head">\
                     <h3 class="detail-section-title">技能</h3>\
-                    <p class="detail-section-desc">管理本专家已安装的技能（启停 / 用量 / 平台导入 / 本地上传）<span v-if="runningSessionCount > 0">。当前有 {{ runningSessionCount }} 个运行中会话，启停将在新会话生效</span></p>\
+                    <p class="detail-section-desc">查看技能来源、管理启停与习得方式。配置变更在新会话生效。</p>\
                   </div>\
+                  <div class="skill-learning-control"><div><strong>主动习得技能</strong><p>允许专家在对话和后台复盘中主动沉淀经验。关闭后，已有技能仍可使用，您明确要求的学习仍可执行。</p><small v-if="!isDevMock">该设置待服务端接入后可保存</small></div><el-switch :model-value="skillLearningEnabled" :disabled="!isDevMock" aria-label="主动习得技能" @change="toggleSkillLearning" /></div>\
                   <div class="detail-action-bar detail-action-bar--split skill-action-bar">\
                     <div class="detail-action-left">\
                       <span class="detail-action-bar-label">已安装 {{ installedSkillCount }} 项 · 已启用 {{ enabledSkillCount }} 项</span>\
@@ -3976,12 +3996,19 @@
                         <el-option label="仅已启用" value="enabled" />\
                         <el-option label="仅已禁用" value="disabled" />\
                       </el-select>\
+                      <el-select v-model="skillChannelFilter" size="small" class="skill-toolbar-select skill-toolbar-channel" placeholder="获取渠道">\
+                        <el-option label="全部渠道" value="all" />\
+                        <el-option label="从平台导入" value="platform_import" />\
+                        <el-option label="本地上传" value="local_upload" />\
+                        <el-option label="习得" value="learned" />\
+                        <el-option label="专家模板" value="expert_template" />\
+                      </el-select>\
                       <el-button type="primary" size="small" @click="openPlatformImportDialog">从平台导入</el-button>\
                       <el-button size="small" :loading="localSkillUploading" @click="triggerLocalSkillUpload">本地上传</el-button>\
                       <input ref="skillLocalImportInput" type="file" accept=".zip,.md,.json,.skill" style="display:none" @change="handleLocalSkillUpload" />\
                     </div>\
                   </div>\
-                  <div v-loading="capabilitiesLoading || capabilitySaving || localSkillUploading">\
+                  <div class="capability-data-scroll" v-loading="capabilitiesLoading || capabilitySaving || localSkillUploading">\
                     <div v-if="skillBindings.length === 0 && !capabilitiesLoading" class="profile-empty-state">\
                       <p class="profile-empty-title">暂无已安装技能</p>\
                       <p class="profile-empty-desc">创建专家时会自动配备基础技能；也可从平台导入或本地上传。</p>\
@@ -3998,7 +4025,7 @@
                         </div>\
                         <p class="capability-card-desc">{{ row.description || \'暂无描述\' }}</p>\
                         <div class="capability-card-foot">\
-                          <span class="capability-card-meta">{{ skillProvenanceLabel(row.provenance) }} · 使用 {{ row.useCount || 0 }} 次</span>\
+                          <span class="capability-card-meta"><span class="skill-channel-label">{{ skillChannelLabel(row.acquisitionChannel) }}</span> · 使用 {{ row.useCount || 0 }} 次</span>\
                           <span class="capability-card-menu" @click.stop @keydown.stop><el-dropdown trigger="click" @command="(cmd) => onSkillCardAction(cmd, row)"><button type="button" class="capability-card-more" :aria-label="\'更多操作：\' + (row.name || row.skillId)">⋯</button><template #dropdown><el-dropdown-menu><el-dropdown-item command="browse">浏览技能包</el-dropdown-item><el-dropdown-item command="delete" divided>删除技能</el-dropdown-item></el-dropdown-menu></template></el-dropdown></span>\
                         </div>\
                       </article>\
@@ -4008,7 +4035,7 @@
               </el-tab-pane>\
               <el-tab-pane name="tools">\
                 <template #label>工具 <span v-if="tabBadges.tools" class="tab-count-badge">{{ tabBadges.tools }}</span></template>\
-                <div class="detail-tab-pane">\
+                <div class="detail-tab-pane capability-tab-pane">\
                   <div class="detail-section-head">\
                     <h3 class="detail-section-title">工具</h3>\
                     <p class="detail-section-desc">管理本专家可调用的内置工具集<span v-if="runningSessionCount > 0">。当前有 {{ runningSessionCount }} 个运行中会话，变更将在新会话生效</span></p>\
@@ -4026,7 +4053,7 @@
                       </el-select>\
                     </div>\
                   </div>\
-                  <div v-loading="capabilitiesLoading || capabilitySaving">\
+                  <div class="capability-data-scroll" v-loading="capabilitiesLoading || capabilitySaving">\
                     <div v-if="filteredToolsets.length === 0" class="profile-empty-state">\
                       <p class="profile-empty-title">无匹配工具集</p>\
                       <p class="profile-empty-desc">试试调整搜索或筛选条件。</p>\
@@ -4416,7 +4443,7 @@
         </el-dialog>\
         <!-- 技能详情 -->\
         <el-dialog v-model="skillDetailVisible" :title="skillDetailTarget ? (skillDetailTarget.name || skillDetailTarget.skillId) : \'技能\'" width="900px" append-to-body class="form-dialog ed-dialog capability-detail-dialog capability-skill-dialog">\
-          <template #header><div class="dialog-header-custom dialog-header-hub capability-dialog-header"><div class="dialog-header-icon dialog-header-icon-hub"><span aria-hidden="true">✦</span></div><div class="dialog-header-text"><div v-if="skillDetailTarget" class="capability-dialog-main"><div class="dialog-header-title">{{ skillDetailTarget.name || skillDetailTarget.skillId }}</div><div class="capability-dialog-tags"><el-tag size="small" type="info">{{ skillProvenanceLabel(skillDetailTarget.provenance) }}</el-tag><el-tag size="small" :type="skillDetailTarget.enabled === false ? \'info\' : \'success\'">{{ skillDetailTarget.enabled === false ? \'已停用\' : \'已启用\' }}</el-tag></div></div><p v-if="skillDetailTarget" class="capability-dialog-desc">{{ skillDetailTarget.description || \'暂无描述\' }}</p></div></div></template>\
+          <template #header><div class="dialog-header-custom dialog-header-hub capability-dialog-header"><div class="dialog-header-icon dialog-header-icon-hub"><span aria-hidden="true">✦</span></div><div class="dialog-header-text"><div v-if="skillDetailTarget" class="capability-dialog-main"><div class="dialog-header-title">{{ skillDetailTarget.name || skillDetailTarget.skillId }}</div><div class="capability-dialog-tags"><el-tag size="small" :type="skillChannelTagType(skillDetailTarget.acquisitionChannel)">{{ skillChannelLabel(skillDetailTarget.acquisitionChannel) }}</el-tag><el-tag size="small" :type="skillDetailTarget.enabled === false ? \'info\' : \'success\'">{{ skillDetailTarget.enabled === false ? \'已停用\' : \'已启用\' }}</el-tag></div></div><p v-if="skillDetailTarget" class="capability-dialog-desc">{{ skillDetailTarget.description || \'暂无描述\' }}</p></div></div></template>\
           <div v-if="skillDetailTarget" class="form-dialog-body ed-dialog-body capability-detail-content">\
             <div class="skill-package-browser">\
               <aside class="skill-package-tree" aria-label="技能包文件">\

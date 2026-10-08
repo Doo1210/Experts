@@ -3012,6 +3012,7 @@
           '<div class="workspace-list-cell workspace-list-size-cell">大小</div>',
           '<div class="workspace-list-cell workspace-list-action-cell">操作</div>',
         '</div>',
+        '<div :key="workspaceCurrentFolderId || \'root\'" class="workspace-list-body">',
         '<div v-for="file in workspaceFiles" :key="file.id" class="workspace-list-row workspace-list-item project-workspace-list-row" :class="{ \'is-folder\': file.kind === \'folder\', \'is-drop-target\': canDropWorkspaceItem(file) }" draggable="true" @dragstart="onWorkspaceDragStart(file, $event)" @dragend="onWorkspaceDragEnd" @dragover.prevent="file.kind === \'folder\' && canDropWorkspaceItem(file)" @drop.prevent="file.kind === \'folder\' && onWorkspaceDrop(file)">',
           '<div class="workspace-list-cell workspace-list-name-cell" @click="file.kind === \'folder\' && openWorkspaceFolder(file)" @dblclick="openWorkspaceFile(file)">',
             '<span class="workspace-file-icon-wrap" :class="workspaceFileTypeClass(file)"><span class="workspace-file-icon">{{ workspaceFileIcon(file) }}</span></span>',
@@ -3037,6 +3038,7 @@
               '</el-dropdown>',
             '</div>',
           '</div>',
+        '</div>',
         '</div>',
       '</div>'
     ].join('');
