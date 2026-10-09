@@ -197,7 +197,6 @@
 
       // ---- 人设 Tab 新增 ----
       var personaPreviewTab = Vue.ref('coreDutyMd');
-      var personaImportInput = Vue.ref(null);
       var presetQuestionsEnabled = Vue.ref(false);
       var presetQuestions = Vue.ref([]);
       var presetDialogVisible = Vue.ref(false);
@@ -494,10 +493,6 @@
         personaOnboardDismissed.value = true;
         store.setPersonaOnboarded(props.expertId, true);
       }
-      function importPersonaSoulMd() {
-        if (personaImportInput.value) personaImportInput.value.click();
-      }
-
       function goToRunningTasks() {
         activeTab.value = 'tasks';
         taskStatusFilter.value = 'running';
@@ -2534,34 +2529,6 @@
       }
 
       // ---- 人设 Tab 方法 ----
-      function exportPersonaMd() {
-        var content = persona.value.soulMd || '';
-        var filename = '专家人设.md';
-        var blob = new Blob([content], { type: 'text/markdown;charset=utf-8' });
-        var url = URL.createObjectURL(blob);
-        var a = document.createElement('a');
-        a.href = url;
-        a.download = filename;
-        a.click();
-        URL.revokeObjectURL(url);
-      }
-
-      function triggerPersonaImport() {
-        if (personaImportInput.value) personaImportInput.value.click();
-      }
-
-      function handlePersonaImport(e) {
-        var file = e.target.files && e.target.files[0];
-        if (!file) return;
-        var reader = new FileReader();
-        reader.onload = function (ev) {
-          persona.value.soulMd = ev.target.result || '';
-          ElementPlus.ElMessage.success('已导入 ' + file.name);
-        };
-        reader.readAsText(file);
-        e.target.value = '';
-      }
-
       function personaPreviewContent() {
         return persona.value.soulMd || '';
       }
@@ -3493,9 +3460,7 @@
         addMemoryWithCategory: addMemoryWithCategory, openCreateMemoryDialog: openCreateMemoryDialog,
         openEditMemoryDialog: openEditMemoryDialog, saveMemoryDialog: saveMemoryDialog, deleteMemoryFromDialog: deleteMemoryFromDialog,
         // 人设 Tab
-        personaPreviewTab: personaPreviewTab, personaImportInput: personaImportInput,
-        exportPersonaMd: exportPersonaMd, triggerPersonaImport: triggerPersonaImport,
-        handlePersonaImport: handlePersonaImport,
+        personaPreviewTab: personaPreviewTab,
         personaPreviewContent: personaPreviewContent, personaPreviewTabLabel: personaPreviewTabLabel,
         presetQuestionsEnabled: presetQuestionsEnabled, presetQuestions: presetQuestions,
         presetDialogVisible: presetDialogVisible, presetDraft: presetDraft,
@@ -3679,7 +3644,6 @@
         personaOnboardDismissed: personaOnboardDismissed,
         dismissPersonaOnboard: dismissPersonaOnboard,
         fillPersonaFromTemplate: fillPersonaFromTemplate,
-        importPersonaSoulMd: importPersonaSoulMd,
         getTaskCwdLabel: getTaskCwdLabel,
         goToWorkspaceFromTask: goToWorkspaceFromTask,
         hubInstallDialogVisible: hubInstallDialogVisible,
@@ -3745,7 +3709,6 @@
                     <p class="detail-section-desc">定义专家的核心职责、工作流程与行为准则。保存后默认在新会话生效，不影响已打开的对话。</p>\
                   </div>\
                   <div class="detail-action-bar persona-toolbar-row">\
-                    <input ref="personaImportInput" type="file" accept=".md" class="material-file-input-hidden" @change="handlePersonaImport">\
                     <div class="persona-preset-cluster">\
                       <span class="persona-preset-title">预置问题</span>\
                       <el-switch class="persona-preset-switch" size="small" :model-value="presetQuestionsEnabled" @change="onPresetQuestionsToggle" />\
@@ -3755,14 +3718,6 @@
                       </button>\
                     </div>\
                     <div class="persona-file-actions">\
-                      <el-button size="small" @click="triggerPersonaImport">\
-                        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" style="margin-right:4px"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>\
-                        导入人设\
-                      </el-button>\
-                      <el-button size="small" @click="exportPersonaMd">\
-                        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" style="margin-right:4px"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>\
-                        导出人设\
-                      </el-button>\
                       <el-button type="primary" size="small" @click="savePersona">保存</el-button>\
                     </div>\
                   </div>\

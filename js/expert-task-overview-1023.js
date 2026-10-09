@@ -149,23 +149,39 @@
         <div v-if="segment === 'autonomous'" class="task-1023-list">
           <div v-for="item in filteredActions" :key="item.id" class="task-1023-row"><div class="task-1023-row-main"><strong>{{ item.title }}</strong><small>{{ item.eventName }} · {{ item.sourceType }} · {{ item.branchName }}</small><button type="button" class="task-1023-cwd-link task-1023-cwd-link--compact" @click="openWorkspace(actionCwd(item))"><span>工作目录</span><code>{{ actionCwd(item) }}</code><span class="task-1023-cwd-open">打开 ↗</span></button></div><el-tag size="small" :type="item.enabled ? 'success' : 'info'">{{ item.enabled ? '已启用' : '已停用' }}</el-tag><span class="task-1023-time">{{ formatTime(item.updatedAt) }}</span><el-button link type="primary" @click="actionDetail = item">详情</el-button><el-dropdown trigger="click" @command="(cmd) => cmd === 'edit' ? openActionForm(item) : cmd === 'trigger' ? triggerAction(item) : deleteAction(item)"><button class="task-1023-more" aria-label="更多操作">⋯</button><template #dropdown><el-dropdown-menu><el-dropdown-item command="edit">编辑配置</el-dropdown-item><el-dropdown-item command="trigger">模拟触发</el-dropdown-item><el-dropdown-item command="delete" divided>删除</el-dropdown-item></el-dropdown-menu></template></el-dropdown></div>
         </div>
-        <el-dialog v-model="archivedDialog" :title="'归档任务 ' + archivedCount" width="760px" class="task-1023-archived-dialog" append-to-body>
-          <p class="task-1023-archived-intro">已归档的对话任务可以恢复，或查看历史记录。</p>
-          <el-input v-model="archivedQuery" clearable size="small" placeholder="搜索归档任务名称或 ID" class="task-1023-archived-search" />
-          <el-empty v-if="!filteredArchivedDialogue.length" description="没有匹配的归档任务" />
-          <div v-else class="task-1023-archived-list">
-            <div v-for="item in filteredArchivedDialogue" :key="item.id" class="task-1023-archived-row">
-              <div class="task-1023-archived-main"><strong>{{ item.title }}</strong><small>{{ item.id }} · 工作目录：{{ item.cwd || '.' }}</small></div>
-              <span class="task-1023-status">已归档</span>
-              <span class="task-1023-time">{{ formatTime(item.lastActivityAt || item.updatedAt) }}</span>
-              <el-button link type="primary" @click="openDialogue(item)">打开</el-button>
-              <el-dropdown trigger="click" @command="(cmd) => cmd === 'edit' ? editDialogue(item) : cmd === 'delete' ? deleteDialogue(item) : archiveDialogue(item, false)">
-                <button type="button" class="task-1023-more" aria-label="归档任务更多操作">⋯</button>
-                <template #dropdown><el-dropdown-menu><el-dropdown-item command="edit">编辑名称</el-dropdown-item><el-dropdown-item command="restore">恢复</el-dropdown-item><el-dropdown-item command="delete" divided>删除</el-dropdown-item></el-dropdown-menu></template>
-              </el-dropdown>
+        <el-dialog v-model="archivedDialog" title="归档任务" width="760px" class="form-dialog ed-dialog task-1023-archived-dialog" append-to-body>
+          <template #header>
+            <div class="dialog-header-custom task-1023-archived-header">
+              <div class="dialog-header-icon task-1023-archived-icon">
+                <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="4" rx="1"/><path d="M5 8v11a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8M10 12h4"/></svg>
+              </div>
+              <div class="dialog-header-text">
+                <div class="dialog-header-title">归档任务 <span class="task-1023-archived-count">{{ archivedCount }}</span></div>
+                <div class="dialog-header-sub">已归档的对话任务可以恢复或查看历史记录</div>
+              </div>
+            </div>
+          </template>
+          <div class="form-dialog-body ed-dialog-body task-1023-archived-body">
+            <el-input v-model="archivedQuery" clearable size="small" placeholder="搜索归档任务名称或 ID" class="task-1023-archived-search" />
+            <el-empty v-if="!filteredArchivedDialogue.length" description="没有匹配的归档任务" />
+            <div v-else class="task-1023-archived-list">
+              <div v-for="item in filteredArchivedDialogue" :key="item.id" class="task-1023-archived-row">
+                <div class="task-1023-archived-main"><strong>{{ item.title }}</strong><small>{{ item.id }} · 工作目录：{{ item.cwd || '.' }}</small></div>
+                <span class="task-1023-status">已归档</span>
+                <span class="task-1023-time">{{ formatTime(item.lastActivityAt || item.updatedAt) }}</span>
+                <el-button link type="primary" @click="openDialogue(item)">打开</el-button>
+                <el-dropdown trigger="click" @command="(cmd) => cmd === 'edit' ? editDialogue(item) : cmd === 'delete' ? deleteDialogue(item) : archiveDialogue(item, false)">
+                  <button type="button" class="task-1023-more" aria-label="归档任务更多操作">⋯</button>
+                  <template #dropdown><el-dropdown-menu><el-dropdown-item command="edit">编辑名称</el-dropdown-item><el-dropdown-item command="restore">恢复</el-dropdown-item><el-dropdown-item command="delete" divided>删除</el-dropdown-item></el-dropdown-menu></template>
+                </el-dropdown>
+              </div>
             </div>
           </div>
-          <template #footer><el-button @click="archivedDialog = false">关闭</el-button></template>
+          <template #footer>
+            <div class="dialog-footer-custom dialog-footer-wizard">
+              <el-button class="wizard-btn wizard-btn-cancel" @click="archivedDialog = false">关闭</el-button>
+            </div>
+          </template>
         </el-dialog>
         <el-dialog v-model="imDetail" title="消息渠道会话" width="760px" class="task-1023-session-dialog" append-to-body>
           <template v-if="imDetail">

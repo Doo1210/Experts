@@ -8,7 +8,6 @@
       var sections = Vue.reactive(util.emptySections());
       var active = Vue.ref('duty');
       var savedText = Vue.ref('');
-      var importInput = Vue.ref(null);
       var presetEnabled = Vue.ref(false);
       var questions = Vue.ref([]);
       var presetDialog = Vue.ref(false);
@@ -48,32 +47,6 @@
           showClose: true
         });
       }
-      function triggerImport() { if (importInput.value) importInput.value.click(); }
-      function importFile(event) {
-        var file = event.target.files && event.target.files[0];
-        event.target.value = '';
-        if (!file) return;
-        if (!/\.(md|markdown)$/i.test(file.name)) return ElementPlus.ElMessage.warning('请选择 .md 或 .markdown 文件');
-        var proceed = function () {
-          var reader = new FileReader();
-          reader.onerror = function () { ElementPlus.ElMessage.error('无法读取，请使用 UTF-8 文件'); };
-          reader.onload = function () {
-            var parsed = util.splitSoul(reader.result || '');
-            Object.assign(sections, parsed.sections);
-            ElementPlus.ElMessage.success(parsed.legacy ? '未识别出分段，已放入岗位职责，请按需拆分。' : '已导入，点击保存后生效。');
-          };
-          reader.readAsText(file, 'UTF-8');
-        };
-        if (!dirty.value) return proceed();
-        ElementPlus.ElMessageBox.confirm('导入将覆盖未保存的岗位说明，确定继续？', '导入岗位说明', {
-          confirmButtonText: '覆盖', cancelButtonText: '取消', type: 'warning'
-        }).then(proceed).catch(function () {});
-      }
-      function exportFile() {
-        var url = URL.createObjectURL(new Blob([util.composeSoul(sections)], { type: 'text/markdown;charset=utf-8' }));
-        var a = document.createElement('a'); a.href = url; a.download = 'SOUL.md'; a.click();
-        setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
-      }
       function openPreset() {
         presetDraft.value = questions.value.length ? questions.value.slice() : ['请说明你能帮我完成哪些工作', '基于现有资料给出下一步建议'];
         presetDialog.value = true;
@@ -107,9 +80,8 @@
         discard: load
       });
       return { sections: sections, active: active, tabs: tabs, validation: validation, dirty: dirty,
-        importInput: importInput, presetEnabled: presetEnabled, questions: questions,
+        presetEnabled: presetEnabled, questions: questions,
         presetDialog: presetDialog, presetDraft: presetDraft, dragged: dragged, save: save,
-        triggerImport: triggerImport, importFile: importFile, exportFile: exportFile,
         openPreset: openPreset, togglePreset: togglePreset, savePreset: savePreset,
         onDragStart: onDragStart, onDrop: onDrop };
     },
@@ -141,11 +113,6 @@
             <div class="soul-toolbar">
               <div class="soul-tabs" role="tablist" aria-label="岗位说明分段">
                 <button v-for="tab in tabs" :key="tab.key" type="button" role="tab" :aria-selected="active === tab.key" class="soul-tab" :class="{ active: active === tab.key }" @click="active = tab.key">{{ tab.label }}</button>
-              </div>
-              <div class="soul-actions">
-                <input ref="importInput" type="file" accept=".md,.markdown" hidden @change="importFile" />
-                <el-button size="small" @click="triggerImport">导入</el-button>
-                <el-button size="small" @click="exportFile">导出</el-button>
               </div>
             </div>
             <el-input v-model="sections[active]" type="textarea" :rows="16" class="soul-source-input" :placeholder="tabs.find(t => t.key === active).placeholder" />
