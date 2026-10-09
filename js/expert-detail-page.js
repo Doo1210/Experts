@@ -903,7 +903,7 @@
         if (!store.setSkillLearningEnabled(props.expertId, enabled)) return;
         skillLearningEnabled.value = !!enabled;
         var sessions = runningSessionCount.value;
-        ElementPlus.ElMessage.success((enabled ? '已开启' : '已关闭') + '主动习得技能。' +
+        ElementPlus.ElMessage.success((enabled ? '已开启' : '已关闭') + '主动学习技能。' +
           (sessions ? '当前 ' + sessions + ' 个运行中会话仍按原设置运行；' : '') + '新会话生效。');
       }
 
@@ -1622,18 +1622,6 @@
             return false;
           }
         }
-        var channelId = String(ch.id || ch.type || '').toLowerCase();
-        if (channelId === 'feishu') {
-          var mode = (secrets.FEISHU_CONNECTION_MODE || getImDraftValue('FEISHU_CONNECTION_MODE') || 'websocket').toLowerCase();
-          if (mode === 'webhook') {
-            var tokenField = fields.find(function (f) { return f.key === 'FEISHU_VERIFICATION_TOKEN'; });
-            var encryptField = fields.find(function (f) { return f.key === 'FEISHU_ENCRYPT_KEY'; });
-            if (!hasImFieldValue(tokenField, secrets) && !hasImFieldValue(encryptField, secrets)) {
-              ElementPlus.ElMessage.warning('飞书 Webhook 模式需配置 Verification Token 或 Encrypt Key');
-              return false;
-            }
-          }
-        }
         return true;
       }
 
@@ -1686,6 +1674,10 @@
           var val = (imSecretDraft.value[field.key] || '').trim();
           if (val) secrets[field.key] = val;
         });
+        if (String(ch.id || ch.type) === 'feishu') {
+          secrets.FEISHU_DOMAIN = 'feishu';
+          secrets.FEISHU_CONNECTION_MODE = 'websocket';
+        }
         if (!validateSelectedImChannel(ch, secrets)) return;
         var policy = collectImPolicy(ch);
         var activeId = String(ch.id || ch.type);
@@ -3948,7 +3940,7 @@
                     <h3 class="detail-section-title">技能</h3>\
                     <p class="detail-section-desc">查看技能来源、管理启停与习得方式。配置变更在新会话生效。</p>\
                   </div>\
-                  <div class="skill-learning-control"><div><strong>主动习得技能</strong><p>允许专家在对话和后台复盘中主动沉淀经验。关闭后，已有技能仍可使用，您明确要求的学习仍可执行。</p><small v-if="!isDevMock">该设置待服务端接入后可保存</small></div><el-switch :model-value="skillLearningEnabled" :disabled="!isDevMock" aria-label="主动习得技能" @change="toggleSkillLearning" /></div>\
+                  <div class="skill-learning-control"><div><strong>主动学习技能</strong><p>允许专家在对话和后台复盘中主动沉淀经验。</p><small v-if="!isDevMock">该设置待服务端接入后可保存</small></div><el-switch :model-value="skillLearningEnabled" :disabled="!isDevMock" aria-label="主动学习技能" @change="toggleSkillLearning" /></div>\
                   <div class="detail-action-bar detail-action-bar--split skill-action-bar">\
                     <div class="detail-action-left">\
                       <span class="detail-action-bar-label">已安装 {{ installedSkillCount }} 项 · 已启用 {{ enabledSkillCount }} 项</span>\

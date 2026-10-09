@@ -551,30 +551,12 @@ window.IM_CHANNEL_TYPES = [
     label: '飞书',
     name: '飞书',
     emoji: '🪽',
-    description: '飞书 / Lark 企业自建应用，默认 WebSocket 长连接（推荐），可选 Webhook 模式。',
+    description: '飞书国内版企业自建应用，使用 WebSocket 长连接，无需公网回调端点。',
     docsUrl: 'https://open.feishu.cn/document/uAjLw4CM/ukTMukTMukTM/reference/im-v1/intro',
-    connectionHint: 'WebSocket（推荐）或 Webhook',
+    connectionHint: 'WebSocket · 无需公网回调',
     credentialFields: [
       { key: 'FEISHU_APP_ID', label: 'App ID', description: '飞书应用 App ID（开放平台 → 凭证与基础信息）。', required: true },
-      { key: 'FEISHU_APP_SECRET', label: 'App Secret', description: '飞书应用 App Secret。', password: true, required: true },
-      {
-        key: 'FEISHU_DOMAIN', label: '域名', type: 'select', default: 'feishu',
-        description: '飞书国内版或 Lark 海外版。',
-        options: [
-          { value: 'feishu', label: 'feishu（国内）' },
-          { value: 'lark', label: 'lark（海外）' }
-        ]
-      },
-      {
-        key: 'FEISHU_CONNECTION_MODE', label: '连接模式', type: 'select', default: 'websocket',
-        description: 'WebSocket 模式无需公网端点（推荐）；Webhook 模式需配置 Encrypt Key 或 Verification Token。',
-        options: [
-          { value: 'websocket', label: 'WebSocket（推荐）' },
-          { value: 'webhook', label: 'Webhook' }
-        ]
-      },
-      { key: 'FEISHU_ENCRYPT_KEY', label: 'Encrypt Key', description: 'Webhook 模式下用于事件加密（飞书后台配置）。', password: true },
-      { key: 'FEISHU_VERIFICATION_TOKEN', label: 'Verification Token', description: 'Webhook 模式下第二层鉴权 token。', password: true }
+      { key: 'FEISHU_APP_SECRET', label: 'App Secret', description: '飞书应用 App Secret。', password: true, required: true }
     ],
     policyFields: [
       {

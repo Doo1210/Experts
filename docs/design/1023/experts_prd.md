@@ -9,8 +9,11 @@ Scope: 专家、项目、专家模板
 
 | 日期 | 涉及范围 | 修改内容 |
 |---|---|---|
+| 2026-10-09 | §1.2.1、§3 | 岗位说明仅保留三段编辑与标题区保存，移除导入、导出和「使用模板」入口；子 Tab 不显示内容绿点 |
+| 2026-10-09 | §1.2.8、附录 D | 主动沟通改为手填目标 ID、受控机器人发送和管理员测试弹窗；定义三类结果、媒体边界及逐渠道 CLI 调用 |
+| 2026-10-09 | §1.2.8、附录 D | 按本机三家 CLI 当前版本修正主动沟通的可达范围、发送命令与文件能力；区分命令契约核对和真实发送验收 |
 | 2026-10-08 | §1.2.5～1.2.8、§1.3.4 | 对齐当前原型的技能／工具／MCP 卡片与导入、对话处理过程和连续澄清交互；区分演示数据与待接入的服务端能力 |
-| 2026-10-08 | §1.2.5、附录 C／D | 技能获取渠道固定为四类，技能列表可按渠道筛选；新增默认开启的专家级「主动习得技能」开关，并区分已有技能启停、用户明确指令和写入审批。MCP 添加、从平台导入及详情交互沿用原有需求 |
+| 2026-10-08 | §1.2.5、附录 C／D | 技能获取渠道固定为四类，技能列表可按渠道筛选；新增默认开启的专家级「主动学习技能」开关，并区分已有技能启停、用户明确指令和写入审批。MCP 添加、从平台导入及详情交互沿用原有需求 |
 | 2026-09-30 | 全文 | 建立按产品结构组织的专家、项目及专家模板需求文档；记录当时已确定的事件中心与自主任务规则 |
 
 ## 文档说明
@@ -42,10 +45,10 @@ Hermes Agent 本地源码仓库：`D:/CodingWorkSpace/PublicProjects/hermes-agen
 对应 [prd.md §3](./prd.md#3-岗位说明设计与实现)，覆盖现有「人设」Tab。
 
 - Tab 改名为「岗位说明」，下设**岗位职责、作业流程、工作规范**三个子 Tab。单栏编辑 Markdown 源码；无工具栏、无实时预览。
-- 三段只用于界面编辑。保存、导入、导出都针对**一份** `SOUL.md`；继续使用 `GET/PUT /api/profiles/{name}/soul`，不拆文件或接口。
+- 三段只用于界面编辑。标题区的保存针对**一份** `SOUL.md`；继续使用 `GET/PUT /api/profiles/{name}/soul`，不拆文件或接口。编辑区不提供导入、导出。
 - 三段可以全空。保存全空时保留内容为空的文件；新会话使用 Hermes 默认人格，不按专家名称生成职责。与 Hermes 默认 `SOUL.md` 一致的自动种入内容，在界面视为未填写。
-- 从零创建且磁盘未填写时，只在**工作规范的未保存缓冲**预填工作目录规则；复制专家不额外预填。岗位说明的「使用模板」只有一套通用骨架，点击后先改缓冲，保存后才落盘。
-- 保存、导出按职责、流程、规范顺序拼成一篇 Markdown；导出使用当前缓冲。拼装结果超过 **20000 字符**时禁止保存。
+- 从零创建且磁盘未填写时，只在**工作规范的未保存缓冲**预填工作目录规则；复制专家不额外预填。页面不提供「使用模板」按钮；三个子 Tab 不显示内容绿点。
+- 保存时按职责、流程、规范顺序拼成一篇 Markdown。拼装结果超过 **20000 字符**时禁止保存。
 - 保存后仅新会话生效；若该专家有运行中会话，成功提示说明它们仍使用旧岗位说明。
 
 **预置问题（1023 新增）**
@@ -100,11 +103,11 @@ Hermes Agent 本地源码仓库：`D:/CodingWorkSpace/PublicProjects/hermes-agen
 
 #### 1.2.5 技能 Tab
 
-对应 [prd.md §8](./prd.md#8-技能获取渠道标签与主动习得开关)。沿用 MVP 的技能安装、启用／禁用和删除能力，本期增加获取渠道与主动习得规则；页面交互按当前原型：
+对应 [prd.md §8](./prd.md#8-技能获取渠道标签与主动学习开关)。沿用 MVP 的技能安装、启用／禁用和删除能力，本期增加获取渠道与主动学习规则；页面交互按当前原型：
 
 - **获取渠道**：每个技能有且只有一个渠道，固定为「从平台导入」「本地上传」「习得」「专家模板」。技能列表显示并支持筛选；现有详情入口如显示来源，标签须一致。进入专家时确定渠道，后续编辑、更新和启停不改变。AI 主动或按用户明确指令创建的技能均为「习得」，复制专家模板所得技能为「专家模板」；具体平台、文件名和模板版本只是补充信息，不增加第五类。
 - Hermes 现有 `bundled`／`hub`／`agent` 不能直接等同于这四类渠道。旧技能应按可核实的创建记录迁移；来源无法判定时先核实，不凭目录或使用次数猜测。
-- **主动习得技能**：专家级开关，默认开启。关闭后，新会话的普通对话及后台复盘不再自主创建或完善技能；已有技能仍可加载，记忆复盘不受影响。用户明确要求创建或修改技能（包括 `/learn`）、从平台导入、本地上传和复制模板不受该开关限制。现有 `skills.write_approval` 仍独立负责写入审批；单个技能启停也不改变主动习得开关。保存后提示仅新会话生效。
+- **主动学习技能**：专家级开关，默认开启。关闭后，新会话的普通对话及后台复盘不再自主创建或完善技能；已有技能仍可加载，记忆复盘不受影响。用户明确要求创建或修改技能（包括 `/learn`）、从平台导入、本地上传和复制模板不受该开关限制。现有 `skills.write_approval` 仍独立负责写入审批；单个技能启停也不改变主动学习开关。保存后提示仅新会话生效。
 - **列表与详情**：顶部显示已安装／已启用数量，提供名称搜索、启用状态和获取渠道筛选，以及「从平台导入」「本地上传」。技能以卡片展示名称、说明、获取渠道、使用次数及独立启停开关；点击卡片打开只读技能包浏览弹窗，显示渠道、启用状态、文件树和文件内容。无真实文件数据时，原型标明「示例」，正式实现须读取该技能的实际文件。卡片 `⋯` 提供「浏览技能包」「删除技能」，删除前二次确认。
 - **导入**：「从平台导入」弹窗按「我发布的／我添加的／内置」切换，可跨分类勾选、批量导入，已安装技能不再出现在候选项；导入后默认启用。「本地上传」原型接受 `.zip`、`.md`、`.json`、`.skill`，重名时阻止导入；正式实现须校验并安装实际包内容，不能只根据文件名生成技能记录。
 
@@ -125,11 +128,17 @@ Hermes Agent 本地源码仓库：`D:/CodingWorkSpace/PublicProjects/hermes-agen
 
 对应 [prd.md §9](./prd.md#9-消息渠道设计与实现) 和 [§4](./prd.md#4-开启了消息渠道的专家启动策略)。产品只支持企业微信 AI Bot（`wecom`）、钉钉和飞书，不做 `wecom_callback`。
 
-- 渠道页保留凭据、Home 和设置指南，精简无关配置。钉钉、飞书提供默认开启的「群聊需 @」；企微不提供。企微和飞书提供扫码配置。
-- 每渠道增加默认关闭的「主动沟通」，以及「可私聊的人」「可发的群」两张名单。显示人名／群名、存平台 ID；发送前仅在名单内匹配，重名需选择，未匹配则停止。企微另受最近会话限制。
+- 渠道页保留凭据、Home 和设置指南，精简无关配置。钉钉、飞书在「启用渠道」卡片内提供默认开启的「群聊需 @」；企微不提供。企微和飞书提供扫码配置。
+- 「启用渠道」沿用现有配置卡片：首行是说明与开关，下面两列填写渠道 ID 和 Secret（首次启用必填；已保存的 Secret 可留空表示不修改）；下一行沿用等宽两列：左侧是选填的 Home 会话或群 ID，右侧是钉钉、飞书的「群聊需 @」开关；右侧标题在上，稍大的提示位于标题下方，开关紧邻提示右侧，不使用输入框边框。企业微信的 Home 仍只占左侧半列，右侧留空。企业微信填写 AI Bot 的 Bot ID／Secret；钉钉填写 Client ID／Client Secret，机器人 Code 仅在与 Client ID 不同时通过折叠的「高级选项」填写；飞书填写 App ID／App Secret。钉钉不提供扫码入口，企微和飞书保留扫码配置。凭据由该专家的密钥作用域保存，读取配置时只返回密钥是否已配置，不回传明文。
+- 飞书固定使用**国内飞书**（domain=feishu）和 **WebSocket**（connection_mode=websocket）。页面不提供飞书／Lark 域名切换或 WebSocket／Webhook 连接方式切换，也不展示 Webhook 地址、Encrypt Key、Verification Token。Home 不作为连接必填项。
+- 钉钉、飞书的「群聊需 @」与 Home 位于同一行，作为该专家当前渠道的配置保存；它只控制群消息的触发条件，不影响私聊，也不与渠道启用开关联动。默认开启；关闭渠道时保留原设置，重新启用后继续使用。
+- 关闭开关时可「保存配置」而不连接；开启后点击「保存并连接」先检查渠道 ID 与 Secret，再应用连接。连接状态区分未配置、已关闭、待连接、已连接和连接失败；不能把“ID 已填写”当成真实连通。原型仅模拟连接状态，真实实现应取该专家 profile 的 gateway 运行状态及失败原因。访问授权／配对与传输连接是两件事，本卡片不新增允许用户字段。
+- 每渠道增加默认关闭的「主动沟通」，以及「可私聊的人」「可发的群」两张名单。本期添加弹窗手填平台目标 ID，名称／备注选填；已有消息会话快捷带入待 session 保存真实平台目标 ID 后接入，原型不把 session ID 冒充发送 ID。列表单行显示名称、ID 摘要、上次测试结果与操作，不把历史测试当实时可达状态。发送前仅在当前专家、当前渠道的名单内匹配，重名需选择，未匹配则停止。Home 不自动加入名单。企微普通目标的手填 ID 仅是匹配线索，必须在当次可发送会话中重新取得发送 ID；授权人例外但仍需进入名单。
+- 每个名单目标提供「测试」弹窗，管理员可输入文字／Markdown、图片或文件并单次真实发送；钉钉原生图片需公网 URL，本地图片走文件附件。钉钉、飞书群文字可选 @ 指定成员；一次只发一种内容类型。文字测试在渠道已启用时可由管理员执行，不受「主动沟通」开关限制；图片／文件测试仍要求「允许收发文件」开启。弹窗展示平台已接受（不表示已读）、失败原因与阶段、结果未知及脱敏技术详情；名单只保留带时间的上次测试摘要。原型预置成功、固定失败和结果未知的目标 ID，按 ID 稳定复现，不展示额外场景选择器或「原型演示」文案，也不调用真实 CLI。
+- 页面区分接收连接状态与机器人发送配置。启用渠道不等于 CLI 已授权、应用权限齐备或目标可达；「检查配置」只能核对已知凭据／权限，真实可达以实际测试或发送结果为准。测试失败不移除目标；请求结果未知不自动重发。
 - 在群里 @ 别人，只限主动沟通已开启且在可发群名单中的群；企微不支持平台 @。文件和 @ 需分开发送时，按平台能力分成消息。
 - 每渠道增加默认关闭的「允许收发文件」，覆盖图片、文件、语音、视频。当前 IM 对话的入站文件由适配器落地；发出的文件从该对话工作目录取。按名单主动发文件还要求主动沟通开启。
-- 主动沟通和文件发送均使用**机器人身份**：企业微信 AI Bot、钉钉应用机器人、飞书应用 Bot；厂商 CLI 的登录态／应用凭据仅用于调用接口，不改变消息发送者。专家可以直接在终端调用对应机器人命令。若「主动沟通」开关和名单要成为不能绕过的强制规则，产品再提供受控出站入口统一校验；两种方式的取舍见附录 D。渠道已启用时，产品需要让该专家 gateway 在线；事件中心 Timer 由事件中心调度，**不因存在 Timer 就要求专家 IM gateway 常驻**。渠道完整重启、退避与失败态策略仍待拍板。
+- 主动沟通和文件发送均使用**当前专家绑定的机器人身份**：企业微信 AI Bot、钉钉应用机器人、飞书应用 Bot。专家对话与事件中心自主任务统一调用产品受控发送入口，由入口校验渠道、开关、名单、媒体权限和目标，再调用对应 CLI；CLI 凭据与专家通用终端隔离，避免绕过开关。管理员测试仅对主动沟通开关作单次例外，仍须渠道已启用。接收 gateway 的在线状态和 CLI 出站能力分别判断；事件中心 Timer 由事件中心调度，**不因存在 Timer 就要求专家 IM gateway 常驻**。渠道完整重启、退避与失败态策略仍待拍板。
 
 ### 1.3 专家对话任务页
 
@@ -183,7 +192,7 @@ Hermes Agent 本地源码仓库：`D:/CodingWorkSpace/PublicProjects/hermes-agen
 
 页面定位：浏览可复用的专家模板，截图 6 为当前页面参考。模板列表和从模板创建专家的既有行为沿用专家管理 MVP PRD；**1023 当前没有已拍板的专家模板页增量需求**。
 
-这里的「专家模板」是独立产品入口；专家管理页岗位说明空态的「使用模板」只是一套通用的 `SOUL.md` 编辑骨架。两者不是同一对象，不能把岗位说明骨架当成专家模板页的新增模板（[prd.md §3.5](./prd.md#35-模板预填导入导出)）。
+这里的「专家模板」是独立产品入口。专家管理页岗位说明仅在从零创建且磁盘未填写时自动预填工作规范，不提供「使用模板」入口；这项默认句不构成专家模板页的新模板（[prd.md §3.5](./prd.md#35-自动预填与旧内容)）。
 
 ## 附录 A. Hermes 源码首轮核对
 
@@ -229,8 +238,8 @@ Hermes Agent 本地源码仓库：`D:/CodingWorkSpace/PublicProjects/hermes-agen
 
 1. **专家管理页／任务 Tab**：自主任务本期纳入；需确认事件中心现有持久化结构中，专家动作的稳定 ID、发布版本、执行记录与去重键如何存放。旧 [prd.md §6 与 §6.10](./prd.md#6-独立定时任务历史方案已取消) 已标为历史方案。
 2. **专家管理页／消息渠道**：渠道进程的多专家启动顺序、资源上限、退出重试和「待重启」处理仍待定。
-3. **专家管理页／消息渠道**：消息任务按 session 分目录、压缩续接沿用 cwd 的方案待确认；IM 任务是否允许在 Web 续聊，以及归档／删除策略待确认。需明确开关／名单是产品引导还是强制约束：前者可直接调用机器人 CLI，后者需让实际发送经过产品校验。各专家 CLI 的调用凭据仍需隔离，发送身份均为机器人。
-4. **专家管理页／技能**：四类获取渠道与「主动习得技能」开关的产品规则已定；旧技能来源迁移及前台／后台自主写入控制仍需落地。范围更广的「允许更新技能」总闸不在本次修改内，后续如提出须单独定义。
+3. **专家管理页／消息渠道**：消息任务按 session 分目录、压缩续接沿用 cwd 的方案待确认；IM 任务是否允许在 Web 续聊，以及归档／删除策略待确认。主动沟通已定为产品受控发送，待接入时落实各专家 CLI 凭据隔离、同一机器人身份核对与真实发送验收。
+4. **专家管理页／技能**：四类获取渠道与「主动学习技能」开关的产品规则已定；旧技能来源迁移及前台／后台自主写入控制仍需落地。范围更广的「允许更新技能」总闸不在本次修改内，后续如提出须单独定义。
 5. **专家管理页／岗位说明**：正文若包含 `## 作业流程` 等保留标题，现有拆段规则无法保证保存后再打开仍还原原三段，需补规则。
 6. **岗位说明／专家对话任务页**：点击预置问题时，若输入框已有未发送内容，是覆盖、追加还是确认后覆盖？原型当前直接覆盖。示例问题应来自通用默认、专家模板还是人工填写，也需确认。
 7. **专家对话任务页**：对话区优化缺交互稿与验收条件；独立的快捷指令功能，其归属、存储、变量和预置内容未定。
@@ -240,7 +249,7 @@ Hermes Agent 本地源码仓库：`D:/CodingWorkSpace/PublicProjects/hermes-agen
 
 ## 附录 D. 实现方案概要（源码与厂商 CLI 核对）
 
-以下是可落地的技术路径，供设计和研发拆分；厂商 CLI 命令以接入时所安装版本的 `--help`／Schema 再核对。本轮只读核对了本机 `dws v1.0.59` 的发送和资源下载 Schema，未向任何渠道发送测试消息；`wecom-cli`、`lark-cli` 在本机未安装，依据其官方 CLI 仓库文档判断。
+以下是可落地的技术路径，供设计和研发拆分；厂商 CLI 命令以接入时所安装版本的 `--help`／Schema 再核对。2026-10-09 本机版本为 `wecom-cli 1.3.4`、`dws v1.0.63`、`lark-cli 1.0.97`；已只读核对版本、官方命令文档及 DWS 发送 Schema，**未向任何真实会话发送测试消息**。安装与命令契约可用，不等于当前专家已具备授权、应用权限或目标可达性。
 
 ### D.1 Hermes 可复用能力
 
@@ -249,17 +258,19 @@ Hermes Agent 本地源码仓库：`D:/CodingWorkSpace/PublicProjects/hermes-agen
 - **消息渠道任务**：复用 Hermes 适配器产生的 `SessionSource`、`SessionStore.get_or_create_session` 和 SessionDB 的平台 `source`。在拿到新 `session_id` 后创建 `消息渠道/<平台>/<首次 session_id>/`，将 cwd 同时写入 SessionDB、轮次上下文和该 `task_id` 的工具 cwd；入站媒体从缓存／下载源归档到该目录后再交给 agent。
 - **自主任务**：事件中心负责 Timer 等触发、版本、分支、动作和去重；执行器在目标 Profile 的配置／凭据作用域中复用 Hermes `AIAgent` + SessionDB，每次动作独立创建 `source=event_center` 的 session、绑定 `自主任务/<动作 ID>/runs/<执行 ID>/` 为 cwd，并把 session ID 回写事件中心运行记录。产品不调用 Hermes cron 创建 job；记忆隔离同时关闭 memory 工具集，不能只设置 `skip_memory=True`。
 - **归档、记忆、MCP**：人工对话归档复用 `sessions.archived`；记忆总闸写 `memory_enabled`、`user_profile_enabled`；MCP 复用现有服务列表与真探针，导入须逐台合并，不能调用整表替换接口。
-- **技能获取渠道与主动习得**：渠道作为当前专家的产品元数据记录，不从 Hermes `bundled`／`hub`／`agent` 猜测。主动习得关闭时须同时约束前台引导和后台技能复盘，不能仅把 `skills.creation_nudge_interval` 设为 0，也不能关闭包含记忆的整个后台复盘；明确的用户学习指令仍按写入审批规则执行。
+- **技能获取渠道与主动学习**：渠道作为当前专家的产品元数据记录，不从 Hermes `bundled`／`hub`／`agent` 猜测。主动习得关闭时须同时约束前台引导和后台技能复盘，不能仅把 `skills.creation_nudge_interval` 设为 0，也不能关闭包含记忆的整个后台复盘；明确的用户学习指令仍按写入审批规则执行。
 - **对话页轻交互**：预置问题作为专家级产品配置由对话页读取，点击后只更新输入缓冲；问题快速定位从已展示的用户消息与其首段可见答复建立前端锚点，复用现有滚动容器和「回到最新」，无需改 Hermes transcript。
 
 ### D.2 三家渠道的主动沟通与文件
 
-当前会话回复优先沿用 Hermes gateway 适配器：企微和飞书适配器已有本地文件上传发送路径，钉钉 session webhook 适配器仅支持文本／Markdown，本地文件使用钉钉机器人 CLI。**主动发给名单中的人或群也可以由专家直接调用机器人 CLI**，不需要真人代发或厂商要求的产品出站服务。这里有两种产品控制强度：若开关／名单是专家行为引导，在岗位说明或技能里先查配置再直调 CLI；若它们是不可绕过的强制限制，则由产品受控入口持有调用凭据、校验目标和文件后调用同一套机器人 CLI。通用终端可直接使用完整凭据时，单靠 UI 开关与提示词无法保证强制限制。
+当前会话回复优先沿用 Hermes gateway 适配器：企微和飞书适配器已有本地文件上传发送路径，钉钉 session webhook 适配器仅支持文本／Markdown，本地文件使用钉钉机器人 CLI。**名单内主动发送与管理员测试统一走产品受控出站入口**，由入口持有按专家隔离的 CLI 调用资格并核对渠道、开关、名单、内容类型和路径，再以机器人身份调用 CLI。专家不能从通用终端读取完整凭据绕过该入口；仅用 UI 开关或提示词无法强制限制。管理员测试只对主动沟通开关豁免一次，仍要求渠道已启用，媒体仍要求收发文件开关开启。
 
 「CLI 授权」在本节只指**调用资格**：安装机器上的登录态、应用凭据、API 权限或目标会话可达范围；它与最终消息显示的**发送者身份**分开。企微 `message aibot send`、钉钉 `send-by-bot`、飞书 `--as bot` 都以机器人名义发消息和文件。
 
-- **企业微信 AI Bot**：根据 [WecomTeam 消息 CLI](https://github.com/WecomTeam/wecom-cli/blob/main/skills/wecomcli-message/SKILL.md)，授权人用 `wecom-cli identity whoami`，其他目标先用 `wecom-cli message aibot sessions list` 获取**本次**可发送会话，再调用以智能机器人身份发送的 `wecom-cli message aibot send --json ...`。本地媒体先用 [媒体 CLI](https://github.com/WecomTeam/wecom-cli/blob/main/skills/wecomcli-media/SKILL.md) 的 `wecom-cli media upload --json '{"file_path":"..."}'` 取得 `media_id`，再发送相应的图片／文件／语音／视频消息；语音原生发送要求 AMR。CLI 的 [扫码初始化与授权状态检查](https://github.com/WecomTeam/wecom-cli/blob/main/skills/wecomcli-shared/SKILL.md)是取得调用资格，**不表示以扫码人的身份发送**；不能假定填入 Hermes Bot ID／Secret 后此 CLI 就已可用。名单目标不在当次 `sessions list` 时应停止发送。
-- **钉钉机器人**：本机 `dws v1.0.59` 的 `dws chat +messages-send --as bot --robot-code ...` 可发群／单聊文本、Markdown 和 @，但其 Schema 明确**不支持 bot 富媒体**。机器人发本地文件走 [DWS 机器人原子命令](https://github.com/DingTalk-Real-AI/dingtalk-workspace-cli/blob/main/skills/multi/dingtalk-chat/references/chat/chat-bot.md) `dws chat message send-by-bot --robot-code ... --group <openConversationId>` 或 `--users <userId>`，配 `--msg-type file --file-path ./报告.pdf`；群内 @ 用 `--at-user-ids`／`--at-open-dingtalk-ids`。本地图片也以文件附件发送；公网图片 URL 才可用 `--msg-type image --image-url`。`--group` 与 `--users` 互斥，文件和带 @ 文本需要分开发送。
-- **飞书机器人**：根据 [larksuite 消息 CLI](https://github.com/larksuite/cli/blob/main/skills/lark-im/references/lark-im-messages-send.md)，用 `lark-cli im +messages-send --as bot --chat-id oc_... --text/--markdown` 发群，或 `--user-id ou_...` 发单聊；`--file ./报告.pdf`、`--image`、`--video`、`--audio` 会自动上传后发送，但本地路径必须相对 CLI 工作目录且解析后留在其中，原生音频需 Opus。[Bot 身份](https://github.com/larksuite/cli/blob/main/skills/lark-shared/references/lark-shared-identity-and-permissions.md)使用应用 appId／appSecret 和已开通的 scope，无需真人 `auth login`。群 @ 先用 `im +chat-members-list --as bot` 确认成员，再在文本／富文本中使用 `<at user_id="ou_...">...</at>`；文件与 @ 文本可分两条。Bot 可搜索和列出可见群，但[不能列出单聊会话](https://github.com/larksuite/cli/blob/main/skills/lark-im/references/lark-im-chat-list.md)；「可私聊的人」需要从已有入站身份或经授权的通讯录流程取得 `open_id`，不能从 Bot 群列表推断。Bot 发送还受应用权限、可用范围、群成员身份和既有单聊关系约束。
+- **企业微信 AI Bot**：每专家用独立 `WECOM_CLI_CONFIG_DIR` 保存 CLI 机器人授权，通过 `wecom-cli auth init` 绑定后用 `auth show` 核对状态及 Bot ID，须与渠道 Bot ID 一致；不能假定填入 Hermes Bot ID／Secret 后 CLI 自动可用。根据 [WecomTeam 消息 CLI](https://github.com/WecomTeam/wecom-cli/blob/main/skills/wecomcli-message/SKILL.md)，授权人用 `wecom-cli identity whoami`，其他目标先用 `wecom-cli message aibot sessions list` 获取**本次**可发送会话，再调用以智能机器人身份发送的 `wecom-cli message aibot send --json ...`。手填 ID 仅供匹配，普通目标必须从当次列表复制发送 ID；授权人也须在产品名单中。列表数量以实际回包为准。本地媒体先用 [媒体 CLI](https://github.com/WecomTeam/wecom-cli/blob/main/skills/wecomcli-media/SKILL.md) 的 `wecom-cli media upload --json '{"file_path":"..."}'` 取得 `media_id`，再发送图片／文件；原生语音需 AMR，语音和视频暂不进通用测试弹窗。Hermes 现有企微适配器的群聊主动发送受被动回复 `req_id` 限制，不能等同于此 CLI 的群聊主动发送能力。[CLI 配置与返回格式](https://github.com/WecomTeam/wecom-cli/blob/main/docs/cli-reference.md)另见官方参考。
+- **钉钉机器人**：将当前专家映射到正确的 DWS 组织／账号 profile，调用时显式传 `--profile` 及渠道 Robot Code；群可用 `dws chat +chat-bots --group <openConversationId> --format json` 辅助核对机器人。本机 `dws v1.0.63` 的 `dws chat +messages-send --as bot --robot-code ...` 可发群／单聊文本、Markdown 和 @；当前 `--help`／Schema 还支持机器人**单目标** `--file`（`--file-path` 为兼容别名）上传文件，以及 `--image-url` 发送公网图片。文件须位于 CLI 工作目录允许的相对路径内；本地图片按文件附件发送。群聊用 `--group <openConversationId>`，单聊用 `--users <userId>`，二者互斥；群文字 @ 用 `--at-user-ids`。多群 `--groups` 只用于支持的类型，不能套用单目标文件能力。[DWS 机器人原子命令](https://github.com/DingTalk-Real-AI/dingtalk-workspace-cli/blob/main/skills/multi/dingtalk-chat/references/chat/chat-bot.md) `dws chat message send-by-bot` 仅作 Shortcut 缺字段时的底层入口。官方页面仍有 Shortcut 不支持 Bot 富媒体的旧描述，以部署版本的 Schema 与真机验证为准。
+- **飞书机器人**：CLI 绑定当前专家现有 App ID／Secret，显式选对应 profile 与 `--as bot`，核对 `im:message:send_as_bot` 权限；不切换真人身份。根据 [larksuite 消息 CLI](https://github.com/larksuite/cli/blob/main/skills/lark-im/references/lark-im-messages-send.md)，用 `lark-cli im +messages-send --as bot --chat-id oc_... --text/--markdown` 发群，或 `--user-id ou_...` 发单聊；`--image`、`--file` 自动上传工作目录内的相对文件。原生 `--video` 需封面、`--audio` 需 Opus，暂不放入通用测试弹窗。群 @ 可先用 `im +chat-members-list --as bot` 核对成员，再在文本／富文本中使用 `<at user_id="ou_...">...</at>`。Bot 可搜索和列出可见群，但[不能列出单聊会话](https://github.com/larksuite/cli/blob/main/skills/lark-im/references/lark-im-chat-list.md)；人员 ID 由管理员手填或已有入站会话带入。Bot 发送还受应用权限、可用范围、群成员身份和单聊关系约束。
+
+产品解析 CLI 返回时统一记录 `accepted / failed / unknown`、上传或发送阶段、平台错误码、任务／消息标识（若有）、来源 session 与时间。企微 CLI 返回结构化 JSON 或透传平台错误，不能假设有消息 ID；钉钉须检查任务／逐目标结果，个人身份的 `query-send-status` 不直接套用于 Bot；飞书 JSON 成功含 `message_id`，错误含 code/message。平台接受不等于已读；进程超时或响应无法判断时保留「结果未知」，不自动重发。管理员浏览器上传的测试文件暂存到当前专家的安全测试目录；正式专家发送只读取来源 session 工作目录，完成后清理临时测试文件。
 
 **收文件**与主动发送分开：当前 IM 对话的附件首先由 Hermes 适配器接收／缓存，产品将可用文件归档到该消息 session 的 cwd。历史资源补拉可按需使用飞书 [`+messages-resources-download --as bot`](https://github.com/larksuite/cli/blob/main/skills/lark-im/references/lark-im-messages-resources-download.md)、钉钉 `dws chat +messages-resource-download` 或企微 `wecom-cli media download`，但必须以真实消息 ID／资源 ID 和各 CLI 可访问的身份为前提；历史补拉不是实时收文件的前置步骤。原生语音／视频格式受平台限制，不能把“能发送文件附件”表述成所有平台都支持原生语音或视频消息。
