@@ -4890,21 +4890,6 @@ body {
   padding-top: 14px;
   border-top: 1px solid #ebeff5;
 }
-.expert-avatar-presets-head {
-  display: flex;
-  align-items: baseline;
-  gap: 10px;
-  margin-bottom: 10px;
-}
-.expert-avatar-presets-head span {
-  color: #34445a;
-  font-size: 13px;
-  font-weight: 600;
-}
-.expert-avatar-presets-head small {
-  color: #93a0b0;
-  font-size: 11px;
-}
 .expert-avatar-presets-list {
   display: flex;
   flex-wrap: wrap;
@@ -14533,11 +14518,6 @@ body {
   padding-top: 0;
   border-top: 0;
 }
-.expert-avatar-presets-head {
-  justify-content: center;
-  margin-bottom: 8px;
-}
-.expert-avatar-presets-head span { color: #8090a3; font-size: 11px; }
 .expert-avatar-presets-list {
   display: grid;
   grid-template-columns: repeat(5, 28px);
@@ -14573,7 +14553,6 @@ body {
 .expert-basic-form-grid .expert-avatar-field .expert-field-label { align-self: flex-start; }
 .expert-basic-form-grid .expert-avatar-picker { width: 132px; height: 132px; flex: 0 0 132px; }
 .expert-basic-form-grid .expert-avatar-field .expert-avatar-presets { margin-top: 8px; }
-.expert-basic-form-grid .expert-avatar-presets-head { margin-bottom: 6px; }
 .expert-basic-form-grid .expert-avatar-presets-list { grid-template-columns: repeat(5, 30px); gap: 6px; }
 .expert-basic-form-grid .expert-field-hint { max-width: none; text-align: center; }
 @media (max-width: 960px) {
@@ -14622,7 +14601,6 @@ body {
   height: 104px;
 }
 .form-dialog-expert-wizard .expert-avatar-column .expert-avatar-presets { margin-top: 8px; }
-.form-dialog-expert-wizard .expert-avatar-presets-head { margin-bottom: 6px; }
 .form-dialog-expert-wizard .el-dialog__footer { padding: 10px 20px 12px; }
 @media (max-width: 720px) {
   .form-dialog-expert-wizard .create-source-select-panel { display: grid; gap: 8px; }

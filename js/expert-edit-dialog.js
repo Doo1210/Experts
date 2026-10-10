@@ -300,8 +300,7 @@
               </div>\
             </div>\
             <div class="expert-avatar-presets">\
-              <div class="expert-avatar-presets-head"><span>预置头像</span></div>\
-              <div class="expert-avatar-presets-list" role="group" aria-label="预置头像">\
+              <div class="expert-avatar-presets-list" role="group" aria-label="可选头像">\
                 <button v-for="preset in avatarPresets" :key="preset.id" type="button" class="expert-avatar-preset" :class="{ \'is-selected\': form.avatar === preset.src }" :aria-label="preset.label" :aria-pressed="form.avatar === preset.src" :title="preset.label" @click="form.avatar = preset.src"><img :src="preset.src" :alt="preset.label"></button>\
               </div>\
             </div>\
