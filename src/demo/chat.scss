@@ -975,6 +975,28 @@
   background: #4080ff;
   content: "";
 }
+.pc-task-pinned-marker {
+  position: absolute;
+  top: -5px;
+  right: -5px;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  border: 2px solid #f7f9fc;
+  border-radius: 50%;
+  background: #4080ff;
+  color: #fff;
+  pointer-events: none;
+}
+.pc-task-pinned-marker svg {
+  width: 10px;
+  height: 10px;
+}
+.pc-tasks:not(.is-action-reveal-paused) .pc-task:hover .pc-task-pinned-marker {
+  visibility: hidden;
+}
 .pc-task-line {
   display: flex;
   align-items: center;
@@ -1051,6 +1073,9 @@
 }
 .pc-task:hover .pc-task-actions {
   display: flex;
+}
+.pc-tasks.is-action-reveal-paused .pc-task:hover .pc-task-actions {
+  display: none;
 }
 .pc-task.pinned .pc-task-pin-action {
   color: #3373e5;

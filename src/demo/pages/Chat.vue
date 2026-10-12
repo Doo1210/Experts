@@ -399,7 +399,12 @@
           </div>
         </div>
       </section>
-      <aside class="pc-tasks">
+      <aside
+        class="pc-tasks"
+        :class="{ 'is-action-reveal-paused': taskActionsPaused }"
+        @mousemove="taskActionsPaused = false"
+        @mouseleave="taskActionsPaused = false"
+      >
         <div class="pc-panel-head">
           <span class="pc-panel-icon"><i class="el-icon-s-unfold" /></span
           ><strong>任务列表</strong
@@ -421,6 +426,25 @@
               @focusout="stopTaskMarquee($event)"
               @click="selectTask(item)"
             >
+              <span
+                v-if="item.pinned"
+                class="pc-task-pinned-marker"
+                role="img"
+                aria-label="已置顶"
+                title="已置顶"
+              >
+                <svg
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                >
+                  <path d="M9 3h6l-1 5 3 3v2H7v-2l3-3-1-5Z" />
+                  <path d="M12 13v8" />
+                </svg>
+              </span>
               <div class="pc-task-line">
                 <button
                   class="pc-task-title"
@@ -737,6 +761,7 @@ export default {
       state,
       draft: "",
       draftConversation: emptyConversation(),
+      taskActionsPaused: false,
       workspaceOpen: false,
       workspaceFolderId: null,
       expandedFolderIds: [],
@@ -1086,6 +1111,7 @@ export default {
       this.expandedFolderIds = ids;
     },
     togglePin(item) {
+      this.taskActionsPaused = true;
       updateConversation(item.id, { pinned: !item.pinned });
     },
     startTaskMarquee(item, event) {
