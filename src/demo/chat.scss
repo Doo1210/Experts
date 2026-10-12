@@ -977,22 +977,19 @@
 }
 .pc-task-pinned-marker {
   position: absolute;
-  top: -5px;
-  right: -5px;
+  top: 6px;
+  right: 9px;
   z-index: 1;
   display: grid;
   place-items: center;
-  width: 16px;
-  height: 16px;
-  border: 2px solid #f7f9fc;
-  border-radius: 50%;
-  background: #4080ff;
-  color: #fff;
+  width: 18px;
+  height: 20px;
+  color: #3373e5;
   pointer-events: none;
 }
 .pc-task-pinned-marker svg {
-  width: 10px;
-  height: 10px;
+  width: 15px;
+  height: 15px;
 }
 .pc-tasks:not(.is-action-reveal-paused) .pc-task:hover .pc-task-pinned-marker {
   visibility: hidden;
@@ -1003,6 +1000,10 @@
   gap: 3px;
   min-width: 0;
   min-height: 22px;
+}
+.pc-task.pinned:not(:hover) .pc-task-line,
+.pc-tasks.is-action-reveal-paused .pc-task.pinned .pc-task-line {
+  padding-right: 20px;
 }
 .pc-task-title {
   flex: 1;
