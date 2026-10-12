@@ -984,7 +984,7 @@
 .pc-task-line {
   display: flex;
   align-items: center;
-  gap: 5px;
+  gap: 3px;
   min-width: 0;
   min-height: 22px;
 }
@@ -1053,7 +1053,7 @@
 .pc-task-actions {
   display: none;
   align-items: center;
-  gap: 1px;
+  gap: 0;
 }
 .pc-task:hover .pc-task-actions,
 .pc-task:focus-within .pc-task-actions {
@@ -1068,8 +1068,9 @@
 .pc-task-actions button {
   display: grid;
   place-items: center;
-  width: 21px;
-  height: 21px;
+  flex: 0 0 18px;
+  width: 18px;
+  height: 20px;
   padding: 0;
   border: 0;
   border-radius: 4px;
