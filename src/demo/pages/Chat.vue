@@ -769,12 +769,15 @@ export default {
       return expertById(this.$route.params.id);
     },
     conversation() {
-      return this.$route.query.conv
+      const existing = this.$route.query.conv
         ? conversationById(this.$route.query.conv)
+        : null;
+      return existing?.expertId === this.$route.params.id
+        ? existing
         : this.draftConversation;
     },
     isDraftTask() {
-      return !this.$route.query.conv;
+      return this.conversation === this.draftConversation;
     },
     visibleConversations() {
       return state.conversations
@@ -873,7 +876,12 @@ export default {
     },
   },
   mounted() {
-    if (!this.conversation && this.expert) this.newTask();
+    if (this.$route.query.conv && this.isDraftTask && this.expert) {
+      const { conv, ...query } = this.$route.query;
+      this.$router
+        .replace({ name: "chat", params: { id: this.expert.id }, query })
+        .catch(() => {});
+    }
     this.$nextTick(this.scrollBottom);
   },
   beforeDestroy() {
@@ -1111,13 +1119,10 @@ export default {
       } else if (this.taskDialogMode === "archive") {
         this.archiveTask(item);
       } else {
+        const deletingCurrent = this.$route.query.conv === item.id;
         stopDemoStream(item.id);
         deleteConversation(item.id);
-        if (this.conversation?.id === item.id) {
-          const next = this.visibleConversations[0];
-          if (next) this.selectTask(next);
-          else this.newTask();
-        }
+        if (deletingCurrent) this.newTask();
       }
       this.taskDialogVisible = false;
     },
