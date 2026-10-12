@@ -50,7 +50,10 @@
           >
         </div>
       </div>
-      <el-table :data="filteredConversations" empty-text="暂无任务"
+      <el-table
+        :data="filteredConversations"
+        class="conversation-task-table"
+        empty-text="暂无任务"
         ><el-table-column label="任务" min-width="190"
           ><template slot-scope="scope"
             ><strong>{{ scope.row.title }}</strong>
@@ -58,7 +61,10 @@
               {{ scope.row.id }}
               <el-button
                 type="text"
+                class="task-id-copy"
                 icon="el-icon-document-copy"
+                :aria-label="`复制任务 ID ${scope.row.id}`"
+                title="复制任务 ID"
                 @click="copy(scope.row.id)"
               /></p></template></el-table-column
         ><el-table-column label="状态" width="90"

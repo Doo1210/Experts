@@ -57,7 +57,15 @@ const textFile = (id, name, content, parentId = null, mime = "text/plain") => ({
   size: new TextEncoder().encode(content).length,
   updatedAt: time(10, 10),
 });
-const expert = (id, name, description, tags, avatarUrl, responsibility) => ({
+const expert = (
+  id,
+  name,
+  description,
+  tags,
+  avatarUrl,
+  responsibility,
+  activeChannelIds = [],
+) => ({
   id,
   name,
   description,
@@ -82,8 +90,8 @@ const expert = (id, name, description, tags, avatarUrl, responsibility) => ({
   channels: ["wecom", "dingtalk", "feishu"].map((channelId) => ({
     id: channelId,
     name: { wecom: "企业微信", dingtalk: "钉钉", feishu: "飞书" }[channelId],
-    enabled: false,
-    connected: false,
+    enabled: activeChannelIds.includes(channelId),
+    connected: activeChannelIds.includes(channelId),
     proactive: false,
     files: false,
   })),
@@ -99,6 +107,7 @@ export const PROJECT_EXPERT_FIXTURES = [
     ["设备维护", "自动化"],
     "/experts/avatars/process-man.svg",
     "负责设备异常诊断、维护计划与停机风险评估。",
+    ["wecom", "dingtalk", "feishu"],
   ),
   expert(
     "exp_supply",

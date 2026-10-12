@@ -91,7 +91,7 @@
                 >
                 <span class="expert-card-info-divider">|</span>
                 <span class="expert-card-channel"
-                  ><span>渠道</span
+                  ><span>消息渠道</span
                   ><span
                     v-if="!enabledChannels(item).length"
                     class="expert-card-channel-empty"
@@ -283,7 +283,9 @@ export default {
       return item.name.replace(/模板$/, "");
     },
     enabledChannels(item) {
-      return (item.channels || []).filter((channel) => channel.enabled);
+      return (item.channels || []).filter(
+        (channel) => channel.enabled && channel.connected,
+      );
     },
     channelIcon(id) {
       return publicAsset(`/experts/channel-icons/${id}.svg`);

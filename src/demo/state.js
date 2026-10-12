@@ -11,7 +11,7 @@ const clone = (value) => JSON.parse(JSON.stringify(value));
 const uid = (prefix) =>
   `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`;
 const now = () => new Date().toISOString();
-const DEMO_DATA_REVISION = 3;
+const DEMO_DATA_REVISION = 4;
 
 const ADDITIONAL_EXPERT_SPECS = [
   {
@@ -23,7 +23,7 @@ const ADDITIONAL_EXPERT_SPECS = [
     model: "推理模型",
     presetQuestions: ["分析这条产线的工艺波动", "整理关键参数的优化方向"],
     skills: ["表格分析", "报告撰写"],
-    channelId: "wecom",
+    channelIds: ["wecom", "dingtalk"],
   },
   {
     id: "exp_safety",
@@ -34,7 +34,7 @@ const ADDITIONAL_EXPERT_SPECS = [
     model: "视觉模型",
     presetQuestions: ["整理本周巡检发现的问题", "生成隐患整改清单"],
     skills: ["记录整理", "报告撰写"],
-    channelId: "dingtalk",
+    channelIds: ["dingtalk"],
   },
   {
     id: "exp_algorithm",
@@ -45,7 +45,7 @@ const ADDITIONAL_EXPERT_SPECS = [
     model: "推理模型",
     presetQuestions: ["比较两版模型的测试结果", "分析误判样例的共同特征"],
     skills: ["表格分析", "报告撰写"],
-    channelId: "",
+    channelIds: [],
   },
   {
     id: "exp_digital",
@@ -56,9 +56,49 @@ const ADDITIONAL_EXPERT_SPECS = [
     model: "通用大模型",
     presetQuestions: ["梳理当前业务流程痛点", "制定数字化改造路线图"],
     skills: ["资料整理", "报告撰写"],
-    channelId: "feishu",
+    channelIds: ["wecom", "dingtalk", "feishu"],
   },
 ];
+
+const CHANNEL_SHOWCASE_UPGRADES = [
+  { expertId: "exp_ops", before: ["feishu"], after: ["dingtalk", "feishu"] },
+  {
+    expertId: "exp_equipment",
+    before: [],
+    after: ["wecom", "dingtalk", "feishu"],
+  },
+  {
+    expertId: "exp_process",
+    before: ["wecom"],
+    after: ["wecom", "dingtalk"],
+  },
+  {
+    expertId: "exp_digital",
+    before: ["feishu"],
+    after: ["wecom", "dingtalk", "feishu"],
+  },
+];
+
+function upgradeChannelShowcase(saved) {
+  for (const sample of CHANNEL_SHOWCASE_UPGRADES) {
+    const expert = saved.experts.find((item) => item.id === sample.expertId);
+    const channels = expert?.channels;
+    if (!Array.isArray(channels) || channels.length !== 3) continue;
+    const original = new Set(sample.before);
+    const unchanged = channels.every(
+      (channel) =>
+        ["wecom", "dingtalk", "feishu"].includes(channel.id) &&
+        channel.enabled === original.has(channel.id) &&
+        channel.connected === original.has(channel.id),
+    );
+    if (!unchanged) continue;
+    const active = new Set(sample.after);
+    channels.forEach((channel) => {
+      channel.enabled = active.has(channel.id);
+      channel.connected = active.has(channel.id);
+    });
+  }
+}
 
 function createSupplementalExpert(spec) {
   return {
@@ -98,8 +138,8 @@ function createSupplementalExpert(spec) {
       { id: "feishu", name: "飞书" },
     ].map((channel) => ({
       ...channel,
-      enabled: channel.id === spec.channelId,
-      connected: channel.id === spec.channelId,
+      enabled: spec.channelIds.includes(channel.id),
+      connected: spec.channelIds.includes(channel.id),
       proactive: false,
       files: false,
     })),
@@ -269,8 +309,8 @@ export function createSeed() {
           {
             id: "dingtalk",
             name: "钉钉",
-            enabled: false,
-            connected: false,
+            enabled: true,
+            connected: true,
             proactive: false,
             files: false,
           },
@@ -440,7 +480,8 @@ export function createSeed() {
 }
 
 export function upgradeExpertFixtures(saved) {
-  if (Number(saved.demoDataRevision || 1) >= DEMO_DATA_REVISION) return saved;
+  const previousRevision = Number(saved.demoDataRevision || 1);
+  if (previousRevision >= DEMO_DATA_REVISION) return saved;
   const seed = createSeed();
   const expertIds = new Set(ADDITIONAL_EXPERT_SPECS.map((item) => item.id));
   const templateIds = new Set(
@@ -460,7 +501,7 @@ export function upgradeExpertFixtures(saved) {
       (item) => templateIds.has(item.id) && !existingTemplates.has(item.id),
     ),
   );
-  if (Number(saved.demoDataRevision || 1) < 3) {
+  if (previousRevision < 3) {
     const existingChats = Array.isArray(saved.imChats) ? saved.imChats : [];
     // Replace only the original bundled sample; keep user-created demo records.
     saved.imChats = [
@@ -470,6 +511,7 @@ export function upgradeExpertFixtures(saved) {
       ),
     ];
   }
+  if (previousRevision < 4) upgradeChannelShowcase(saved);
   saved.demoDataRevision = DEMO_DATA_REVISION;
   return saved;
 }

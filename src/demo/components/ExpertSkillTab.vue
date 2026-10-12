@@ -31,7 +31,7 @@
             label="仅已禁用"
             value="disabled" /></el-select
         ><el-select v-model="sourceFilter" size="small"
-          ><el-option label="全部渠道" value="all" /><el-option
+          ><el-option label="全部来源" value="all" /><el-option
             v-for="source in sources"
             :key="source"
             :label="source"
@@ -271,7 +271,7 @@ export default {
       search: "",
       enabledFilter: "all",
       sourceFilter: "all",
-      sources: ["从平台导入", "本地上传", "习得", "专家模板", "内置"],
+      sources: ["从平台导入", "本地上传", "对话习得", "复制专家"],
       importVisible: false,
       importTab: "published",
       selectedImports: [],
@@ -329,7 +329,15 @@ export default {
       );
     },
     sourceLabel(source) {
-      return { 平台导入: "从平台导入", 主动学习: "习得" }[source] || source;
+      return (
+        {
+          平台导入: "从平台导入",
+          内置: "从平台导入",
+          主动学习: "对话习得",
+          习得: "对话习得",
+          专家模板: "复制专家",
+        }[source] || source
+      );
     },
     openImport() {
       this.selectedImports = [];

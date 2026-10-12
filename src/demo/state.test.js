@@ -16,6 +16,49 @@ beforeEach(async () => {
 });
 
 describe("演示状态", () => {
+  it("预置专家展示零到三个已接入消息渠道", () => {
+    const counts = demo
+      .createSeed()
+      .experts.map(
+        (expert) =>
+          expert.channels.filter(
+            (channel) => channel.enabled && channel.connected,
+          ).length,
+      );
+    expect(new Set(counts)).toEqual(new Set([0, 1, 2, 3]));
+  });
+  it("升级渠道展示样例时保留手动修改的连接状态", () => {
+    const saved = demo.createSeed();
+    saved.demoDataRevision = 3;
+    const oldConnections = {
+      exp_ops: ["feishu"],
+      exp_equipment: [],
+      exp_process: ["wecom"],
+      exp_digital: ["feishu"],
+    };
+    saved.experts.forEach((expert) => {
+      if (!oldConnections[expert.id]) return;
+      expert.channels.forEach((channel) => {
+        channel.enabled = oldConnections[expert.id].includes(channel.id);
+        channel.connected = channel.enabled;
+      });
+    });
+    const processDingtalk = saved.experts
+      .find((expert) => expert.id === "exp_process")
+      .channels.find((channel) => channel.id === "dingtalk");
+    processDingtalk.enabled = true;
+    processDingtalk.connected = false;
+    demo.upgradeExpertFixtures(saved);
+    const connectedCount = (id) =>
+      saved.experts
+        .find((expert) => expert.id === id)
+        .channels.filter((channel) => channel.enabled && channel.connected)
+        .length;
+    expect(connectedCount("exp_ops")).toBe(2);
+    expect(connectedCount("exp_equipment")).toBe(3);
+    expect(processDingtalk.connected).toBe(false);
+    expect(connectedCount("exp_process")).toBe(1);
+  });
   it("首次对话标题保留前 20 个字符，超出显示省略号", () => {
     expect(demo.conversationTitleFromFirstMessage("12345678901234567890")).toBe(
       "12345678901234567890",
