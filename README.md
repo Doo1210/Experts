@@ -43,4 +43,4 @@ npm run check:versions -- --host-lock D:\CodingWorkSpace\wanwu\wanwu-web\web\pnp
 - `src/router/index.js`：`/experts/` history 路由及原型 hash 链接兼容。
 - `scripts/check-versions.mjs`：与宿主实际锁定版本的核对。
 
-产品规则按“1023 PRD → 未覆盖部分的 MVP PRD → 原型现状”处理。覆盖与检查记录见 `docs/prototype-coverage.md` 和 `docs/verification.md`。
+本工程后续确认的产品与交互需求统一维护在 [docs/experts_prd.md](docs/experts_prd.md)；实现或验收新需求时，同步更新对应章节和修改记录。该文档未覆盖的规则再按“1023 PRD → MVP PRD → 原型现状”核对。覆盖与检查记录见 `docs/prototype-coverage.md` 和 `docs/verification.md`。
