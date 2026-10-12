@@ -37,11 +37,7 @@
     <div class="pc-body">
       <section v-if="conversation" class="pc-main">
         <div v-if="conversation.archived" class="pc-archived">
-          此任务已归档，不会出现在右侧任务列表。<button
-            @click="updateConversation(conversation.id, { archived: false })"
-          >
-            恢复任务
-          </button>
+          此任务已归档，不会出现在右侧任务列表。可在专家管理页「任务」的「归档任务」弹窗中恢复。
         </div>
         <div class="pc-messages-wrap">
           <div ref="scroller" class="pc-messages">
@@ -495,12 +491,6 @@
               暂无任务<br /><small>点击上方「新建任务」开始</small>
             </div>
           </div>
-          <button
-            class="pc-archived-toggle"
-            @click="showArchived = !showArchived"
-          >
-            {{ showArchived ? "隐藏已归档任务" : "显示已归档任务" }}
-          </button>
         </div>
       </aside>
       <aside v-if="workspaceOpen" class="pc-workspace">
@@ -747,7 +737,6 @@ export default {
       state,
       draft: "",
       draftConversation: emptyConversation(),
-      showArchived: false,
       workspaceOpen: false,
       workspaceFolderId: null,
       expandedFolderIds: [],
@@ -796,9 +785,7 @@ export default {
     visibleConversations() {
       return state.conversations
         .filter(
-          (item) =>
-            item.expertId === this.$route.params.id &&
-            (this.showArchived || !item.archived),
+          (item) => item.expertId === this.$route.params.id && !item.archived,
         )
         .sort(
           (a, b) =>
@@ -916,7 +903,6 @@ export default {
   },
   methods: {
     avatarSrcFor,
-    updateConversation,
     back() {
       this.$router
         .push({
