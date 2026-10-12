@@ -435,6 +435,15 @@
                 ><span v-if="item.status === 'running'" class="pc-spinner" />
                 <div class="pc-task-actions">
                   <button
+                    type="button"
+                    title="编辑名称"
+                    aria-label="编辑名称"
+                    @click.stop="openTaskDialog('rename', item)"
+                  >
+                    <i class="el-icon-edit-outline" />
+                  </button>
+                  <button
+                    class="pc-task-pin-action"
                     :title="item.pinned ? '取消置顶' : '置顶'"
                     @click.stop="togglePin(item)"
                   >
@@ -465,7 +474,7 @@
                 </div>
               </div>
               <button class="pc-task-cwd" @click.stop="openWorkspace(item)">
-                <i class="el-icon-folder" /> 工作目录
+                <i class="el-icon-folder" /> 工作目录：
                 <span>{{ cwdLabel(item.cwd) }}</span
                 ><i class="el-icon-arrow-right" />
               </button>
@@ -1033,6 +1042,8 @@ export default {
       this.openTaskDialog("rename", item);
     },
     openTaskDialog(mode, item) {
+      if (this.taskClickTimer) clearTimeout(this.taskClickTimer);
+      this.taskClickTimer = null;
       if (
         mode === "archive" &&
         (this.conversation?.id !== item.id || !this.draft.trim())
