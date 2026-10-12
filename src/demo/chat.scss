@@ -1049,11 +1049,7 @@
   align-items: center;
   gap: 0;
 }
-.pc-task:hover .pc-task-actions,
-.pc-task:focus-within .pc-task-actions {
-  display: flex;
-}
-.pc-task.pinned .pc-task-actions {
+.pc-task:hover .pc-task-actions {
   display: flex;
 }
 .pc-task.pinned .pc-task-pin-action {
