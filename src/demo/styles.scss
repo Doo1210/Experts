@@ -6,6 +6,8 @@
   --primary-light: #ecf3ff;
   --page-bg: #f5f7fa;
   --border: #e4e7ed;
+  --hover-feedback-delay: 320ms;
+  --hover-feedback-duration: 80ms;
   font-family: "PingFang SC", "Microsoft YaHei", Inter, system-ui, sans-serif;
   color: #303133;
   background: var(--page-bg);
@@ -22,6 +24,42 @@ body,
 }
 button {
   font: inherit;
+}
+.demo-hover-tooltip,
+.el-tooltip__popper,
+.el-popover {
+  border: 1px solid #dfe6ef !important;
+  border-radius: 8px !important;
+  background: #fff !important;
+  box-shadow: 0 8px 24px rgba(31, 59, 103, 0.12) !important;
+  color: #344054 !important;
+}
+.demo-hover-tooltip,
+.el-tooltip__popper {
+  max-width: min(320px, calc(100vw - 16px));
+  padding: 6px 10px;
+  font-size: 12px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+.demo-hover-tooltip {
+  position: fixed;
+  z-index: 5000;
+  pointer-events: none;
+}
+.demo-hover-tooltip[hidden],
+.el-tooltip__popper .popper__arrow,
+.el-popover .popper__arrow {
+  display: none !important;
+}
+.el-tooltip__popper.el-fade-in-linear-enter-active,
+.el-tooltip__popper.el-fade-in-linear-leave-active,
+.el-popover.el-fade-in-linear-enter-active,
+.el-popover.el-fade-in-linear-leave-active,
+.el-popover.el-zoom-in-top-enter-active,
+.el-popover.el-zoom-in-top-leave-active {
+  transition-duration: var(--hover-feedback-duration) !important;
 }
 .demo-app {
   width: 100%;
@@ -395,7 +433,7 @@ button {
   flex-direction: column;
   padding: 20px;
   cursor: pointer;
-  transition: border-color 0.15s;
+  transition: border-color var(--hover-feedback-duration);
 }
 .expert-card:hover,
 .kanban-card:hover {
@@ -573,7 +611,9 @@ button {
   inset: 0;
   display: flex;
   align-items: center;
-  transition: opacity 0.16s ease;
+  transition:
+    opacity var(--hover-feedback-duration) ease,
+    visibility 0s linear;
 }
 .expert-card-mine .expert-card-info {
   display: flex;
@@ -633,16 +673,20 @@ button {
   padding: 0 16px;
   background: #fbfcfe;
   opacity: 0;
+  visibility: hidden;
   pointer-events: none;
 }
 .expert-card-mine:hover .expert-card-info,
 .expert-card-mine:focus-within .expert-card-info {
   opacity: 0;
+  transition-delay: var(--hover-feedback-delay);
   pointer-events: none;
 }
 .expert-card-mine:hover .expert-card-hover-actions,
 .expert-card-mine:focus-within .expert-card-hover-actions {
   opacity: 1;
+  visibility: visible;
+  transition-delay: var(--hover-feedback-delay);
   pointer-events: auto;
 }
 .expert-card-mine .expert-card-start-btn,
@@ -1086,7 +1130,9 @@ button {
   inset: 0;
   display: flex;
   align-items: center;
-  transition: opacity 0.16s ease;
+  transition:
+    opacity var(--hover-feedback-duration) ease,
+    visibility 0s linear;
 }
 .expert-card-template-tags {
   justify-content: flex-start;
@@ -1112,6 +1158,7 @@ button {
   z-index: 1;
   background: #e7e8ea;
   opacity: 0;
+  visibility: hidden;
   pointer-events: none;
 }
 .expert-card-template-actions button {
@@ -1130,11 +1177,14 @@ button {
 .expert-card-template:hover .expert-card-template-tags,
 .expert-card-template:focus-within .expert-card-template-tags {
   opacity: 0;
+  transition-delay: var(--hover-feedback-delay);
   pointer-events: none;
 }
 .expert-card-template:hover .expert-card-template-actions,
 .expert-card-template:focus-within .expert-card-template-actions {
   opacity: 1;
+  visibility: visible;
+  transition-delay: var(--hover-feedback-delay);
   pointer-events: auto;
 }
 .expert-card-template-actions button:focus-visible {
@@ -1907,7 +1957,7 @@ button {
   background: #fff;
   cursor: pointer;
   transform: none;
-  transition: border-color 0.2s;
+  transition: border-color var(--hover-feedback-duration);
 }
 .project-list-card:hover,
 .project-list-card:focus-within {
@@ -5984,9 +6034,9 @@ button {
   color: #8495aa;
   cursor: pointer;
   transition:
-    border-color 0.16s ease,
-    background 0.16s ease,
-    color 0.16s ease;
+    border-color var(--hover-feedback-duration) ease,
+    background var(--hover-feedback-duration) ease,
+    color var(--hover-feedback-duration) ease;
 }
 .task-im-dialog-close:hover {
   border-color: #bfd4f1;
@@ -6752,9 +6802,9 @@ button {
   text-align: center;
   cursor: pointer;
   transition:
-    border-color 0.16s ease,
-    background-color 0.16s ease,
-    box-shadow 0.16s ease;
+    border-color var(--hover-feedback-duration) ease,
+    background-color var(--hover-feedback-duration) ease,
+    box-shadow var(--hover-feedback-duration) ease;
 }
 .im-1023-upload-zone:hover {
   border-color: #6da5f5;

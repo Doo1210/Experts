@@ -131,6 +131,7 @@
             v-if="questions.length"
             placement="left"
             trigger="hover"
+            :open-delay="320"
             width="300"
             popper-class="pc-question-popover"
             ><button
@@ -148,7 +149,7 @@
               <button
                 v-for="message in questions"
                 :key="message.id"
-                :title="message.content"
+                :aria-label="message.content"
                 @click="jumpTo(message.id)"
               /></div
           ></el-popover>
@@ -550,7 +551,7 @@
               content="设为工作目录"
               placement="top"
               effect="light"
-              :open-delay="100"
+              :open-delay="320"
               :enterable="false"
             >
               <button
@@ -604,7 +605,7 @@
               content="设为工作目录"
               placement="top"
               effect="light"
-              :open-delay="100"
+              :open-delay="320"
               :enterable="false"
             >
               <button

@@ -1032,16 +1032,14 @@
   text-overflow: clip;
   animation: pc-task-title-marquee var(--pc-task-marquee-duration) linear
     infinite;
+  animation-delay: var(--hover-feedback-delay);
 }
 @keyframes pc-task-title-marquee {
   0%,
-  2%,
-  98%,
   100% {
     transform: translateX(0);
   }
-  48%,
-  52% {
+  50% {
     transform: translateX(calc(0px - var(--pc-task-marquee-distance)));
   }
 }
@@ -1068,15 +1066,28 @@
   }
 }
 .pc-task-actions {
-  display: none;
+  display: flex;
   align-items: center;
   gap: 0;
+  flex: 0 0 auto;
+  width: 0;
+  min-width: 0;
+  overflow: hidden;
+  visibility: hidden;
+  transition:
+    width 0s linear,
+    visibility 0s linear;
 }
-.pc-task:hover .pc-task-actions {
-  display: flex;
+.pc-task:hover .pc-task-actions,
+.pc-task:focus-within .pc-task-actions {
+  width: 72px;
+  visibility: visible;
+  transition-delay: var(--hover-feedback-delay);
 }
 .pc-tasks.is-action-reveal-paused .pc-task:hover .pc-task-actions {
-  display: none;
+  width: 0;
+  visibility: hidden;
+  transition-delay: 0s;
 }
 .pc-task.pinned .pc-task-pin-action {
   color: #3373e5;
