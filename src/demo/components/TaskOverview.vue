@@ -22,29 +22,33 @@
       </button>
     </div>
     <template v-if="section === 'conversation'">
-      <div class="toolbar">
-        <span
+      <div class="toolbar task-action-bar">
+        <strong class="task-action-summary"
           ><strong>{{ conversations.length }}</strong> 个任务 ·
           <strong>{{
             conversations.filter((x) => x.status === "running").length
           }}</strong>
-          运行中</span
-        ><el-input
-          v-model="keyword"
-          prefix-icon="el-icon-search"
-          clearable
-          placeholder="搜索名称或 ID"
-        /><el-select v-model="statusFilter"
-          ><el-option label="全部" value="" /><el-option
-            label="运行中"
-            value="running" /><el-option
-            label="已就绪"
-            value="ready" /></el-select
-        ><el-button @click="archiveVisible = true"
-          >归档任务 {{ archived.length }}</el-button
-        ><el-button type="primary" @click="newConversation"
-          >+ 新建任务</el-button
+          运行中</strong
         >
+        <div class="task-action-controls">
+          <el-input
+            v-model="keyword"
+            size="small"
+            prefix-icon="el-icon-search"
+            clearable
+            placeholder="搜索名称或 ID"
+          /><el-select v-model="statusFilter" size="small"
+            ><el-option label="全部" value="" /><el-option
+              label="运行中"
+              value="running" /><el-option
+              label="已就绪"
+              value="ready" /></el-select
+          ><el-button size="small" @click="archiveVisible = true"
+            >归档任务 {{ archived.length }}</el-button
+          ><el-button type="primary" size="small" @click="newConversation"
+            >+ 新建任务</el-button
+          >
+        </div>
       </div>
       <el-table :data="filteredConversations" empty-text="暂无任务"
         ><el-table-column label="任务" min-width="190"
@@ -145,24 +149,34 @@
       >
     </template>
     <template v-else-if="section === 'im'"
-      ><div class="toolbar">
-        <span>{{ chats.length }} 个聊天 · {{ runningChats }} 个运行中</span
-        ><el-input
-          v-model="imKeyword"
-          clearable
-          prefix-icon="el-icon-search"
-          placeholder="搜索聊天名或 ID"
-        /><el-select v-model="chatType"
-          ><el-option label="全部类型" value="" /><el-option
-            label="群聊"
-            value="group" /><el-option label="单聊" value="single" /></el-select
-        ><el-select v-model="platform"
-          ><el-option label="全部渠道" value="" /><el-option
-            v-for="item in ['企业微信', '钉钉', '飞书']"
-            :key="item"
-            :label="item"
-            :value="item"
-        /></el-select>
+      ><div class="toolbar task-action-bar">
+        <strong class="task-action-summary"
+          >{{ chats.length }} 个聊天 · {{ runningChats }} 个运行中</strong
+        >
+        <div class="task-action-controls">
+          <el-input
+            v-model="imKeyword"
+            size="small"
+            clearable
+            prefix-icon="el-icon-search"
+            placeholder="搜索聊天名或 ID"
+          /><el-select v-model="chatType" size="small"
+            ><el-option label="全部类型" value="" /><el-option
+              label="群聊"
+              value="group" /><el-option
+              label="单聊"
+              value="single" /></el-select
+          ><el-select
+            v-model="platform"
+            size="small"
+            class="task-platform-select"
+            ><el-option label="全部渠道" value="" /><el-option
+              v-for="item in ['企业微信', '钉钉', '飞书']"
+              :key="item"
+              :label="item"
+              :value="item"
+          /></el-select>
+        </div>
       </div>
       <div class="im-grid">
         <div
@@ -187,15 +201,19 @@
           <p>
             最近活跃：{{ formatRecent(chat.updatedAt)
             }}<template v-if="chat.chatType === 'group'">
-              · 发起人：{{ chat.members[0].name }}</template
+              · 发起人：{{
+                chat.lastInitiator || chat.members[0].name
+              }}</template
             >
           </p>
           <div class="task-im-card-foot">
             <span class="task-im-folder"><i class="el-icon-folder" /></span
             ><span
-              >工作目录<strong
-                >{{ chat.title }}--{{ chat.chatId }}</strong
-              ></span
+              >工作目录<strong>{{
+                chat.cwd
+                  ? chat.cwd.split("/").slice(-1)[0]
+                  : `${chat.title}--${chat.chatId}`
+              }}</strong></span
             ><button
               type="button"
               title="打开工作目录"
@@ -209,69 +227,201 @@
       <el-empty v-if="!filteredChats.length" description="暂无匹配聊天" />
       <el-dialog
         :visible.sync="imVisible"
-        width="calc(100% - 32px)"
-        custom-class="manage-dialog im-dialog"
+        width="1280px"
+        top="7.5vh"
+        custom-class="manage-dialog task-im-dialog"
         :title="selectedChat ? selectedChat.title : '聊天详情'"
-        ><div v-if="selectedChat" slot="title" class="im-dialog-head">
-          <div class="im-dialog-head-top">
+        @opened="scrollImToBottom"
+        ><div v-if="selectedChat" slot="title" class="task-im-dialog-header">
+          <div class="task-im-dialog-heading">
             <h3>{{ selectedChat.title }}</h3>
-            <img
-              :src="channelLogo(selectedChat.platform)"
-              :alt="selectedChat.platform"
-            /><span>{{
-              selectedChat.chatType === "group" ? "群聊" : "单聊"
-            }}</span>
+            <span class="task-im-card-badges">
+              <span class="task-im-vendor"
+                ><img
+                  :src="channelLogo(selectedChat.platform)"
+                  :alt="selectedChat.platform"
+              /></span>
+              <span class="task-im-type">{{
+                selectedChat.chatType === "group" ? "群聊" : "单聊"
+              }}</span>
+            </span>
           </div>
           <p>
             最近活跃：{{ formatRecent(selectedChat.updatedAt)
             }}<template v-if="selectedChat.chatType === 'group'">
-              · 发起人：{{ selectedChat.members[0].name }}</template
+              · 发起人：{{
+                selectedChat.lastInitiator || selectedChat.members[0].name
+              }}</template
             >
           </p>
-          <button type="button" @click="$emit('workspace')">
-            工作目录： {{ selectedChat.title }}--{{ selectedChat.chatId }}
-            <i class="el-icon-top-right" />
+          <button
+            type="button"
+            class="task-im-dialog-path"
+            @click="$emit('workspace')"
+          >
+            <span>工作目录：</span><code>{{ selectedChat.cwd }}</code
+            ><b aria-hidden="true">↗</b>
           </button>
         </div>
         <template v-if="selectedChat"
-          ><div class="im-detail">
-            <aside v-if="selectedChat.chatType === 'group'">
-              <strong>发起过对话的人</strong
-              ><button
+          ><div
+            class="task-im-dialog-body"
+            :class="{ 'is-dm': selectedChat.chatType !== 'group' }"
+          >
+            <aside
+              v-if="selectedChat.chatType === 'group'"
+              class="task-im-members"
+            >
+              <h4>发起过对话的人</h4>
+              <button
                 v-for="member in selectedChat.members"
                 :key="member.id"
+                type="button"
                 :class="{ active: selectedMember === member.id }"
-                @click="selectedMember = member.id"
+                @click="selectImMember(member)"
               >
-                {{ member.name }}
+                <strong>{{ member.name }}</strong
+                ><small>{{ formatRecent(member.lastActivityAt) }}</small>
               </button>
             </aside>
-            <aside>
-              <strong>对话导航</strong
-              ><button
+            <nav class="task-im-segments" aria-label="对话导航">
+              <h4>对话导航</h4>
+              <section
                 v-for="segment in activeSegments"
                 :key="segment.id"
+                class="task-im-nav-group"
                 :class="{ active: selectedSegment === segment.id }"
-                @click="selectedSegment = segment.id"
               >
-                {{ segment.id }} · {{ segment.title }}
+                <div class="task-im-nav-head">
+                  <button
+                    type="button"
+                    class="task-im-nav-session"
+                    :aria-expanded="expandedSegments.includes(segment.id)"
+                    @click="toggleImSegment(segment)"
+                  >
+                    <span
+                      class="task-im-nav-chevron"
+                      :class="{
+                        expanded: expandedSegments.includes(segment.id),
+                      }"
+                      >›</span
+                    >
+                    <strong>{{ segment.id }}</strong
+                    ><small>{{ formatTime(segment.startedAt).slice(5) }}</small
+                    ><em v-if="segment.current">当前</em>
+                  </button>
+                  <button
+                    type="button"
+                    class="task-im-nav-workspace"
+                    :title="'打开 ' + segment.id + ' 的工作目录'"
+                    @click="$emit('workspace')"
+                  >
+                    <i class="el-icon-folder-opened" />
+                  </button>
+                </div>
+                <div
+                  v-show="expandedSegments.includes(segment.id)"
+                  class="task-im-nav-questions"
+                >
+                  <button
+                    v-for="question in questionsFor(segment)"
+                    :key="question.id"
+                    type="button"
+                    :class="{ active: highlightedMessage === question.id }"
+                    @click="jumpImQuestion(segment, question)"
+                  >
+                    <time>{{ imClock(question.at) }}</time
+                    ><span>{{
+                      question.title || question.content.slice(0, 22)
+                    }}</span>
+                  </button>
+                </div>
+              </section>
+            </nav>
+            <main
+              ref="imTimeline"
+              class="task-im-timeline"
+              aria-label="连续消息时间线"
+            >
+              <button
+                v-if="loadedSegments < activeSegments.length"
+                type="button"
+                class="task-im-load-older"
+                @click="loadOlderImSegments"
+              >
+                加载更早消息
               </button>
-            </aside>
-            <div class="im-timeline">
-              <h4 class="sr-only">连续消息时间线</h4>
-              <div
-                v-for="(message, index) in activeMessages"
-                :key="index"
-                :class="['message', message.role]"
+              <section
+                v-for="segment in visibleSegments"
+                :id="'im-segment-' + segment.id"
+                :key="segment.id"
+                class="task-im-segment"
               >
-                <strong>{{
-                  message.role === "user"
-                    ? (activeMember && activeMember.name) || "用户"
-                    : "专家"
-                }}</strong>
-                <p>{{ message.content }}</p>
-              </div>
-            </div>
+                <div v-if="segment.resetCommand" class="task-im-reset">
+                  <span>上下文已重置</span
+                  ><code>{{ segment.resetCommand }}</code>
+                </div>
+                <div class="task-im-segment-head">
+                  <div>
+                    <strong>{{ segment.id }}</strong
+                    ><span>开始于 {{ formatTime(segment.startedAt) }}</span
+                    ><em v-if="segment.current">当前</em>
+                  </div>
+                  <button type="button" @click="copy(segment.sessionId)">
+                    复制完整 ID
+                  </button>
+                </div>
+                <div
+                  v-for="message in segment.messages"
+                  :id="'im-message-' + message.id"
+                  :key="message.id"
+                  class="task-im-message-row"
+                  :class="[
+                    'is-' + message.role,
+                    { 'is-highlighted': highlightedMessage === message.id },
+                  ]"
+                >
+                  <button
+                    v-if="message.role === 'file'"
+                    type="button"
+                    class="task-im-file-card"
+                    @click="$emit('workspace')"
+                  >
+                    <span class="task-im-file-icon">↧</span
+                    ><span
+                      ><strong>{{ message.fileName }}</strong
+                      ><small
+                        >{{
+                          message.direction === "received"
+                            ? "收到文件"
+                            : "生成文件"
+                        }}
+                        · {{ message.transferStatus }} ·
+                        {{ imClock(message.at) }}</small
+                      ></span
+                    ><b aria-hidden="true">↗</b>
+                  </button>
+                  <div
+                    v-else-if="message.role === 'command'"
+                    class="task-im-command"
+                  >
+                    {{ imClock(message.at) }} · {{ message.content }}
+                  </div>
+                  <div v-else-if="message.role === 'tool'" class="task-im-tool">
+                    {{ imClock(message.at) }} · 工具回执：{{ message.content }}
+                  </div>
+                  <div v-else class="task-im-bubble">
+                    <div>
+                      <strong>{{
+                        message.role === "user" ? activeMember.name : "专家"
+                      }}</strong
+                      ><time>{{ imClock(message.at) }}</time>
+                    </div>
+                    <p>{{ message.content }}</p>
+                  </div>
+                </div>
+              </section>
+            </main>
           </div></template
         ><span slot="footer"
           ><el-button @click="imVisible = false">关闭</el-button></span
@@ -279,16 +429,19 @@
       >
     </template>
     <template v-else
-      ><div class="toolbar">
-        <span>{{ events.length }} 个专家执行动作</span
-        ><el-input
-          v-model="eventKeyword"
-          clearable
-          prefix-icon="el-icon-search"
-          placeholder="搜索名称或 ID"
-        /><el-button type="primary" @click="openEventForm()"
-          >+ 配置专家动作</el-button
+      ><div class="toolbar task-action-bar">
+        <strong class="task-action-summary"
+          >{{ events.length }} 个专家执行动作</strong
         >
+        <div class="task-action-controls">
+          <el-input
+            v-model="eventKeyword"
+            size="small"
+            clearable
+            prefix-icon="el-icon-search"
+            placeholder="搜索名称或 ID"
+          />
+        </div>
       </div>
       <div class="event-action-list">
         <div
@@ -493,6 +646,10 @@ export default {
       selectedChat: null,
       selectedMember: "",
       selectedSegment: "",
+      expandedSegments: [],
+      loadedSegments: 2,
+      highlightedMessage: "",
+      highlightTimer: null,
       eventKeyword: "",
       eventFormVisible: false,
       eventDetailVisible: false,
@@ -553,11 +710,8 @@ export default {
     activeSegments() {
       return this.activeMember ? this.activeMember.segments : [];
     },
-    activeMessages() {
-      const segment = this.activeSegments.find(
-        (x) => x.id === this.selectedSegment,
-      );
-      return segment ? segment.messages : [];
+    visibleSegments() {
+      return this.activeSegments.slice(-this.loadedSegments);
     },
     events() {
       return eventsFor(this.expert.id);
@@ -668,6 +822,99 @@ export default {
         ? `昨天 ${time}`
         : `${date.getMonth() + 1}-${date.getDate()} ${time}`;
     },
+    imClock(value) {
+      if (!value) return "-";
+      return new Date(value).toLocaleTimeString("zh-CN", {
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: false,
+      });
+    },
+    questionsFor(segment) {
+      return segment.messages
+        .filter((message) => message.role === "user" && message.question)
+        .slice()
+        .reverse();
+    },
+    scrollImToBottom() {
+      this.$nextTick(() => {
+        const timeline = this.$refs.imTimeline;
+        if (timeline) timeline.scrollTop = timeline.scrollHeight;
+      });
+    },
+    selectImMember(member) {
+      this.selectedMember = member.id;
+      this.selectedSegment = member.segments.length
+        ? member.segments[member.segments.length - 1].id
+        : "";
+      this.loadedSegments = 2;
+      this.expandedSegments = this.selectedSegment
+        ? [this.selectedSegment]
+        : [];
+      this.highlightedMessage = "";
+      this.scrollImToBottom();
+    },
+    loadOlderImSegments() {
+      const timeline = this.$refs.imTimeline;
+      if (!timeline || this.loadedSegments >= this.activeSegments.length)
+        return;
+      const beforeHeight = timeline.scrollHeight;
+      const beforeTop = timeline.scrollTop;
+      this.loadedSegments += 1;
+      this.$nextTick(() => {
+        if (this.$refs.imTimeline)
+          this.$refs.imTimeline.scrollTop =
+            beforeTop + this.$refs.imTimeline.scrollHeight - beforeHeight;
+      });
+    },
+    scrollImAnchor(anchorId) {
+      this.$nextTick(() => {
+        const timeline = this.$refs.imTimeline;
+        const target = timeline && timeline.querySelector(`[id="${anchorId}"]`);
+        if (!target) return;
+        const delta =
+          target.getBoundingClientRect().top -
+          timeline.getBoundingClientRect().top;
+        timeline.scrollTo({
+          top: timeline.scrollTop + delta - 12,
+          behavior: "smooth",
+        });
+      });
+    },
+    jumpImSegment(segmentId) {
+      const index = this.activeSegments.findIndex(
+        (segment) => segment.id === segmentId,
+      );
+      if (index < 0) return;
+      this.loadedSegments = Math.max(
+        this.loadedSegments,
+        this.activeSegments.length - index,
+      );
+      this.selectedSegment = segmentId;
+      this.scrollImAnchor(`im-segment-${segmentId}`);
+    },
+    toggleImSegment(segment) {
+      if (this.expandedSegments.includes(segment.id)) {
+        this.expandedSegments = this.expandedSegments.filter(
+          (id) => id !== segment.id,
+        );
+      } else {
+        this.expandedSegments = [...this.expandedSegments, segment.id];
+        this.jumpImSegment(segment.id);
+      }
+    },
+    jumpImQuestion(segment, message) {
+      this.jumpImSegment(segment.id);
+      if (!this.expandedSegments.includes(segment.id))
+        this.expandedSegments = [...this.expandedSegments, segment.id];
+      this.highlightedMessage = message.id;
+      this.scrollImAnchor(`im-message-${message.id}`);
+      clearTimeout(this.highlightTimer);
+      this.highlightTimer = setTimeout(() => {
+        if (this.highlightedMessage === message.id)
+          this.highlightedMessage = "";
+      }, 2200);
+    },
     channelLogo(platform) {
       return publicAsset(
         `/experts/channel-icons/${{ 企业微信: "wecom", 钉钉: "dingtalk", 飞书: "feishu" }[platform] || "wecom"}.svg`,
@@ -719,19 +966,26 @@ export default {
     },
     openChat(chat) {
       this.selectedChat = chat;
-      this.selectedMember = chat.members[0].id;
-      this.selectedSegment = chat.members[0].segments.slice(-1)[0].id;
+      const latestMember = chat.members
+        .slice()
+        .sort((a, b) =>
+          String(b.lastActivityAt || "").localeCompare(
+            String(a.lastActivityAt || ""),
+          ),
+        )[0];
+      this.selectImMember(latestMember);
       this.imVisible = true;
     },
   },
+  beforeDestroy() {
+    clearTimeout(this.highlightTimer);
+  },
   watch: {
-    selectedMember(id) {
-      const member =
-        this.selectedChat && this.selectedChat.members.find((x) => x.id === id);
-      this.selectedSegment =
-        member && member.segments.length
-          ? member.segments[member.segments.length - 1].id
-          : "";
+    imVisible(value) {
+      if (!value) {
+        clearTimeout(this.highlightTimer);
+        this.highlightedMessage = "";
+      }
     },
   },
 };

@@ -48,6 +48,28 @@ describe("演示状态", () => {
       ),
     ).toBe(true);
   });
+  it("升级消息渠道样例时保留自建聊天并补齐原型会话", () => {
+    const saved = demo.createSeed();
+    saved.demoDataRevision = 2;
+    saved.imChats = [
+      { id: "im_wecom_1", expertId: "exp_quality", members: [] },
+      { id: "custom_chat", expertId: "exp_quality", members: [] },
+    ];
+    const upgraded = demo.upgradeExpertFixtures(saved);
+    expect(upgraded.imChats.map((chat) => chat.id)).toContain("custom_chat");
+    expect(upgraded.imChats.some((chat) => chat.id === "im_wecom_1")).toBe(
+      false,
+    );
+    const group = upgraded.imChats.find((chat) => chat.chatType === "group");
+    expect(group.members).toHaveLength(3);
+    expect(group.members[0].segments).toHaveLength(3);
+    expect(
+      group.members[0].segments[1].messages.map((item) => item.role),
+    ).toContain("file");
+    expect(upgraded.imChats.some((chat) => chat.chatType === "single")).toBe(
+      true,
+    );
+  });
   it("会话软归档不影响项目看板卡", () => {
     const card = demo.projectById("proj_factory").tasks[0];
     const conversation = demo.conversationById("conv_quality_1");

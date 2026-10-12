@@ -1,5 +1,6 @@
 import Vue from "vue";
 import { clearFiles } from "./file-db";
+import { createImDemoChats } from "./im-fixtures";
 import {
   enrichProjectFixtures,
   PROJECT_EXPERT_FIXTURES,
@@ -10,7 +11,7 @@ const clone = (value) => JSON.parse(JSON.stringify(value));
 const uid = (prefix) =>
   `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`;
 const now = () => new Date().toISOString();
-const DEMO_DATA_REVISION = 2;
+const DEMO_DATA_REVISION = 3;
 
 const ADDITIONAL_EXPERT_SPECS = [
   {
@@ -364,61 +365,7 @@ export function createSeed() {
         ],
       },
     ],
-    imChats: [
-      {
-        id: "im_wecom_1",
-        expertId: "exp_quality",
-        platform: "企业微信",
-        chatType: "group",
-        chatId: "wr_48392",
-        title: "质量协作群",
-        updatedAt: "2026-10-10T10:12:00+08:00",
-        members: [
-          {
-            id: "u_chen",
-            name: "陈工",
-            segments: [
-              {
-                id: "seg_1",
-                title: "第一段对话",
-                messages: [
-                  { role: "user", content: "昨天的不良品主要集中在哪一批？" },
-                  {
-                    role: "assistant",
-                    content: "从演示数据看，主要集中在 B-102 批次。",
-                  },
-                ],
-              },
-              {
-                id: "seg_2",
-                title: "重置后的对话",
-                messages: [
-                  { role: "user", content: "帮我继续跟进" },
-                  { role: "assistant", content: "已列出需要核查的工艺参数。" },
-                ],
-              },
-            ],
-          },
-          {
-            id: "u_li",
-            name: "李工",
-            segments: [
-              {
-                id: "seg_3",
-                title: "第一段对话",
-                messages: [
-                  { role: "user", content: "今天有新的异常吗？" },
-                  {
-                    role: "assistant",
-                    content: "目前演示数据中没有新增异常。",
-                  },
-                ],
-              },
-            ],
-          },
-        ],
-      },
-    ],
+    imChats: createImDemoChats(),
     eventRuns: [
       {
         id: "evt_daily",
@@ -513,6 +460,16 @@ export function upgradeExpertFixtures(saved) {
       (item) => templateIds.has(item.id) && !existingTemplates.has(item.id),
     ),
   );
+  if (Number(saved.demoDataRevision || 1) < 3) {
+    const existingChats = Array.isArray(saved.imChats) ? saved.imChats : [];
+    // Replace only the original bundled sample; keep user-created demo records.
+    saved.imChats = [
+      ...existingChats.filter((chat) => chat.id !== "im_wecom_1"),
+      ...createImDemoChats().filter(
+        (chat) => !existingChats.some((existing) => existing.id === chat.id),
+      ),
+    ];
+  }
   saved.demoDataRevision = DEMO_DATA_REVISION;
   return saved;
 }

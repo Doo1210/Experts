@@ -84,23 +84,6 @@
         专家模板
       </button>
     </div>
-    <div class="expert-list-tools">
-      <slot name="tools" />
-      <button
-        type="button"
-        class="page-create-btn"
-        @click="$emit('create-expert')"
-      >
-        <span class="page-create-btn-icon">+</span>新建专家
-      </button>
-      <button
-        type="button"
-        class="page-create-btn"
-        @click="$emit('create-project')"
-      >
-        <span class="page-create-btn-icon">+</span>新建项目
-      </button>
-    </div>
   </div>
 </template>
 

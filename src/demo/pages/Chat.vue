@@ -2,7 +2,7 @@
   <div v-if="expert" class="pc-chat">
     <header class="pc-top">
       <div class="pc-top-left">
-        <button class="pc-back" aria-label="返回专家" @click="back">
+        <button class="pc-back" aria-label="返回专家列表" @click="back">
           <i class="el-icon-arrow-left" />
         </button>
         <button class="pc-expert" @click="back">
@@ -877,9 +877,8 @@ export default {
     back() {
       this.$router
         .push({
-          name: "expert",
-          params: { id: this.expert.id },
-          query: { tab: "task", embed: this.$route.query.embed },
+          name: "experts",
+          query: { embed: this.$route.query.embed },
         })
         .catch(() => {});
     },

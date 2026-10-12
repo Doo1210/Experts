@@ -1,38 +1,24 @@
 <template>
   <div class="page page-list expert-list-page">
-    <list-header
-      :active="tab"
-      @create-expert="openCreate"
-      @create-project="goCreateProject"
-    >
-      <template #tools>
-        <div
-          class="expert-list-search"
-          :class="{ 'is-open': searchVisible || keyword }"
-        >
-          <button
-            type="button"
-            class="expert-list-search-toggle"
-            :aria-label="
-              keyword ? '清除搜索' : tab === 'mine' ? '搜索专家' : '搜索模板'
-            "
-            :aria-expanded="Boolean(searchVisible || keyword)"
-            @click="toggleSearch"
-          >
-            <i :class="keyword ? 'el-icon-close' : 'el-icon-search'" />
-          </button>
-          <el-input
-            v-if="searchVisible || keyword"
-            ref="expertSearch"
-            v-model="keyword"
-            size="small"
-            clearable
-            :placeholder="tab === 'mine' ? '搜索专家' : '搜索模板'"
-            @keyup.esc.native="closeSearch"
-          />
-        </div>
-      </template>
-    </list-header>
+    <list-header :active="tab" />
+    <div class="expert-list-tools">
+      <el-input
+        v-model="keyword"
+        size="small"
+        clearable
+        prefix-icon="el-icon-search"
+        :placeholder="tab === 'mine' ? '搜索专家' : '搜索模板'"
+        :aria-label="tab === 'mine' ? '搜索专家' : '搜索模板'"
+      />
+      <button
+        v-if="tab === 'mine'"
+        type="button"
+        class="page-create-btn"
+        @click="openCreate"
+      >
+        <span class="page-create-btn-icon">+</span>新建专家
+      </button>
+    </div>
     <div class="expert-list-scroll">
       <div v-if="filtered.length" class="card-grid">
         <article
@@ -79,7 +65,6 @@
                 ···
               </button>
               <el-dropdown-menu slot="dropdown"
-                ><el-dropdown-item command="edit">编辑资料</el-dropdown-item
                 ><el-dropdown-item command="publish"
                   >发布为模板</el-dropdown-item
                 ><el-dropdown-item command="delete" divided
@@ -224,44 +209,6 @@
       @submit="createExpert"
       @closed="clearCreateRoute"
     />
-    <el-dialog
-      v-if="editingId"
-      title="编辑专家资料"
-      :visible.sync="editVisible"
-      width="540px"
-      :close-on-click-modal="false"
-      @closed="clearForm"
-    >
-      <el-form label-position="top"
-        ><el-form-item label="名称" required
-          ><el-input
-            v-model.trim="form.name"
-            maxlength="40"
-            show-word-limit /></el-form-item
-        ><el-form-item label="简介"
-          ><el-input
-            v-model="form.description"
-            type="textarea"
-            :rows="3"
-            maxlength="240"
-            show-word-limit /></el-form-item
-        ><el-form-item label="标签（用逗号分隔）"
-          ><el-input
-            v-model="tagsText"
-            placeholder="例如：质量管理, 数据分析" /></el-form-item
-        ><el-form-item label="默认模型"
-          ><el-select v-model="form.model" style="width: 100%"
-            ><el-option label="通用大模型" value="通用大模型" /><el-option
-              label="推理模型"
-              value="推理模型" /><el-option
-              label="视觉模型"
-              value="视觉模型" /></el-select></el-form-item
-      ></el-form>
-      <span slot="footer"
-        ><el-button @click="editVisible = false">取消</el-button
-        ><el-button type="primary" @click="saveEdit">保存</el-button></span
-      >
-    </el-dialog>
     <template-intro-dialog
       :visible.sync="templateVisible"
       :template="selectedTemplate"
@@ -275,7 +222,6 @@
 import {
   state,
   addExpert,
-  updateExpert,
   deleteExpert,
   createConversation,
   publishTemplate,
@@ -292,15 +238,10 @@ export default {
     return {
       state,
       keyword: "",
-      searchVisible: false,
       createVisible: false,
-      editVisible: false,
       templateVisible: false,
       selectedTemplate: null,
-      editingId: "",
       templateId: "",
-      form: { name: "", description: "", model: "通用大模型" },
-      tagsText: "",
     };
   },
   computed: {
@@ -326,7 +267,6 @@ export default {
   watch: {
     tab() {
       this.keyword = "";
-      this.searchVisible = false;
     },
     "$route.query.create"(value) {
       if (value === "1") this.createVisible = true;
@@ -334,18 +274,8 @@ export default {
   },
   methods: {
     publicAsset,
-    toggleSearch() {
-      if (this.keyword) return this.clearSearch();
-      this.searchVisible = !this.searchVisible;
-      if (this.searchVisible)
-        this.$nextTick(() => this.$refs.expertSearch?.focus());
-    },
-    closeSearch() {
-      if (!this.keyword) this.searchVisible = false;
-    },
     clearSearch() {
       this.keyword = "";
-      this.searchVisible = false;
     },
     openCreate() {
       this.templateId = "";
@@ -383,12 +313,6 @@ export default {
       return this.state.eventRuns.filter((event) => event.expertId === item.id)
         .length;
     },
-    goCreateProject() {
-      this.$router.push({
-        name: "projects",
-        query: { create: "1", embed: this.$route.query.embed },
-      });
-    },
     openExpert(item) {
       this.$router.push({
         name: "expert",
@@ -415,19 +339,10 @@ export default {
       this.createVisible = true;
     },
     onCommand(command, item) {
-      if (command === "edit") {
-        this.editingId = item.id;
-        this.form = {
-          name: item.name,
-          description: item.description,
-          model: item.model,
-        };
-        this.tagsText = item.tags.join(", ");
-        this.editVisible = true;
-      } else if (command === "publish") {
+      if (command === "publish") {
         publishTemplate(item.id);
         this.$message.success("已发布到演示模板库");
-      } else
+      } else if (command === "delete") {
         this.$confirm(`确定删除“${item.name}”？`, "删除专家", {
           type: "warning",
         })
@@ -436,11 +351,7 @@ export default {
             this.$message.success("已删除");
           })
           .catch(() => {});
-    },
-    clearForm() {
-      this.editingId = "";
-      this.form = { name: "", description: "", model: "通用大模型" };
-      this.tagsText = "";
+      }
     },
     clearCreateRoute() {
       this.templateId = "";
@@ -456,19 +367,6 @@ export default {
       this.templateId = "";
       this.$message.success("专家创建成功（演示）");
       this.openExpert(item);
-    },
-    saveEdit() {
-      if (!this.form.name) return this.$message.warning("请填写专家名称");
-      const payload = {
-        ...this.form,
-        tags: this.tagsText
-          .split(/[,，]/)
-          .map((s) => s.trim())
-          .filter(Boolean),
-      };
-      updateExpert(this.editingId, payload);
-      this.editVisible = false;
-      this.$message.success("已更新");
     },
   },
 };

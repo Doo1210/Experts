@@ -1,19 +1,23 @@
 <template>
   <div class="page page-list project-list-page">
-    <list-header
-      active="project"
-      @create-expert="goCreateExpert"
-      @create-project="createVisible = true"
-    >
-      <template #tools
-        ><el-input
-          v-model="keyword"
-          size="small"
-          clearable
-          prefix-icon="el-icon-search"
-          placeholder="搜索项目"
-      /></template>
-    </list-header>
+    <list-header active="project" />
+    <div class="expert-list-tools">
+      <el-input
+        v-model="keyword"
+        size="small"
+        clearable
+        prefix-icon="el-icon-search"
+        placeholder="搜索项目"
+        aria-label="搜索项目"
+      />
+      <button
+        type="button"
+        class="page-create-btn"
+        @click="createVisible = true"
+      >
+        <span class="page-create-btn-icon">+</span>新建项目
+      </button>
+    </div>
     <div class="expert-list-scroll">
       <div v-if="filtered.length" class="card-grid">
         <article
@@ -167,12 +171,6 @@ export default {
     expertAvatarUrl,
     isProjectImageIcon,
     projectIconLabel,
-    goCreateExpert() {
-      this.$router.push({
-        name: "experts",
-        query: { create: "1", embed: this.$route.query.embed },
-      });
-    },
     openProject(project) {
       this.$router.push({
         name: "project",
