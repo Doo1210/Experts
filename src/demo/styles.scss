@@ -611,9 +611,6 @@ button {
   inset: 0;
   display: flex;
   align-items: center;
-  transition:
-    opacity var(--hover-feedback-duration) ease,
-    visibility 0s linear;
 }
 .expert-card-mine .expert-card-info {
   display: flex;
@@ -679,14 +676,12 @@ button {
 .expert-card-mine:hover .expert-card-info,
 .expert-card-mine:focus-within .expert-card-info {
   opacity: 0;
-  transition-delay: var(--hover-feedback-delay);
   pointer-events: none;
 }
 .expert-card-mine:hover .expert-card-hover-actions,
 .expert-card-mine:focus-within .expert-card-hover-actions {
   opacity: 1;
   visibility: visible;
-  transition-delay: var(--hover-feedback-delay);
   pointer-events: auto;
 }
 .expert-card-mine .expert-card-start-btn,
@@ -1130,9 +1125,6 @@ button {
   inset: 0;
   display: flex;
   align-items: center;
-  transition:
-    opacity var(--hover-feedback-duration) ease,
-    visibility 0s linear;
 }
 .expert-card-template-tags {
   justify-content: flex-start;
@@ -1177,14 +1169,12 @@ button {
 .expert-card-template:hover .expert-card-template-tags,
 .expert-card-template:focus-within .expert-card-template-tags {
   opacity: 0;
-  transition-delay: var(--hover-feedback-delay);
   pointer-events: none;
 }
 .expert-card-template:hover .expert-card-template-actions,
 .expert-card-template:focus-within .expert-card-template-actions {
   opacity: 1;
   visibility: visible;
-  transition-delay: var(--hover-feedback-delay);
   pointer-events: auto;
 }
 .expert-card-template-actions button:focus-visible {
@@ -1398,6 +1388,7 @@ button {
   .expert-card-template-actions {
     top: 44px;
     opacity: 1;
+    visibility: visible;
     pointer-events: auto;
   }
   .expert-card-template:hover .expert-card-template-tags,
@@ -1415,6 +1406,7 @@ button {
   .expert-card-mine .expert-card-hover-actions {
     top: 44px;
     opacity: 1;
+    visibility: visible;
     pointer-events: auto;
   }
   .expert-card-mine:hover .expert-card-info,
