@@ -918,7 +918,7 @@
 .pc-tasks,
 .pc-workspace {
   display: flex;
-  flex: 0 0 198px;
+  flex: 0 0 200px;
   flex-direction: column;
   min-width: 0;
   min-height: 0;
@@ -1408,8 +1408,5 @@
 @media (max-width: 1050px) {
   .pc-workspace {
     flex-basis: 230px;
-  }
-  .pc-tasks {
-    flex-basis: 176px;
   }
 }
