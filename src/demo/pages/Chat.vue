@@ -546,16 +546,23 @@
             <button class="pc-workspace-root" @click="workspaceFolderId = null">
               <i class="el-icon-folder-opened" /> workspace
             </button>
-            <button
-              class="pc-workspace-set-cwd"
-              title="设为工作目录"
-              aria-label="将 workspace 设为工作目录"
-              @click.stop="setCwd('/')"
+            <el-tooltip
+              content="设为工作目录"
+              placement="top"
+              effect="light"
+              :open-delay="100"
+              :enterable="false"
             >
-              <span class="pc-folder-settings-icon" aria-hidden="true">
-                <i class="el-icon-folder" /><i class="el-icon-setting" />
-              </span>
-            </button>
+              <button
+                class="pc-workspace-set-cwd"
+                aria-label="将 workspace 设为工作目录"
+                @click.stop="setCwd('/')"
+              >
+                <span class="pc-folder-settings-icon" aria-hidden="true">
+                  <i class="el-icon-folder" /><i class="el-icon-setting" />
+                </span>
+              </button>
+            </el-tooltip>
           </div>
           <div
             v-for="node in workspaceTreeRows"
@@ -588,20 +595,26 @@
               <span v-else class="pc-tree-arrow" />
               <span class="pc-tree-icon">{{ workspaceIcon(node.item) }}</span>
               <span class="pc-tree-name">{{ node.item.name }}</span></button
-            ><button
+            ><el-tooltip
               v-if="
                 node.item.kind === 'folder' &&
                 conversation &&
                 conversation.cwd !== folderPath(node.item.id)
               "
-              class="pc-workspace-set-cwd"
-              title="设为工作目录"
-              :aria-label="'将' + node.item.name + '设为工作目录'"
-              @click="setCwd(folderPath(node.item.id))"
+              content="设为工作目录"
+              placement="top"
+              effect="light"
+              :open-delay="100"
+              :enterable="false"
             >
-              <span class="pc-folder-settings-icon" aria-hidden="true">
-                <i class="el-icon-folder" /><i class="el-icon-setting" />
-              </span></button
+              <button
+                class="pc-workspace-set-cwd"
+                :aria-label="'将' + node.item.name + '设为工作目录'"
+                @click="setCwd(folderPath(node.item.id))"
+              >
+                <span class="pc-folder-settings-icon" aria-hidden="true">
+                  <i class="el-icon-folder" /><i class="el-icon-setting" />
+                </span></button></el-tooltip
             ><button
               v-if="node.item.kind === 'file'"
               title="下载文件"
