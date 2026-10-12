@@ -999,8 +999,39 @@
   font-size: 12.5px;
   font-weight: 600;
   text-align: left;
+  white-space: nowrap;
+}
+.pc-task-title-text {
+  display: block;
+  width: 100%;
+  overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.pc-task-title-text.marquee {
+  display: inline-block;
+  width: max-content;
+  overflow: visible;
+  text-overflow: clip;
+  animation: pc-task-title-marquee var(--pc-task-marquee-duration) linear
+    infinite;
+}
+@keyframes pc-task-title-marquee {
+  0%,
+  12%,
+  88%,
+  100% {
+    transform: translateX(0);
+  }
+  45%,
+  55% {
+    transform: translateX(calc(0px - var(--pc-task-marquee-distance)));
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .pc-task-title-text.marquee {
+    animation: none;
+  }
 }
 .pc-task.active .pc-task-title {
   color: #2869d7;

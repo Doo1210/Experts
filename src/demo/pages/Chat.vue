@@ -419,6 +419,10 @@
                 active: conversation && item.id === conversation.id,
                 pinned: !!item.pinned,
               }"
+              @mouseenter="startTaskMarquee(item, $event)"
+              @mouseleave="stopTaskMarquee($event)"
+              @focusin="startTaskMarquee(item, $event)"
+              @focusout="stopTaskMarquee($event)"
               @click="selectTask(item)"
             >
               <div class="pc-task-line">
@@ -428,7 +432,19 @@
                   @click.stop="handleTaskTitleClick(item)"
                   @dblclick.stop="handleTaskTitleDblclick(item)"
                 >
-                  {{ item.title }}</button
+                  <span
+                    class="pc-task-title-text"
+                    :class="{ marquee: marqueeTaskId === item.id }"
+                    :style="
+                      marqueeTaskId === item.id
+                        ? {
+                            '--pc-task-marquee-distance': `${marqueeDistance}px`,
+                            '--pc-task-marquee-duration': `${marqueeDuration}s`,
+                          }
+                        : null
+                    "
+                    >{{ item.title }}</span
+                  ></button
                 ><span v-if="item.status === 'running'" class="pc-spinner" />
                 <div class="pc-task-actions">
                   <button
@@ -748,6 +764,9 @@ export default {
       clarifyDraft: "",
       pathPopoverDismissed: false,
       taskClickTimer: null,
+      marqueeTaskId: null,
+      marqueeDistance: 0,
+      marqueeDuration: 6,
       expandedProcess: [],
       taskDialogVisible: false,
       taskDialogMode: "rename",
@@ -1085,6 +1104,33 @@ export default {
     },
     togglePin(item) {
       updateConversation(item.id, { pinned: !item.pinned });
+    },
+    startTaskMarquee(item, event) {
+      const card = event.currentTarget;
+      requestAnimationFrame(() => {
+        if (
+          !card.isConnected ||
+          (!card.matches(":hover") && !card.matches(":focus-within"))
+        )
+          return;
+        const title = card.querySelector(".pc-task-title");
+        const text = card.querySelector(".pc-task-title-text");
+        if (!title || !text) return;
+        const distance = text.scrollWidth - title.clientWidth;
+        this.marqueeTaskId = distance > 1 ? item.id : null;
+        this.marqueeDistance = Math.max(0, distance);
+        this.marqueeDuration = Math.max(5, Math.min(14, distance / 18 + 4));
+      });
+    },
+    stopTaskMarquee(event) {
+      const card = event.currentTarget;
+      requestAnimationFrame(() => {
+        if (
+          !card.isConnected ||
+          (!card.matches(":hover") && !card.matches(":focus-within"))
+        )
+          this.marqueeTaskId = null;
+      });
     },
     handleTaskTitleClick(item) {
       if (this.taskClickTimer) clearTimeout(this.taskClickTimer);
