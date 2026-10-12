@@ -641,6 +641,18 @@ export function publishTemplate(expertId) {
   persist();
 }
 
+export function conversationTitleFromFirstMessage(text) {
+  const characters = Array.from(
+    String(text || "")
+      .trim()
+      .replace(/\s+/g, " "),
+  );
+  if (!characters.length) return "新任务";
+  return characters.length > 20
+    ? `${characters.slice(0, 20).join("")}…`
+    : characters.join("");
+}
+
 export function createConversation(expertId, title = "新对话任务") {
   const item = {
     id: uid("conv"),

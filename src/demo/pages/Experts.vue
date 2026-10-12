@@ -219,13 +219,7 @@
 </template>
 
 <script>
-import {
-  state,
-  addExpert,
-  deleteExpert,
-  createConversation,
-  publishTemplate,
-} from "../state";
+import { state, addExpert, deleteExpert, publishTemplate } from "../state";
 import ListHeader from "../components/ListHeader.vue";
 import CreateExpertDialog from "../components/CreateExpertDialog.vue";
 import TemplateIntroDialog from "../components/TemplateIntroDialog.vue";
@@ -325,11 +319,10 @@ export default {
       this.templateVisible = true;
     },
     startChat(item) {
-      const conv = createConversation(item.id);
       this.$router.push({
         name: "chat",
         params: { id: item.id },
-        query: { conv: conv.id, embed: this.$route.query.embed },
+        query: { embed: this.$route.query.embed },
       });
     },
     useTemplate(item) {

@@ -16,6 +16,17 @@ beforeEach(async () => {
 });
 
 describe("演示状态", () => {
+  it("首次对话标题保留前 20 个字符，超出显示省略号", () => {
+    expect(demo.conversationTitleFromFirstMessage("12345678901234567890")).toBe(
+      "12345678901234567890",
+    );
+    expect(
+      demo.conversationTitleFromFirstMessage("123456789012345678901"),
+    ).toBe("12345678901234567890…");
+    expect(
+      demo.conversationTitleFromFirstMessage("  检查  本周良率\n变化  "),
+    ).toBe("检查 本周良率 变化");
+  });
   it("补充专家与模板时保留已有演示内容", () => {
     const saved = demo.createSeed();
     delete saved.demoDataRevision;

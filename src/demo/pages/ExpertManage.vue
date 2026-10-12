@@ -270,13 +270,7 @@
 
 <script>
 import Vue from "vue";
-import {
-  expertById,
-  createConversation,
-  conversationsFor,
-  deleteExpert,
-  persist,
-} from "../state";
+import { expertById, conversationsFor, deleteExpert, persist } from "../state";
 import ExpertBasicTab from "../components/ExpertBasicTab.vue";
 import Workspace from "../components/Workspace.vue";
 import TaskOverview from "../components/TaskOverview.vue";
@@ -497,11 +491,10 @@ export default {
         .catch(() => {});
     },
     startTask() {
-      const conv = createConversation(this.expert.id, "新任务");
       this.$router.push({
         name: "chat",
         params: { id: this.expert.id },
-        query: { conv: conv.id, embed: this.$route.query.embed },
+        query: { embed: this.$route.query.embed },
       });
     },
     confirmDeleteExpert() {

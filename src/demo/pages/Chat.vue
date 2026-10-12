@@ -700,8 +700,8 @@ import {
   state,
   expertById,
   conversationById,
-  conversationsFor,
   createConversation,
+  conversationTitleFromFirstMessage,
   updateConversation,
   deleteConversation,
   sendDemoMessage,
@@ -710,6 +710,16 @@ import {
 } from "../state";
 import { saveFile, readFile } from "../file-db";
 import { avatarSrcFor } from "../avatar";
+function emptyConversation() {
+  return {
+    id: null,
+    title: "",
+    status: "ready",
+    archived: false,
+    cwd: "/",
+    messages: [],
+  };
+}
 function saveBlob(blob, name) {
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
@@ -724,6 +734,7 @@ export default {
     return {
       state,
       draft: "",
+      draftConversation: emptyConversation(),
       showArchived: false,
       workspaceOpen: false,
       workspaceFolderId: null,
@@ -758,7 +769,12 @@ export default {
       return expertById(this.$route.params.id);
     },
     conversation() {
-      return conversationById(this.$route.query.conv);
+      return this.$route.query.conv
+        ? conversationById(this.$route.query.conv)
+        : this.draftConversation;
+    },
+    isDraftTask() {
+      return !this.$route.query.conv;
     },
     visibleConversations() {
       return state.conversations
@@ -857,15 +873,11 @@ export default {
     },
   },
   mounted() {
-    if (!this.conversation && this.expert)
-      this.selectTask(
-        conversationsFor(this.expert.id)[0] ||
-          createConversation(this.expert.id, "新任务"),
-      );
+    if (!this.conversation && this.expert) this.newTask();
     this.$nextTick(this.scrollBottom);
   },
   beforeDestroy() {
-    if (this.conversation) stopDemoStream(this.conversation.id);
+    if (this.$route.query.conv) stopDemoStream(this.$route.query.conv);
     if (this.taskClickTimer) clearTimeout(this.taskClickTimer);
     this.clearPreview();
   },
@@ -873,6 +885,7 @@ export default {
     "$route.query.conv"(next, prior) {
       if (prior && next !== prior) stopDemoStream(prior);
       this.draft = "";
+      this.pendingFiles = [];
       this.clarifyDraft = "";
       this.$nextTick(this.scrollBottom);
     },
@@ -908,7 +921,15 @@ export default {
         .catch(() => {});
     },
     newTask() {
-      this.selectTask(createConversation(this.expert.id, "新任务"));
+      this.draftConversation = emptyConversation();
+      this.draft = "";
+      this.pendingFiles = [];
+      this.clarifyDraft = "";
+      this.workspaceOpen = false;
+      const { conv, ...query } = this.$route.query;
+      this.$router
+        .push({ name: "chat", params: { id: this.expert.id }, query })
+        .catch(() => {});
     },
     send() {
       if (
@@ -921,9 +942,29 @@ export default {
       const content =
         this.draft.trim() ||
         this.pendingFiles.map((file) => file.name).join("、");
-      sendDemoMessage(this.conversation.id, content);
+      let conversationId = this.conversation.id;
+      if (this.isDraftTask) {
+        const created = createConversation(
+          this.expert.id,
+          conversationTitleFromFirstMessage(content),
+        );
+        conversationId = created.id;
+        if (this.draftConversation.cwd !== "/")
+          updateConversation(conversationId, {
+            cwd: this.draftConversation.cwd,
+          });
+      }
+      sendDemoMessage(conversationId, content);
       this.draft = "";
       this.pendingFiles = [];
+      if (this.isDraftTask)
+        this.$router
+          .replace({
+            name: "chat",
+            params: { id: this.expert.id },
+            query: { ...this.$route.query, conv: conversationId },
+          })
+          .catch(() => {});
       this.$nextTick(this.scrollBottom);
     },
     handleEnter() {
@@ -936,13 +977,15 @@ export default {
       this.modelPickerVisible = false;
     },
     stop() {
-      if (this.conversation) stopDemoStream(this.conversation.id);
+      if (this.conversation?.id) stopDemoStream(this.conversation.id);
     },
     cwdLabel(cwd) {
       return !cwd || cwd === "/" ? "工作空间" : String(cwd).replace(/^\//, "");
     },
     setCwd(cwd) {
-      if (this.conversation) updateConversation(this.conversation.id, { cwd });
+      if (this.isDraftTask) this.draftConversation.cwd = cwd;
+      else if (this.conversation)
+        updateConversation(this.conversation.id, { cwd });
     },
     folderPath(id) {
       const parts = [];
