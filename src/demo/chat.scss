@@ -1161,18 +1161,67 @@
   text-align: left;
 }
 .pc-workspace-root {
-  width: 100%;
+  flex: 1;
   font-weight: 600;
 }
-.pc-workspace-root.selected,
-.pc-workspace-root:hover,
+.pc-workspace-root-row {
+  display: flex;
+  align-items: center;
+  min-height: 29px;
+  padding-right: 4px;
+  border-radius: 6px;
+}
+.pc-workspace-root-row.selected,
+.pc-workspace-root-row:hover,
 .pc-workspace-row:hover {
   background: rgba(99, 102, 241, 0.06);
 }
-.pc-workspace-root.cwd,
+.pc-workspace-root-row.cwd .pc-workspace-root,
+.pc-workspace-root-row.cwd .pc-workspace-set-cwd,
 .pc-workspace-row.cwd .pc-tree-name {
   color: #4080ff;
   font-weight: 600;
+}
+.pc-workspace-root-row .pc-workspace-set-cwd,
+.pc-workspace-row .pc-workspace-set-cwd {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 28px;
+  width: 28px;
+  height: 29px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: #8391a5;
+}
+.pc-workspace-root-row.cwd .pc-workspace-set-cwd {
+  color: #4080ff;
+}
+.pc-workspace-set-cwd:hover,
+.pc-workspace-set-cwd:focus-visible {
+  color: #4080ff;
+}
+.pc-folder-settings-icon {
+  position: relative;
+  display: inline-flex;
+  align-items: flex-start;
+  width: 20px;
+  height: 18px;
+}
+.pc-folder-settings-icon .el-icon-folder {
+  font-size: 17px;
+  line-height: 18px;
+}
+.pc-folder-settings-icon .el-icon-setting {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  border-radius: 50%;
+  background: #fff;
+  font-size: 11px;
+  line-height: 11px;
 }
 .pc-workspace-row {
   display: flex;

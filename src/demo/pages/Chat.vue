@@ -536,16 +536,27 @@
           </button>
         </div>
         <div class="pc-workspace-tree">
-          <button
-            class="pc-workspace-root"
+          <div
+            class="pc-workspace-root-row"
             :class="{
               selected: workspaceFolderId === null,
               cwd: conversation && conversation.cwd === '/',
             }"
-            @click="workspaceFolderId = null"
           >
-            <i class="el-icon-folder-opened" /> 工作空间
-          </button>
+            <button class="pc-workspace-root" @click="workspaceFolderId = null">
+              <i class="el-icon-folder-opened" /> workspace
+            </button>
+            <button
+              class="pc-workspace-set-cwd"
+              title="设为工作目录"
+              aria-label="将 workspace 设为工作目录"
+              @click.stop="setCwd('/')"
+            >
+              <span class="pc-folder-settings-icon" aria-hidden="true">
+                <i class="el-icon-folder" /><i class="el-icon-setting" />
+              </span>
+            </button>
+          </div>
           <div
             v-for="node in workspaceTreeRows"
             :key="node.item.id"
@@ -583,10 +594,14 @@
                 conversation &&
                 conversation.cwd !== folderPath(node.item.id)
               "
+              class="pc-workspace-set-cwd"
               title="设为工作目录"
+              :aria-label="'将' + node.item.name + '设为工作目录'"
               @click="setCwd(folderPath(node.item.id))"
             >
-              <i class="el-icon-position" /></button
+              <span class="pc-folder-settings-icon" aria-hidden="true">
+                <i class="el-icon-folder" /><i class="el-icon-setting" />
+              </span></button
             ><button
               v-if="node.item.kind === 'file'"
               title="下载文件"
@@ -841,8 +856,8 @@ export default {
     workspaceFolderName() {
       return this.workspaceFolderId
         ? this.expert.files.find((item) => item.id === this.workspaceFolderId)
-            ?.name || "工作空间"
-        : "工作空间";
+            ?.name || "workspace"
+        : "workspace";
     },
     workspaceTreeRows() {
       if (!this.expert) return [];
