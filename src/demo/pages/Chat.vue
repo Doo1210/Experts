@@ -5,7 +5,13 @@
         <button class="pc-back" aria-label="返回专家列表" @click="back">
           <i class="el-icon-arrow-left" />
         </button>
-        <button class="pc-expert" @click="back">
+        <button
+          class="pc-expert"
+          type="button"
+          title="打开专家管理页"
+          :aria-label="'打开' + expert.name + '的管理页'"
+          @click="openManage"
+        >
           <img :src="avatarSrcFor(expert)" :alt="expert.name" /><strong>{{
             expert.name
           }}</strong>
@@ -45,15 +51,6 @@
               </div>
               <h1>{{ expert.name }}</h1>
               <p>{{ expert.description }}</p>
-              <div
-                v-if="expert.tags && expert.tags.length"
-                class="pc-intro-tags"
-              >
-                <strong>擅长领域</strong>
-                <div>
-                  <span v-for="tag in expert.tags" :key="tag">{{ tag }}</span>
-                </div>
-              </div>
               <div class="pc-intro-tip">
                 在下方输入任务指令并发送，将自动新建任务并开始对话
               </div>
@@ -909,6 +906,15 @@ export default {
         .push({
           name: "experts",
           query: { embed: this.$route.query.embed },
+        })
+        .catch(() => {});
+    },
+    openManage() {
+      this.$router
+        .push({
+          name: "expert",
+          params: { id: this.expert.id },
+          query: { tab: "persona", embed: this.$route.query.embed },
         })
         .catch(() => {});
     },

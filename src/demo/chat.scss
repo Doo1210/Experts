@@ -202,36 +202,6 @@
   font-size: 13px;
   line-height: 1.75;
 }
-.pc-intro-tags {
-  width: 100%;
-  margin-top: 18px;
-}
-.pc-intro-tags strong {
-  display: block;
-  margin-bottom: 9px;
-  color: #303133;
-  font-size: 12px;
-}
-.pc-intro-tags div {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
-  gap: 7px;
-}
-.pc-intro-tags span {
-  padding: 4px 9px;
-  border: 1px solid #e5ebf3;
-  border-radius: 5px;
-  background: #fff;
-  color: #7892ad;
-  font-size: 11px;
-}
-.pc-intro-tags span:nth-child(2) {
-  color: #729a8b;
-}
-.pc-intro-tags span:nth-child(3) {
-  color: #b2967b;
-}
 .pc-intro-tip {
   margin-top: 20px;
   padding: 9px 13px;
