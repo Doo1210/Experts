@@ -5065,6 +5065,10 @@ button {
   line-height: 32px;
   font-size: 12px;
 }
+.expert-channel-page .channel-mention-field .el-select,
+.expert-channel-page .channel-mention-field .el-select .el-input {
+  width: 100%;
+}
 .expert-channel-page .channel-config-actions {
   display: flex;
   justify-content: flex-end;
@@ -5665,6 +5669,18 @@ button {
   border: 1px solid #e5eaf1;
   border-radius: 10px;
   background: #fff;
+}
+.expert-manage-page .memory-content-card.is-memory-disabled .memory-readonly-content {
+  border-color: #e7ebf0;
+  background: #f4f6f8;
+  color: #7d8795;
+}
+.expert-manage-page .memory-content-card.is-memory-disabled .memory-tabs button,
+.expert-manage-page .memory-content-card.is-memory-disabled .memory-tabs button.active {
+  color: #8993a1;
+}
+.expert-manage-page .memory-content-card.is-memory-disabled .memory-tabs button.active {
+  border-bottom-color: #aab3bf;
 }
 .expert-manage-page .memory-switch-copy {
   display: flex;

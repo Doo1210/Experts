@@ -67,6 +67,17 @@
               v-model.trim="homeDraft"
               placeholder="填写默认投递的会话或群 ID"
           /></label>
+          <label v-if="channel.id !== 'wecom'" class="channel-mention-field"
+            ><span>群聊需 @ <small>群里有人 @ 专家时才响应</small></span
+            ><el-select
+              :value="channel.requireMention !== false"
+              aria-label="群聊需 @"
+              @change="setRequireMention"
+            >
+              <el-option label="开启" :value="true" />
+              <el-option label="关闭" :value="false" />
+            </el-select>
+          </label>
         </div>
         <div class="channel-config-actions">
           <el-button
@@ -174,7 +185,11 @@
           <p v-if="!groups.length">暂无可发的群</p>
         </div>
         <p class="channel-proactive-note">
-          关闭主动沟通后仍可手动测试；图片和文件由收发文件开关控制。所有发送结果均为演示。
+          {{
+            channel.id === "wecom"
+              ? "企微发送前会重新核对当前可发送会话。"
+              : "群聊需 @ 只控制专家收到群消息时是否响应。"
+          }}关闭主动沟通后仍可手动测试；图片和文件由收发文件开关控制。所有发送结果均为演示。
         </p>
       </section>
       <section class="channel-file-card">
@@ -189,7 +204,9 @@
         />
       </section>
       <div class="channel-command-hint">
-        可用命令：/help · /new · /stop · /sethome · /status。
+        可用命令：/help · /new · /stop · /sethome · /status。{{
+          channel.id === "wecom" ? "" : "在群里使用时先 @ 机器人。"
+        }}
       </div>
     </div>
     <el-dialog
@@ -542,6 +559,10 @@ export default {
   },
   methods: {
     persist,
+    setRequireMention(enabled) {
+      Vue.set(this.channel, "requireMention", Boolean(enabled));
+      persist();
+    },
     loadDraft() {
       this.botIdDraft = "";
       this.botSecretDraft = "";

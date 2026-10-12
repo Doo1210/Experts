@@ -138,9 +138,16 @@
               <span>关闭后新会话不再使用或写入专家画像和用户画像</span>
               <small>已有文件保留</small>
             </div>
-            <el-switch v-model="expert.memoryEnabled" @change="persist" />
+            <el-switch
+              v-model="expert.memoryEnabled"
+              aria-label="启用记忆"
+              @change="toggleMemoryEnabled"
+            />
           </div>
-          <div class="memory-content-card">
+          <div
+            class="memory-content-card"
+            :class="{ 'is-memory-disabled': !expert.memoryEnabled }"
+          >
             <div class="memory-tabs">
               <button
                 type="button"
@@ -438,6 +445,15 @@ export default {
   },
   methods: {
     persist,
+    toggleMemoryEnabled(enabled) {
+      this.expert.memoryEnabled = Boolean(enabled);
+      persist();
+      this.$message.success(
+        enabled
+          ? "记忆已开启，将在新会话生效（演示）"
+          : "记忆已关闭，将在新会话生效；已有文件仍保留（演示）",
+      );
+    },
     badgeFor(key) {
       if (key === "skill") return this.expert.skills.length;
       if (key === "tool")
