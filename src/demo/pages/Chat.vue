@@ -508,7 +508,7 @@
               </div>
               <button class="pc-task-cwd" @click.stop="openWorkspace(item)">
                 <i class="el-icon-folder" /> 工作目录：
-                <span>{{ cwdLabel(item.cwd) }}</span
+                <span>{{ cwdLabel(item.cwd, "workspace") }}</span
                 ><i class="el-icon-arrow-right" />
               </button>
             </div>
@@ -1069,8 +1069,8 @@ export default {
     stop() {
       if (this.conversation?.id) stopDemoStream(this.conversation.id);
     },
-    cwdLabel(cwd) {
-      return !cwd || cwd === "/" ? "工作空间" : String(cwd).replace(/^\//, "");
+    cwdLabel(cwd, rootName = "工作空间") {
+      return !cwd || cwd === "/" ? rootName : String(cwd).replace(/^\//, "");
     },
     setCwd(cwd) {
       if (this.isDraftTask) this.draftConversation.cwd = cwd;
