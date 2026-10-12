@@ -1018,13 +1018,13 @@
 }
 @keyframes pc-task-title-marquee {
   0%,
-  12%,
-  88%,
+  2%,
+  98%,
   100% {
     transform: translateX(0);
   }
-  45%,
-  55% {
+  48%,
+  52% {
     transform: translateX(calc(0px - var(--pc-task-marquee-distance)));
   }
 }

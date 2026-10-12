@@ -428,9 +428,8 @@
               <div class="pc-task-line">
                 <button
                   class="pc-task-title"
-                  :title="item.title + '（双击修改名称）'"
-                  @click.stop="handleTaskTitleClick(item)"
-                  @dblclick.stop="handleTaskTitleDblclick(item)"
+                  :title="item.title"
+                  @click.stop="selectTask(item)"
                 >
                   <span
                     class="pc-task-title-text"
@@ -763,7 +762,6 @@ export default {
       pendingFiles: [],
       clarifyDraft: "",
       pathPopoverDismissed: false,
-      taskClickTimer: null,
       marqueeTaskId: null,
       marqueeDistance: 0,
       marqueeDuration: 6,
@@ -902,7 +900,6 @@ export default {
   },
   beforeDestroy() {
     if (this.$route.query.conv) stopDemoStream(this.$route.query.conv);
-    if (this.taskClickTimer) clearTimeout(this.taskClickTimer);
     this.clearPreview();
   },
   watch: {
@@ -1119,7 +1116,7 @@ export default {
         const distance = text.scrollWidth - title.clientWidth;
         this.marqueeTaskId = distance > 1 ? item.id : null;
         this.marqueeDistance = Math.max(0, distance);
-        this.marqueeDuration = Math.max(5, Math.min(14, distance / 18 + 4));
+        this.marqueeDuration = Math.max(3.6, Math.min(10, distance / 25 + 3));
       });
     },
     stopTaskMarquee(event) {
@@ -1132,21 +1129,7 @@ export default {
           this.marqueeTaskId = null;
       });
     },
-    handleTaskTitleClick(item) {
-      if (this.taskClickTimer) clearTimeout(this.taskClickTimer);
-      this.taskClickTimer = setTimeout(() => {
-        this.taskClickTimer = null;
-        this.selectTask(item);
-      }, 220);
-    },
-    handleTaskTitleDblclick(item) {
-      if (this.taskClickTimer) clearTimeout(this.taskClickTimer);
-      this.taskClickTimer = null;
-      this.openTaskDialog("rename", item);
-    },
     openTaskDialog(mode, item) {
-      if (this.taskClickTimer) clearTimeout(this.taskClickTimer);
-      this.taskClickTimer = null;
       if (
         mode === "archive" &&
         (this.conversation?.id !== item.id || !this.draft.trim())
