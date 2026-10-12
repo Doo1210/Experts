@@ -1466,6 +1466,34 @@
   padding: 8px 14px;
   border-radius: 4px;
 }
+.pc-task-rename-dialog.el-dialog {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  margin: 0 !important;
+  transform: translate(-50%, -50%);
+}
+.pc-task-rename-dialog .pc-dialog-icon {
+  background: #edf5ff;
+}
+.pc-task-rename-dialog .pc-task-rename-body {
+  padding: 24px;
+}
+.pc-task-rename-dialog .el-input__inner {
+  height: 42px;
+  border-radius: 8px;
+  font-size: 14px;
+}
+.pc-task-rename-dialog .pc-task-rename-hint {
+  margin: 10px 0 0;
+  color: #8291a5;
+  font-size: 12px;
+}
+.pc-task-rename-dialog .pc-dialog-footer .el-button {
+  min-width: 88px;
+  height: 36px;
+  border-radius: 8px;
+}
 @media (max-width: 1050px) {
   .pc-workspace {
     flex-basis: 230px;

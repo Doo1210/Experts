@@ -637,25 +637,45 @@
     </div>
     <el-dialog
       :visible.sync="taskDialogVisible"
-      width="420px"
-      custom-class="pc-task-dialog"
+      :width="taskDialogMode === 'rename' ? '460px' : '420px'"
+      :custom-class="
+        taskDialogMode === 'rename'
+          ? 'pc-dialog pc-task-rename-dialog'
+          : 'pc-task-dialog'
+      "
       append-to-body
       :close-on-click-modal="false"
-      ><span slot="title" class="pc-task-dialog-title">{{
-        taskDialogMode === "rename"
-          ? "修改任务名称"
-          : taskDialogMode === "archive"
-            ? "归档任务"
-            : "删除任务"
+      ><div
+        v-if="taskDialogMode === 'rename'"
+        slot="title"
+        class="pc-dialog-head"
+      >
+        <div class="pc-dialog-icon"><i class="el-icon-edit-outline" /></div>
+        <div>
+          <strong>编辑任务名称</strong
+          ><span>为这项任务设置一个易于识别的名称</span>
+        </div>
+      </div>
+      <span v-else slot="title" class="pc-task-dialog-title">{{
+        taskDialogMode === "archive" ? "归档任务" : "删除任务"
       }}</span>
-      <div v-if="taskDialogMode === 'rename'" class="pc-dialog-body">
-        <label>请输入新的任务名称</label
-        ><el-input
+      <div
+        v-if="taskDialogMode === 'rename'"
+        class="pc-dialog-body pc-task-rename-body"
+      >
+        <label><em>*</em> 任务名称</label>
+        <el-input
           ref="renameInput"
           v-model="taskNameDraft"
           maxlength="100"
+          show-word-limit
+          clearable
+          placeholder="请输入任务名称"
           @keyup.enter.native="confirmTaskDialog"
         />
+        <p class="pc-task-rename-hint">
+          修改名称不会影响任务的对话记录和工作目录。
+        </p>
       </div>
       <div v-else class="pc-dialog-body">
         <p>
@@ -673,7 +693,7 @@
           @click="confirmTaskDialog"
           >{{
             taskDialogMode === "rename"
-              ? "确定"
+              ? "保存名称"
               : taskDialogMode === "archive"
                 ? "归档"
                 : "删除"
