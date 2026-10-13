@@ -34,63 +34,67 @@
         ><el-button size="small" @click="openForm()">添加服务</el-button>
       </div>
     </div>
-    <div class="mcp-card-grid">
-      <div
-        v-for="service in visibleServices"
-        :key="service.id"
-        class="mcp-card"
-        role="button"
-        tabindex="0"
-        :aria-label="`查看 ${service.name} 详情`"
-        @click="openDetail(service)"
-        @keydown.enter.self.prevent="openDetail(service)"
-        @keydown.space.self.prevent="openDetail(service)"
-      >
-        <div class="mcp-card-top">
-          <strong>{{ service.name }}</strong>
-          <el-switch
-            :value="service.enabled"
-            :aria-label="`${service.name} 启用开关`"
-            @click.native.stop
-            @change="toggleService(service, $event)"
-          />
-        </div>
-        <p class="mcp-card-config" :title="connectionSummary(service)">
-          {{ connectionSummary(service) }}
-        </p>
-        <div class="mcp-card-tool-count">{{ capabilityLabel(service) }}</div>
-        <div class="mcp-card-foot">
-          <span
-            class="mcp-card-status"
-            :class="{ pending: needsAttention(service) }"
-            >{{ connectionLabel(service) }}</span
-          >
-          <el-dropdown
-            trigger="click"
-            @click.native.stop
-            @command="handleCardCommand($event, service)"
-          >
-            <button
-              type="button"
-              class="mcp-card-more"
-              :aria-label="`${service.name} 更多操作`"
-              @click.stop
+    <div class="mcp-card-scroll">
+      <div class="mcp-card-grid">
+        <div
+          v-for="service in visibleServices"
+          :key="service.id"
+          class="mcp-card"
+          role="button"
+          tabindex="0"
+          :aria-label="`查看 ${service.name} 详情`"
+          @click="openDetail(service)"
+          @keydown.enter.self.prevent="openDetail(service)"
+          @keydown.space.self.prevent="openDetail(service)"
+        >
+          <div class="mcp-card-top">
+            <strong>{{ service.name }}</strong>
+            <el-switch
+              :value="service.enabled"
+              :aria-label="`${service.name} 启用开关`"
+              @click.native.stop
+              @change="toggleService(service, $event)"
+            />
+          </div>
+          <p class="mcp-card-config" :title="connectionSummary(service)">
+            {{ connectionSummary(service) }}
+          </p>
+          <div class="mcp-card-tool-count">{{ capabilityLabel(service) }}</div>
+          <div class="mcp-card-foot">
+            <span
+              class="mcp-card-status"
+              :class="{ pending: needsAttention(service) }"
+              >{{ connectionLabel(service) }}</span
             >
-              ···
-            </button>
-            <el-dropdown-menu slot="dropdown">
-              <el-dropdown-item command="edit">编辑配置</el-dropdown-item>
-              <el-dropdown-item command="delete" divided>删除</el-dropdown-item>
-            </el-dropdown-menu>
-          </el-dropdown>
+            <el-dropdown
+              trigger="click"
+              @click.native.stop
+              @command="handleCardCommand($event, service)"
+            >
+              <button
+                type="button"
+                class="mcp-card-more"
+                :aria-label="`${service.name} 更多操作`"
+                @click.stop
+              >
+                ···
+              </button>
+              <el-dropdown-menu slot="dropdown">
+                <el-dropdown-item command="edit">编辑配置</el-dropdown-item>
+                <el-dropdown-item command="delete" divided
+                  >删除</el-dropdown-item
+                >
+              </el-dropdown-menu>
+            </el-dropdown>
+          </div>
         </div>
       </div>
+      <el-empty v-if="!expert.mcps.length" description="还没有 MCP 服务" />
+      <el-empty
+        v-else-if="!visibleServices.length"
+        description="当前筛选下没有服务"
+      />
     </div>
-    <el-empty v-if="!expert.mcps.length" description="还没有 MCP 服务" />
-    <el-empty
-      v-else-if="!visibleServices.length"
-      description="当前筛选下没有服务"
-    />
     <el-dialog
       :visible.sync="formVisible"
       width="640px"

@@ -21,26 +21,28 @@
         /></el-select>
       </div>
     </div>
-    <div class="tool-card-grid">
-      <div v-for="tool in visibleTools" :key="tool.id" class="tool-card">
-        <div class="tool-card-top">
-          <button type="button" @click="openDetail(tool)">
-            {{ tool.name }}</button
-          ><el-switch
-            :value="toolEnabled(tool)"
-            @change="setToolEnabled(tool, $event)"
-          />
-        </div>
-        <p>{{ tool.description }}</p>
-        <div>
-          <span>{{ tool.functions.length }} 个工具 · </span
-          ><span :class="tool.needsKey ? 'key-needed' : 'ready'">{{
-            tool.needsKey ? "缺密钥" : "就绪"
-          }}</span>
+    <div class="tool-card-scroll">
+      <div class="tool-card-grid">
+        <div v-for="tool in visibleTools" :key="tool.id" class="tool-card">
+          <div class="tool-card-top">
+            <button type="button" @click="openDetail(tool)">
+              {{ tool.name }}</button
+            ><el-switch
+              :value="toolEnabled(tool)"
+              @change="setToolEnabled(tool, $event)"
+            />
+          </div>
+          <p>{{ tool.description }}</p>
+          <div>
+            <span>{{ tool.functions.length }} 个工具 · </span
+            ><span :class="tool.needsKey ? 'key-needed' : 'ready'">{{
+              tool.needsKey ? "缺密钥" : "就绪"
+            }}</span>
+          </div>
         </div>
       </div>
+      <el-empty v-if="!visibleTools.length" description="暂无匹配工具集" />
     </div>
-    <el-empty v-if="!visibleTools.length" description="暂无匹配工具集" />
     <el-dialog
       :visible.sync="detailVisible"
       width="800px"

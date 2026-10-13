@@ -41,7 +41,12 @@
           </button>
         </nav>
       </aside>
-      <section class="detail-content">
+      <section
+        class="detail-content"
+        :class="{
+          'is-card-scroll-tab': ['skill', 'tool', 'mcp'].includes(tab),
+        }"
+      >
         <expert-basic-tab v-if="tab === 'basic'" :expert="expert" />
         <template v-else-if="tab === 'persona'">
           <div class="section-heading">
