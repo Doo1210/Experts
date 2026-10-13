@@ -5,19 +5,6 @@
         <h2>MCP 服务</h2>
         <p>管理当前专家的外部能力，配置变更在新会话生效。</p>
       </div>
-      <el-select
-        :value="expert.id"
-        size="small"
-        class="mcp-profile-select"
-        @change="switchProfile"
-      >
-        <el-option
-          v-for="profile in demoProfiles"
-          :key="profile.id"
-          :label="`当前 Profile：${profile.name}`"
-          :value="profile.id"
-        />
-      </el-select>
     </div>
     <div class="mcp-action-bar">
       <strong
@@ -471,7 +458,7 @@
 <script>
 import Vue from "vue";
 import McpTestResult from "./McpTestResult.vue";
-import { persist, state } from "../state";
+import { persist } from "../state";
 import { MCP_HUB_CATALOG } from "../mcp-catalog";
 import {
   normalizeMcpService,
@@ -542,14 +529,6 @@ export default {
     };
   },
   computed: {
-    demoProfiles() {
-      const profiles = state.experts.filter((item) =>
-        ["exp_quality", "exp_ops"].includes(item.id),
-      );
-      return profiles.some((item) => item.id === this.expert.id)
-        ? profiles
-        : [this.expert, ...profiles];
-    },
     enabledCount() {
       return this.expert.mcps.filter((item) => item.enabled).length;
     },
@@ -660,16 +639,6 @@ export default {
       )
         return "连接成功，但未发现工具、提示模板或资源。";
       return "";
-    },
-    switchProfile(id) {
-      if (id === this.expert.id) return;
-      this.$router
-        .push({
-          name: "expert",
-          params: { id },
-          query: { tab: "mcp", embed: this.$route.query.embed },
-        })
-        .catch(() => {});
     },
     toggleService(service, enabled) {
       if (enabled && ["auth", "error"].includes(service.probe)) {
