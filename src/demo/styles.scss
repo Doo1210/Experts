@@ -6,6 +6,9 @@
   --primary-light: #ecf3ff;
   --page-bg: #f5f7fa;
   --border: #e4e7ed;
+  --scrollbar-size: 5px;
+  --scrollbar-thumb: #dfe4ea;
+  --scrollbar-thumb-hover: #c8d1dc;
   --hover-feedback-delay: 320ms;
   --hover-feedback-duration: 80ms;
   font-family: "PingFang SC", "Microsoft YaHei", Inter, system-ui, sans-serif;
@@ -14,6 +17,35 @@
 }
 * {
   box-sizing: border-box;
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb) transparent;
+}
+*::-webkit-scrollbar {
+  width: var(--scrollbar-size);
+  height: var(--scrollbar-size);
+}
+*::-webkit-scrollbar-track,
+*::-webkit-scrollbar-corner {
+  background: transparent;
+}
+*::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: var(--scrollbar-thumb);
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: var(--scrollbar-thumb-hover);
+}
+.el-scrollbar__bar.is-vertical {
+  width: var(--scrollbar-size);
+}
+.el-scrollbar__bar.is-horizontal {
+  height: var(--scrollbar-size);
+}
+.el-scrollbar__thumb {
+  background-color: var(--scrollbar-thumb);
+}
+.el-scrollbar__thumb:hover {
+  background-color: var(--scrollbar-thumb-hover);
 }
 html,
 body,
@@ -172,15 +204,15 @@ button {
   padding: 0 0 32px;
   scrollbar-gutter: stable;
   scrollbar-width: thin;
-  scrollbar-color: #e5ebf4 transparent;
+  scrollbar-color: var(--scrollbar-thumb) transparent;
 }
 .expert-list-scroll::-webkit-scrollbar {
   display: block;
-  width: 4px;
+  width: var(--scrollbar-size);
 }
 .expert-list-scroll::-webkit-scrollbar-thumb {
   border-radius: 99px;
-  background: #e5ebf4;
+  background: var(--scrollbar-thumb);
 }
 .expert-list-tabs {
   flex-shrink: 0;
@@ -1211,16 +1243,16 @@ button {
   max-height: min(68vh, 660px);
   overflow-y: auto;
   padding: 20px 18px 24px 24px;
-  scrollbar-color: #e5ebf4 transparent;
+  scrollbar-color: var(--scrollbar-thumb) transparent;
   scrollbar-gutter: stable;
   scrollbar-width: thin;
 }
 .template-intro-dialog .el-dialog__body::-webkit-scrollbar {
-  width: 4px;
+  width: var(--scrollbar-size);
 }
 .template-intro-dialog .el-dialog__body::-webkit-scrollbar-thumb {
   border-radius: 99px;
-  background: #e5ebf4;
+  background: var(--scrollbar-thumb);
 }
 .template-intro-content {
   display: flex;
