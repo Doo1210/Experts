@@ -118,11 +118,15 @@
             </div>
           </div>
         </template>
-        <workspace v-else-if="tab === 'workspace'" :expert="expert" />
+        <workspace
+          v-else-if="tab === 'workspace'"
+          :expert="expert"
+          :open-path="workspaceOpenPath"
+        />
         <task-overview
           v-else-if="tab === 'task'"
           :expert="expert"
-          @workspace="setTab('workspace')"
+          @workspace="openTaskWorkspace"
           @new-task="startTask"
         />
         <template v-else-if="tab === 'memory'"
@@ -357,6 +361,7 @@ export default {
       questionsDraft: [],
       questionDragIndex: -1,
       memorySubTab: "expert",
+      workspaceOpenPath: "",
       deleteVisible: false,
       deleteConfirmName: "",
     };
@@ -498,11 +503,23 @@ export default {
           "在当前工作目录中读取和保存任务文件；不确定工作目录时先与用户确认。";
     },
     setTab(tab) {
+      if (tab === "workspace") this.workspaceOpenPath = "";
       this.$router
         .push({
           name: "expert",
           params: { id: this.expert.id },
           query: { ...this.$route.query, tab },
+        })
+        .catch(() => {});
+    },
+    openTaskWorkspace(target) {
+      this.workspaceOpenPath =
+        typeof target === "string" ? target : target?.cwd || "";
+      this.$router
+        .push({
+          name: "expert",
+          params: { id: this.expert.id },
+          query: { ...this.$route.query, tab: "workspace" },
         })
         .catch(() => {});
     },

@@ -1,6 +1,7 @@
 import Vue from "vue";
 import { clearFiles } from "./file-db";
-import { createImDemoChats } from "./im-fixtures";
+import { createImDemoChats, createImWorkspaceItems } from "./im-fixtures";
+import { mcpDemoPreset } from "./mcp-demo";
 import {
   enrichProjectFixtures,
   PROJECT_EXPERT_FIXTURES,
@@ -11,7 +12,7 @@ const clone = (value) => JSON.parse(JSON.stringify(value));
 const uid = (prefix) =>
   `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`;
 const now = () => new Date().toISOString();
-const DEMO_DATA_REVISION = 4;
+const DEMO_DATA_REVISION = 10;
 
 const ADDITIONAL_EXPERT_SPECS = [
   {
@@ -206,15 +207,7 @@ export function createSeed() {
           { id: "tool_file", name: "文件工具", enabled: true },
           { id: "tool_search", name: "搜索工具", enabled: true },
         ],
-        mcps: [
-          {
-            id: "mcp_db",
-            name: "质量数据库",
-            type: "stdio",
-            enabled: true,
-            status: "connected",
-          },
-        ],
+        mcps: mcpDemoPreset("all"),
         channels: [
           {
             id: "wecom",
@@ -262,6 +255,7 @@ export function createSeed() {
             parentId: null,
             kind: "folder",
           },
+          ...createImWorkspaceItems(),
           {
             id: "f_quality_event",
             name: "自主任务",
@@ -296,7 +290,7 @@ export function createSeed() {
           },
         ],
         tools: [{ id: "tool_file", name: "文件工具", enabled: true }],
-        mcps: [],
+        mcps: mcpDemoPreset("healthy").slice(0, 2),
         channels: [
           {
             id: "wecom",
@@ -512,6 +506,147 @@ export function upgradeExpertFixtures(saved) {
     ];
   }
   if (previousRevision < 4) upgradeChannelShowcase(saved);
+  if (previousRevision < 5) {
+    for (const id of ["exp_quality", "exp_ops"]) {
+      const expert = saved.experts.find((item) => item.id === id);
+      const fixture = seed.experts.find((item) => item.id === id);
+      if (!expert || !fixture) continue;
+      expert.mcps = Array.isArray(expert.mcps) ? expert.mcps : [];
+      for (const service of fixture.mcps)
+        if (
+          !expert.mcps.some(
+            (item) => item.id === service.id || item.name === service.name,
+          )
+        )
+          expert.mcps.push(clone(service));
+    }
+  }
+  if (previousRevision < 8) {
+    const quality = saved.experts.find((item) => item.id === "exp_quality");
+    const fixtureIds = new Set([
+      "im_wecom_1",
+      "im_exp_quality_group",
+      "im_exp_quality_dm",
+    ]);
+    saved.imChats = (Array.isArray(saved.imChats) ? saved.imChats : []).filter(
+      (chat) => !fixtureIds.has(chat.id),
+    );
+    if (quality) {
+      const chats = createImDemoChats();
+      saved.imChats.push(...chats);
+      quality.files = Array.isArray(quality.files) ? quality.files : [];
+      const known = new Set(quality.files.map((item) => item.id));
+      for (const item of createImWorkspaceItems(chats))
+        if (!known.has(item.id)) quality.files.push(item);
+    }
+  }
+  if (previousRevision < 9) {
+    const dm = (saved.imChats || []).find(
+      (chat) => chat.id === "im_exp_quality_dm",
+    );
+    if (dm) {
+      const oldScope = dm.scopes?.[0];
+      const oldPrefix = `${dm.cwd}/scope-direct01`;
+      const directPath = (path) =>
+        typeof path === "string" && path.startsWith(`${oldPrefix}/`)
+          ? `${dm.cwd}${path.slice(oldPrefix.length)}`
+          : path;
+      if (!Array.isArray(dm.segments))
+        dm.segments = (oldScope?.segments || []).map((segment) => ({
+          ...segment,
+          cwd: directPath(segment.cwd),
+          messages: (segment.messages || []).map((message) => ({
+            ...message,
+            fileDirectory: directPath(message.fileDirectory),
+          })),
+        }));
+      dm.sessionKey = null;
+      dm.scopes = [];
+      const quality = saved.experts.find((item) => item.id === "exp_quality");
+      if (quality) {
+        quality.files = Array.isArray(quality.files) ? quality.files : [];
+        const known = new Map(quality.files.map((item) => [item.id, item]));
+        const directItems = createImWorkspaceItems([dm]);
+        for (const item of directItems) {
+          const existing = known.get(item.id);
+          if (existing && item.kind === "file")
+            existing.parentId = item.parentId;
+          else if (!existing) {
+            quality.files.push(item);
+            known.set(item.id, item);
+          }
+        }
+        const chatFolder = directItems.find(
+          (item) => item.name === dm.cwd.split("/").at(-1),
+        );
+        const obsoleteScope = quality.files.find(
+          (item) =>
+            item.name === "scope-direct01" && item.parentId === chatFolder?.id,
+        );
+        if (obsoleteScope) {
+          const destinations = new Map([[obsoleteScope.id, chatFolder.id]]);
+          const obsoleteIds = new Set([obsoleteScope.id]);
+          const pending = [obsoleteScope.id];
+          while (pending.length) {
+            const oldParentId = pending.shift();
+            const newParentId = destinations.get(oldParentId);
+            const children = quality.files.filter(
+              (item) => item.parentId === oldParentId,
+            );
+            for (const child of children) {
+              if (child.kind === "folder") {
+                const matching = quality.files.find(
+                  (item) =>
+                    item.id !== child.id &&
+                    item.kind === "folder" &&
+                    item.parentId === newParentId &&
+                    item.name === child.name,
+                );
+                if (matching) {
+                  destinations.set(child.id, matching.id);
+                  obsoleteIds.add(child.id);
+                } else {
+                  child.parentId = newParentId;
+                  destinations.set(child.id, child.id);
+                }
+                pending.push(child.id);
+              } else child.parentId = newParentId;
+            }
+          }
+          quality.files = quality.files.filter(
+            (item) => !obsoleteIds.has(item.id),
+          );
+        }
+      }
+    }
+  }
+  if (previousRevision < 10) {
+    const group = (saved.imChats || []).find(
+      (chat) => chat.id === "im_exp_quality_group",
+    );
+    if (group) {
+      delete group.currentPolicy;
+      const sharedScopes = (group.scopes || []).filter(
+        (scope) => scope.mode === "shared",
+      );
+      if (sharedScopes.length)
+        group.deferredSharedScopes = [
+          ...(group.deferredSharedScopes || []),
+          ...sharedScopes,
+        ];
+      group.scopes = (group.scopes || [])
+        .filter((scope) => scope.mode !== "shared")
+        .map((scope) => ({
+          ...scope,
+          mode: "member",
+          current: true,
+          segments: (scope.segments || []).map((segment, index, segments) => ({
+            ...segment,
+            current: index === segments.length - 1,
+          })),
+        }));
+    }
+  }
   saved.demoDataRevision = DEMO_DATA_REVISION;
   return saved;
 }

@@ -200,7 +200,10 @@ function saveBlob(blob, name) {
 }
 export default {
   name: "DemoWorkspace",
-  props: { expert: { type: Object, required: true } },
+  props: {
+    expert: { type: Object, required: true },
+    openPath: { type: String, default: "" },
+  },
   data() {
     return {
       folderId: null,
@@ -258,7 +261,32 @@ export default {
   beforeDestroy() {
     if (this.previewUrl) URL.revokeObjectURL(this.previewUrl);
   },
+  mounted() {
+    this.navigateToPath(this.openPath);
+  },
+  watch: {
+    openPath(path) {
+      this.navigateToPath(path);
+    },
+  },
   methods: {
+    navigateToPath(path) {
+      let parentId = null;
+      for (const name of String(path || "")
+        .split("/")
+        .filter(Boolean)) {
+        const folder = this.expert.files.find(
+          (item) =>
+            item.kind === "folder" &&
+            item.parentId === parentId &&
+            item.name === name,
+        );
+        if (!folder) break;
+        parentId = folder.id;
+      }
+      this.folderId = parentId;
+      this.selected = [];
+    },
     fileType(item) {
       return item.kind === "folder"
         ? "文件夹"

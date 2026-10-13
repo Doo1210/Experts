@@ -52,17 +52,32 @@
     />
     <div class="skill-card-scroll">
       <div class="skill-card-grid">
-        <div v-for="item in visibleSkills" :key="item.id" class="skill-card">
+        <div
+          v-for="item in visibleSkills"
+          :key="item.id"
+          class="skill-card"
+          role="button"
+          tabindex="0"
+          :aria-label="`查看${item.name}详情`"
+          @click="openDetail(item)"
+          @keydown.enter.self.prevent="openDetail(item)"
+          @keydown.space.self.prevent="openDetail(item)"
+        >
           <div class="skill-card-top">
-            <button type="button" @click="openDetail(item)">
-              {{ item.name }}</button
-            ><el-switch v-model="item.enabled" @change="persist" />
+            <strong>{{ item.name }}</strong
+            ><el-switch
+              v-model="item.enabled"
+              @click.native.stop
+              @change="persist"
+            />
           </div>
           <p>{{ description(item) }}</p>
           <div class="skill-card-foot">
             <span>{{ sourceLabel(item.source) }}</span
-            ><small>· 使用 {{ item.usageCount || 0 }} 次</small
-            ><el-dropdown @command="(command) => skillCommand(command, item)"
+            ><el-dropdown
+              trigger="click"
+              @click.native.stop
+              @command="(command) => skillCommand(command, item)"
               ><button
                 type="button"
                 class="skill-card-more"
@@ -70,7 +85,6 @@
               >
                 ···</button
               ><el-dropdown-menu slot="dropdown"
-                ><el-dropdown-item command="detail">查看详情</el-dropdown-item
                 ><el-dropdown-item command="remove"
                   >卸载技能</el-dropdown-item
                 ></el-dropdown-menu
@@ -115,8 +129,7 @@
             :value="selectedImports.includes(candidate.id)"
             @change="toggleImport(candidate.id)"
           /><span class="skill-import-icon">✦</span
-          ><strong>{{ candidate.name }}</strong
-          ><small>({{ candidate.id }})</small></label
+          ><strong>{{ candidate.name }}</strong></label
         ><el-empty
           v-if="!visibleCandidates.length"
           description="暂无可导入技能"
@@ -139,33 +152,76 @@
       width="900px"
       custom-class="manage-dialog skill-detail-dialog"
       ><div v-if="selectedSkill" slot="title" class="skill-detail-head">
-        <span class="skill-dialog-icon">✦</span
-        ><span
-          ><strong>{{ selectedSkill.name }}</strong
-          ><small>{{ description(selectedSkill) }}</small></span
-        ><em>{{ sourceLabel(selectedSkill.source) }}</em
-        ><em>{{ selectedSkill.enabled ? "已启用" : "已停用" }}</em>
+        <span class="skill-dialog-icon">✦</span>
+        <div class="skill-detail-copy">
+          <div class="skill-detail-heading">
+            <strong>{{ selectedSkill.name }}</strong>
+            <em>{{ sourceLabel(selectedSkill.source) }}</em>
+            <em>{{ selectedSkill.enabled ? "已启用" : "已停用" }}</em>
+          </div>
+          <small>{{ description(selectedSkill) }}</small>
+        </div>
       </div>
       <div v-if="selectedSkill" class="skill-detail-body">
-        <aside>
-          <strong>技能包文件 <small>示例</small></strong
-          ><button
+        <aside class="skill-file-tree" aria-label="技能包文件">
+          <strong>技能包文件</strong>
+          <button
             type="button"
+            class="skill-file-entry"
             :class="{ active: detailFile === 'SKILL.md' }"
             @click="detailFile = 'SKILL.md'"
           >
-            📄 SKILL.md</button
-          ><button type="button" @click="detailFile = '使用说明.md'">
-            ▾ references/</button
-          ><button
+            <i class="el-icon-document" aria-hidden="true" />SKILL.md
+          </button>
+          <button
             type="button"
-            class="nested"
+            class="skill-folder-entry"
+            :aria-expanded="foldersOpen.references"
+            @click="foldersOpen.references = !foldersOpen.references"
+          >
+            <i
+              :class="
+                foldersOpen.references
+                  ? 'el-icon-caret-bottom'
+                  : 'el-icon-caret-right'
+              "
+              aria-hidden="true"
+            />
+            <i class="el-icon-folder" aria-hidden="true" />references/
+          </button>
+          <button
+            v-if="foldersOpen.references"
+            type="button"
+            class="skill-file-entry nested"
             :class="{ active: detailFile === '使用说明.md' }"
             @click="detailFile = '使用说明.md'"
           >
-            📄 使用说明.md</button
-          ><button type="button" @click="detailFile = '模板说明.md'">
-            ▸ templates/
+            <i class="el-icon-document" aria-hidden="true" />使用说明.md
+          </button>
+          <button
+            type="button"
+            class="skill-folder-entry"
+            :aria-expanded="foldersOpen.templates"
+            @click="foldersOpen.templates = !foldersOpen.templates"
+          >
+            <i
+              :class="
+                foldersOpen.templates
+                  ? 'el-icon-caret-bottom'
+                  : 'el-icon-caret-right'
+              "
+              aria-hidden="true"
+            />
+            <i class="el-icon-folder" aria-hidden="true" />templates/
+          </button>
+          <button
+            v-if="foldersOpen.templates"
+            type="button"
+            class="skill-file-entry nested"
+            :class="{ active: detailFile === '模板说明.md' }"
+            @click="detailFile = '模板说明.md'"
+          >
+            <i class="el-icon-document" aria-hidden="true" />模板说明.md
           </button>
         </aside>
         <div>
@@ -283,6 +339,7 @@ export default {
       detailVisible: false,
       selectedSkill: null,
       detailFile: "SKILL.md",
+      foldersOpen: { references: true, templates: false },
     };
   },
   computed: {
@@ -393,20 +450,20 @@ export default {
     openDetail(item) {
       this.selectedSkill = item;
       this.detailFile = "SKILL.md";
+      this.foldersOpen = { references: true, templates: false };
       this.detailVisible = true;
     },
     skillCommand(command, item) {
-      if (command === "detail") this.openDetail(item);
-      else
-        this.$confirm(`确定卸载“${item.name}”？`, "卸载技能", {
-          type: "warning",
-          customClass: "manage-message-box",
+      if (command !== "remove") return;
+      this.$confirm(`确定卸载“${item.name}”？`, "卸载技能", {
+        type: "warning",
+        customClass: "manage-message-box",
+      })
+        .then(() => {
+          this.expert.skills.splice(this.expert.skills.indexOf(item), 1);
+          persist();
         })
-          .then(() => {
-            this.expert.skills.splice(this.expert.skills.indexOf(item), 1);
-            persist();
-          })
-          .catch(() => {});
+        .catch(() => {});
     },
   },
 };

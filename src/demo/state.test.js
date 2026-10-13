@@ -16,6 +16,37 @@ beforeEach(async () => {
 });
 
 describe("演示状态", () => {
+  it("默认 MCP 样例覆盖多种连接与能力状态，并与第二个 Profile 隔离", () => {
+    const seed = demo.createSeed();
+    const quality = seed.experts.find((item) => item.id === "exp_quality");
+    const ops = seed.experts.find((item) => item.id === "exp_ops");
+    expect(quality.mcps.length).toBeGreaterThan(8);
+    expect(quality.mcps.some((item) => item.probe === "auth")).toBe(true);
+    expect(quality.mcps.some((item) => item.probe === "error")).toBe(true);
+    expect(quality.mcps.some((item) => item.probe === "untested")).toBe(true);
+    expect(
+      quality.mcps.some((item) => item.resourceCount && !item.tools.length),
+    ).toBe(true);
+    expect(ops.mcps).toHaveLength(2);
+    expect(ops.mcps).not.toBe(quality.mcps);
+  });
+  it("增量补齐 MCP 样例时保留用户添加的服务和同名旧服务", () => {
+    const saved = demo.createSeed();
+    saved.demoDataRevision = 4;
+    const quality = saved.experts.find((item) => item.id === "exp_quality");
+    quality.mcps = [
+      { id: "custom", name: "自定义服务", enabled: false },
+      { id: "mcp_db", name: "质量数据库", enabled: true },
+    ];
+    demo.upgradeExpertFixtures(saved);
+    expect(quality.mcps.some((item) => item.id === "custom")).toBe(true);
+    expect(quality.mcps.some((item) => item.id === "demo_mcp_quality_db")).toBe(
+      false,
+    );
+    const count = quality.mcps.length;
+    demo.upgradeExpertFixtures(saved);
+    expect(quality.mcps).toHaveLength(count);
+  });
   it("预置专家展示零到三个已接入消息渠道", () => {
     const counts = demo
       .createSeed()
@@ -117,12 +148,135 @@ describe("演示状态", () => {
     const group = upgraded.imChats.find((chat) => chat.chatType === "group");
     expect(group.members).toHaveLength(3);
     expect(group.members[0].segments).toHaveLength(3);
+    expect(group.scopes.every((scope) => scope.mode === "member")).toBe(true);
     expect(
       group.members[0].segments[1].messages.map((item) => item.role),
     ).toContain("file");
     expect(upgraded.imChats.some((chat) => chat.chatType === "single")).toBe(
       true,
     );
+    expect(
+      upgraded.experts
+        .find((item) => item.id === "exp_quality")
+        .files.some(
+          (item) => item.name === "chat-wecom81" && item.kind === "folder",
+        ),
+    ).toBe(true);
+  });
+  it("升级新版聊天记录样例时保留自建聊天并补齐内部通知", () => {
+    const saved = demo.createSeed();
+    saved.demoDataRevision = 7;
+    saved.imChats.find(
+      (chat) => chat.chatType === "group",
+    ).scopes[0].segments[0].messages = [];
+    saved.imChats.push({
+      id: "custom_chat_2",
+      expertId: "exp_quality",
+      members: [],
+    });
+    const upgraded = demo.upgradeExpertFixtures(saved);
+    expect(upgraded.imChats.some((chat) => chat.id === "custom_chat_2")).toBe(
+      true,
+    );
+    expect(
+      upgraded.imChats
+        .find((chat) => chat.chatType === "group")
+        .scopes[0].segments.at(-1)
+        .messages.some((entry) => entry.role === "notice"),
+    ).toBe(true);
+  });
+  it("旧单聊样例迁移为无范围结构并保留会话内容", () => {
+    const saved = demo.createSeed();
+    saved.demoDataRevision = 8;
+    const dm = saved.imChats.find((chat) => chat.id === "im_exp_quality_dm");
+    const oldPrefix = `${dm.cwd}/scope-direct01`;
+    dm.scopes = [
+      {
+        sessionKey: "legacy-direct-key",
+        segments: dm.segments.map((segment) => ({
+          ...segment,
+          cwd: segment.cwd.replace(dm.cwd, oldPrefix),
+          messages: segment.messages.map((entry) => ({
+            ...entry,
+            fileDirectory: entry.fileDirectory?.replace(dm.cwd, oldPrefix),
+          })),
+        })),
+      },
+    ];
+    dm.scopes[0].segments[0].messages[0].content = "保留的旧对话";
+    delete dm.segments;
+    const quality = saved.experts.find((item) => item.id === "exp_quality");
+    const chatFolder = quality.files.find(
+      (item) => item.name === "chat-dingtalk30",
+    );
+    quality.files.push(
+      {
+        id: "old-direct-scope",
+        name: "scope-direct01",
+        kind: "folder",
+        parentId: chatFolder.id,
+      },
+      {
+        id: "old-direct-segment",
+        name: "session-s5",
+        kind: "folder",
+        parentId: "old-direct-scope",
+      },
+      {
+        id: "custom-im-file",
+        name: "用户保留文件.txt",
+        kind: "file",
+        parentId: "old-direct-segment",
+      },
+    );
+    const upgraded = demo.upgradeExpertFixtures(saved);
+    const migrated = upgraded.imChats.find(
+      (chat) => chat.id === "im_exp_quality_dm",
+    );
+    expect(migrated.sessionKey).toBeNull();
+    expect(migrated.scopes).toEqual([]);
+    expect(migrated.segments[0].messages[0].content).toBe("保留的旧对话");
+    expect(migrated.segments[0].cwd).toBe(`${dm.cwd}/session-s5`);
+    expect(
+      migrated.segments[1].messages.find((entry) => entry.role === "file")
+        .fileDirectory,
+    ).toBe(`${dm.cwd}/session-s6/收到文件`);
+    expect(quality.files.some((item) => item.id === "old-direct-scope")).toBe(
+      false,
+    );
+    const movedFile = quality.files.find(
+      (item) => item.id === "custom-im-file",
+    );
+    expect(
+      quality.files.find((item) => item.id === movedFile.parentId).name,
+    ).toBe("session-s5");
+  });
+  it("旧群聊策略样例退回成员记录，不展示共享策略", () => {
+    const saved = demo.createSeed();
+    saved.demoDataRevision = 9;
+    const group = saved.imChats.find(
+      (chat) => chat.id === "im_exp_quality_group",
+    );
+    group.currentPolicy = "全群共享";
+    group.scopes.unshift({
+      mode: "shared",
+      current: true,
+      sessionKey: "legacy-shared",
+      segments: [{ sessionId: "shared-segment" }],
+    });
+    group.scopes[1].current = false;
+    group.scopes[1].segments.at(-1).current = false;
+    const upgraded = demo.upgradeExpertFixtures(saved);
+    const migrated = upgraded.imChats.find(
+      (chat) => chat.id === "im_exp_quality_group",
+    );
+    expect(migrated.currentPolicy).toBeUndefined();
+    expect(migrated.scopes).toHaveLength(3);
+    expect(migrated.deferredSharedScopes[0].sessionKey).toBe("legacy-shared");
+    expect(migrated.scopes.every((scope) => scope.mode === "member")).toBe(
+      true,
+    );
+    expect(migrated.scopes[0].segments.at(-1).current).toBe(true);
   });
   it("会话软归档不影响项目看板卡", () => {
     const card = demo.projectById("proj_factory").tasks[0];

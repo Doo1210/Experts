@@ -111,6 +111,13 @@ export function createImDemoChats(expertId = "exp_quality") {
                 transferStatus: "已保存",
               }),
               message(
+                "g-z-notice",
+                "notice",
+                "10",
+                "10:04",
+                "已开始新的成员会话。",
+              ),
+              message(
                 "g-z-11",
                 "assistant",
                 "10",
@@ -276,5 +283,124 @@ export function createImDemoChats(expertId = "exp_quality") {
       },
     ],
   };
+  group.platformScope = "org-fab-a";
+  group.runState = "ready";
+  group.cwd = "消息渠道/wecom/chat-wecom81";
+  dm.platformScope = "org-fab-a";
+  dm.runState = "unknown";
+  dm.gatewayStatus = "disconnected";
+  dm.cwd = "消息渠道/dingtalk/chat-dingtalk30";
+
+  function segmentWithPath(
+    segment,
+    scopePath,
+    senderName,
+    dbStart,
+    current,
+    boundaryLabel = "",
+  ) {
+    const cwd = `${scopePath}/session-${segment.id.toLowerCase()}`;
+    return {
+      ...segment,
+      current,
+      cwd,
+      boundaryLabel,
+      messages: segment.messages.map((entry, index) => ({
+        ...entry,
+        dbId: dbStart + index,
+        senderName: entry.role === "user" ? senderName : undefined,
+        fileDirectory:
+          entry.role === "file"
+            ? `${cwd}/${entry.direction === "received" ? "收到文件" : "生成文件"}`
+            : undefined,
+      })),
+    };
+  }
+
+  group.scopes = group.members.map((member, index) => {
+    const scopePath = `${group.cwd}/scope-m${String(index + 1).padStart(2, "0")}`;
+    return {
+      id: member.id,
+      label: member.name,
+      memberName: member.name,
+      mode: "member",
+      current: true,
+      lastActivityAt: member.lastActivityAt,
+      sessionKey: `agent:${expertId}:wecom:group:${group.chatId}:${member.id}`,
+      cwd: scopePath,
+      segments: member.segments.map((segment, segmentIndex) =>
+        segmentWithPath(
+          segment,
+          scopePath,
+          member.name,
+          (index + 2) * 1000 + segmentIndex * 100,
+          segmentIndex === member.segments.length - 1,
+          segmentIndex === 0
+            ? ""
+            : segment.resetCommand === "/new"
+              ? "/new"
+              : "开始新会话",
+        ),
+      ),
+    };
+  });
+  dm.sessionKey = null;
+  dm.scopes = [];
+  dm.segments = dm.members[0].segments.map((segment, index) =>
+    segmentWithPath(
+      segment,
+      dm.cwd,
+      "设备主管",
+      6000 + index * 100,
+      index === dm.members[0].segments.length - 1,
+      index === 0 ? "" : "/reset",
+    ),
+  );
   return [group, dm];
+}
+
+export function createImWorkspaceItems(chats = createImDemoChats()) {
+  const items = [];
+  const folders = new Map([["消息渠道", "f_quality_im"]]);
+  function folderId(path) {
+    if (folders.has(path)) return folders.get(path);
+    const parts = path.split("/");
+    const name = parts.pop();
+    const parentId = folderId(parts.join("/"));
+    let hash = 2166136261;
+    for (const char of path)
+      hash = Math.imul(hash ^ char.charCodeAt(0), 16777619);
+    const id = `f_im_${(hash >>> 0).toString(16)}`;
+    folders.set(path, id);
+    items.push({ id, name, parentId, kind: "folder" });
+    return id;
+  }
+  for (const chat of chats) {
+    folderId(chat.cwd);
+    function addSegments(segments) {
+      for (const segment of segments || []) {
+        folderId(segment.cwd);
+        for (const entry of segment.messages || []) {
+          if (entry.role !== "file") continue;
+          const parentId = folderId(
+            entry.fileDirectory ||
+              `${segment.cwd}/${entry.direction === "received" ? "收到文件" : "生成文件"}`,
+          );
+          items.push({
+            id: `f_im_file_${entry.id}`,
+            name: entry.fileName,
+            parentId,
+            kind: "file",
+            content: entry.content || `演示文件：${entry.fileName}`,
+          });
+        }
+      }
+    }
+    for (const scope of chat.scopes || []) {
+      folderId(scope.cwd);
+      addSegments(scope.segments);
+    }
+    addSegments(chat.segments);
+  }
+  return items;
 }
