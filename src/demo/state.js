@@ -2,6 +2,7 @@ import Vue from "vue";
 import { clearFiles } from "./file-db";
 import { createImDemoChats, createImWorkspaceItems } from "./im-fixtures";
 import { mcpDemoPreset } from "./mcp-demo";
+import { defaultKnowledgeConfig, KNOWLEDGE_MODES } from "./knowledge-demo";
 import {
   enrichProjectFixtures,
   PROJECT_EXPERT_FIXTURES,
@@ -12,7 +13,7 @@ const clone = (value) => JSON.parse(JSON.stringify(value));
 const uid = (prefix) =>
   `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`;
 const now = () => new Date().toISOString();
-const DEMO_DATA_REVISION = 10;
+const DEMO_DATA_REVISION = 12;
 
 const ADDITIONAL_EXPERT_SPECS = [
   {
@@ -121,6 +122,7 @@ function createSupplementalExpert(spec) {
     presetQuestions: spec.presetQuestions.slice(),
     memoryEnabled: true,
     learningEnabled: false,
+    knowledge: defaultKnowledgeConfig(spec.id),
     skills: spec.skills.map((name, index) => ({
       id: `${spec.id}_skill_${index + 1}`,
       name,
@@ -189,6 +191,7 @@ export function createSeed() {
         presetQuestions: ["帮我分析本周良率变化", "整理这批异常记录的主要原因"],
         memoryEnabled: true,
         learningEnabled: true,
+        knowledge: defaultKnowledgeConfig("exp_quality"),
         skills: [
           {
             id: "skill_csv",
@@ -281,6 +284,7 @@ export function createSeed() {
         presetQuestions: ["制定下月运营计划"],
         memoryEnabled: false,
         learningEnabled: false,
+        knowledge: defaultKnowledgeConfig("exp_ops"),
         skills: [
           {
             id: "skill_report",
@@ -647,6 +651,14 @@ export function upgradeExpertFixtures(saved) {
         }));
     }
   }
+  if (previousRevision < 12) {
+    for (const expert of saved.experts) {
+      if (!expert.knowledge)
+        expert.knowledge = defaultKnowledgeConfig(expert.id);
+      if (!KNOWLEDGE_MODES.some((mode) => mode.id === expert.knowledge.mode))
+        expert.knowledge.mode = "smart-reasoning";
+    }
+  }
   saved.demoDataRevision = DEMO_DATA_REVISION;
   return saved;
 }
@@ -722,6 +734,7 @@ export function addExpert(form, templateId, copyExpertId = "") {
         presetEnabled: false,
         memoryEnabled: true,
         learningEnabled: true,
+        knowledge: defaultKnowledgeConfig(),
         skills: [],
         tools: [],
         mcps: [],

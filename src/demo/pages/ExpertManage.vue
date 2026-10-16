@@ -44,7 +44,10 @@
       <section
         class="detail-content"
         :class="{
-          'is-card-scroll-tab': ['skill', 'tool', 'mcp'].includes(tab),
+          'is-card-scroll-tab': ['skill', 'tool', 'mcp', 'knowledge'].includes(
+            tab,
+          ),
+          'is-knowledge-tab': tab === 'knowledge',
         }"
       >
         <expert-basic-tab v-if="tab === 'basic'" :expert="expert" />
@@ -133,6 +136,10 @@
           :expert="expert"
           @workspace="openTaskWorkspace"
           @new-task="startTask"
+        />
+        <expert-knowledge-tab
+          v-else-if="tab === 'knowledge'"
+          :expert="expert"
         />
         <template v-else-if="tab === 'memory'"
           ><div class="section-heading">
@@ -293,6 +300,7 @@ import TaskOverview from "../components/TaskOverview.vue";
 import ExpertSkillTab from "../components/ExpertSkillTab.vue";
 import ExpertToolTab from "../components/ExpertToolTab.vue";
 import ExpertMcpTab from "../components/ExpertMcpTab.vue";
+import ExpertKnowledgeTab from "../components/ExpertKnowledgeTab.vue";
 import ExpertChannelTab from "../components/ExpertChannelTab.vue";
 const DEMO_EXPERT_MEMORY = `# 专家长期记忆
 
@@ -327,6 +335,7 @@ export default {
     ExpertSkillTab,
     ExpertToolTab,
     ExpertMcpTab,
+    ExpertKnowledgeTab,
     ExpertChannelTab,
   },
   data() {
@@ -336,6 +345,7 @@ export default {
         { key: "persona", label: "岗位说明", icon: "el-icon-document" },
         { key: "workspace", label: "工作空间", icon: "el-icon-folder" },
         { key: "task", label: "任务", icon: "el-icon-chat-line-square" },
+        { key: "knowledge", label: "知识", icon: "el-icon-reading" },
         { key: "memory", label: "记忆", icon: "el-icon-collection" },
         { key: "skill", label: "技能", icon: "el-icon-magic-stick" },
         { key: "tool", label: "工具", icon: "el-icon-setting" },

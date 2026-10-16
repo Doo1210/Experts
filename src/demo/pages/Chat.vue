@@ -16,11 +16,6 @@
             expert.name
           }}</strong>
         </button>
-        <span
-          v-if="conversation && conversation.status === 'running'"
-          class="pc-running"
-          >运行中</span
-        >
       </div>
       <div class="pc-top-actions">
         <button class="pc-primary" @click="newTask">
