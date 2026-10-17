@@ -53,44 +53,61 @@
               />
             </el-select>
           </div>
-          <div class="knowledge-method-heading">
-            <strong
-              >可用方式
-              <small>{{ draft.methodIds.length }} 已启用</small></strong
+          <div class="knowledge-method-groups">
+            <section
+              v-for="group in methodGroups"
+              :key="group.key"
+              class="knowledge-method-group"
+              :class="{ 'is-built-in': group.key === 'built-in' }"
+              :aria-label="group.label"
             >
-            <el-button type="text" @click="openCustomDialog"
-              >+ 添加自定义方式</el-button
-            >
-          </div>
-          <div class="knowledge-method-grid">
-            <article
-              v-for="method in allMethods"
-              :key="method.id"
-              class="knowledge-method-card"
-              :class="{ 'is-method-off': !isMethodEnabled(method.id) }"
-            >
-              <div class="knowledge-method-card-top">
-                <strong>{{ method.name }}</strong>
-                <span
-                  class="knowledge-method-status"
-                  :class="methodStatus(method).kind"
-                  >{{ methodStatus(method).label }}</span
+              <div class="knowledge-method-heading">
+                <strong>
+                  {{ group.label }}
+                  <small v-if="group.methods.length">
+                    {{ group.enabledCount }}/{{ group.methods.length }} 已启用
+                  </small>
+                  <small v-else>暂无</small>
+                </strong>
+                <el-button
+                  v-if="group.key === 'custom'"
+                  type="text"
+                  @click="openCustomDialog"
+                  >+ 添加方式</el-button
                 >
-                <el-switch
-                  :value="isMethodEnabled(method.id)"
-                  :aria-label="`${method.name}启用状态`"
-                  @change="toggleMethod(method.id, $event)"
-                />
               </div>
-              <p>{{ method.description }}</p>
-              <small>{{ method.requirement }}</small>
-              <div class="knowledge-method-card-foot">
-                <span>{{ method.custom ? "自定义方式" : "平台内置" }}</span>
-                <el-button type="text" @click="openMethodDetail(method)">{{
-                  method.custom ? "查看／编辑配置" : "查看配置"
-                }}</el-button>
+              <div v-if="group.methods.length" class="knowledge-method-grid">
+                <article
+                  v-for="method in group.methods"
+                  :key="method.id"
+                  class="knowledge-method-card"
+                  :class="{ 'is-method-off': !isMethodEnabled(method.id) }"
+                >
+                  <div class="knowledge-method-card-top">
+                    <strong>{{ method.name }}</strong>
+                    <span
+                      class="knowledge-method-status"
+                      :class="methodStatus(method).kind"
+                      >{{ methodStatus(method).label }}</span
+                    >
+                    <el-switch
+                      :value="isMethodEnabled(method.id)"
+                      :aria-label="`${method.name}启用状态`"
+                      @change="toggleMethod(method.id, $event)"
+                    />
+                  </div>
+                  <p :title="method.description">{{ method.description }}</p>
+                  <small :title="method.requirement">{{
+                    method.requirement
+                  }}</small>
+                  <div class="knowledge-method-card-foot">
+                    <el-button type="text" @click="openMethodDetail(method)">{{
+                      method.custom ? "查看／编辑配置" : "查看配置"
+                    }}</el-button>
+                  </div>
+                </article>
               </div>
-            </article>
+            </section>
           </div>
           <p v-if="draft.scope === 'none'" class="knowledge-field-hint">
             当前设置为不使用知识库；方式配置会保留，切换知识范围后可使用。
@@ -541,6 +558,26 @@ export default {
           custom: true,
         })),
       ];
+    },
+    methodGroups() {
+      const customMethods = this.allMethods.filter((method) => method.custom);
+      return [
+        {
+          key: "built-in",
+          label: "内置方式",
+          methods: this.builtInMethods,
+        },
+        {
+          key: "custom",
+          label: "自定义方式",
+          methods: customMethods,
+        },
+      ].map((group) => ({
+        ...group,
+        enabledCount: group.methods.filter((method) =>
+          this.draft.methodIds.includes(method.id),
+        ).length,
+      }));
     },
     availableCandidates() {
       return KNOWLEDGE_CUSTOM_CANDIDATES.filter(
