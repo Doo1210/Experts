@@ -16,34 +16,59 @@ beforeEach(async () => {
 });
 
 describe("演示状态", () => {
-  it("知识配置按专家隔离，并为旧演示数据补齐启用开关", () => {
+  it("知识配置按专家隔离，并将旧开关与方式迁移为新范围", () => {
     const seed = demo.createSeed();
     const quality = seed.experts.find((item) => item.id === "exp_quality");
     const ops = seed.experts.find((item) => item.id === "exp_ops");
     expect(quality.knowledge).toMatchObject({
-      enabled: true,
       scope: "selected",
       libraryIds: ["kb_quality", "kb_process"],
-      mode: "smart-reasoning",
+      defaultMethodId: "smart-reasoning",
     });
-    expect(ops.knowledge.enabled).toBe(false);
+    expect(ops.knowledge.scope).toBe("none");
     expect(ops.knowledge).not.toBe(quality.knowledge);
 
     seed.demoDataRevision = 10;
-    delete quality.knowledge;
-    ops.knowledge.mode = "data-analysis";
+    quality.knowledge = {
+      enabled: true,
+      scope: "selected",
+      libraryIds: ["kb_quality"],
+      fileTypes: ["Excel"],
+      mode: "quick-retrieval",
+    };
+    ops.knowledge = {
+      enabled: false,
+      scope: "all",
+      libraryIds: [],
+      fileTypes: [],
+      mode: "data-analysis",
+    };
     demo.upgradeExpertFixtures(seed);
-    expect(quality.knowledge.enabled).toBe(true);
-    expect(ops.knowledge.mode).toBe("data-analysis");
+    expect(quality.knowledge).toMatchObject({
+      scope: "selected",
+      fileTypes: ["Excel（XLSX）"],
+      defaultMethodId: "quick-answer",
+      methodIds: ["quick-answer"],
+    });
+    expect(ops.knowledge).toMatchObject({
+      scope: "none",
+      defaultMethodId: "data-analysis",
+    });
 
     const old = demo.createSeed();
-    old.demoDataRevision = 11;
-    old.experts.find((item) => item.id === "exp_quality").knowledge.mode =
-      "auto";
+    old.demoDataRevision = 12;
+    old.experts.find((item) => item.id === "exp_quality").knowledge = {
+      enabled: true,
+      scope: "all",
+      mode: "auto",
+      libraryIds: [],
+      fileTypes: [],
+    };
     demo.upgradeExpertFixtures(old);
     expect(
-      old.experts.find((item) => item.id === "exp_quality").knowledge.mode,
-    ).toBe("smart-reasoning");
+      old.experts.find((item) => item.id === "exp_quality").knowledge
+        .defaultMethodId,
+    ).toBe("auto");
   });
   it("默认 MCP 样例覆盖多种连接与能力状态，并与第二个 Profile 隔离", () => {
     const seed = demo.createSeed();

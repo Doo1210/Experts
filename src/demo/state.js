@@ -2,7 +2,10 @@ import Vue from "vue";
 import { clearFiles } from "./file-db";
 import { createImDemoChats, createImWorkspaceItems } from "./im-fixtures";
 import { mcpDemoPreset } from "./mcp-demo";
-import { defaultKnowledgeConfig, KNOWLEDGE_MODES } from "./knowledge-demo";
+import {
+  defaultKnowledgeConfig,
+  migrateKnowledgeConfig,
+} from "./knowledge-demo";
 import {
   enrichProjectFixtures,
   PROJECT_EXPERT_FIXTURES,
@@ -13,7 +16,7 @@ const clone = (value) => JSON.parse(JSON.stringify(value));
 const uid = (prefix) =>
   `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`;
 const now = () => new Date().toISOString();
-const DEMO_DATA_REVISION = 12;
+const DEMO_DATA_REVISION = 13;
 
 const ADDITIONAL_EXPERT_SPECS = [
   {
@@ -651,12 +654,9 @@ export function upgradeExpertFixtures(saved) {
         }));
     }
   }
-  if (previousRevision < 12) {
+  if (previousRevision < 13) {
     for (const expert of saved.experts) {
-      if (!expert.knowledge)
-        expert.knowledge = defaultKnowledgeConfig(expert.id);
-      if (!KNOWLEDGE_MODES.some((mode) => mode.id === expert.knowledge.mode))
-        expert.knowledge.mode = "smart-reasoning";
+      expert.knowledge = migrateKnowledgeConfig(expert.knowledge, expert.id);
     }
   }
   saved.demoDataRevision = DEMO_DATA_REVISION;
@@ -778,6 +778,7 @@ export function addExpert(form, templateId, copyExpertId = "") {
     model: form.model || "通用大模型",
     workspaceRoot: `/专家/${form.name.trim()}`,
   });
+  item.knowledge = migrateKnowledgeConfig(item.knowledge, id);
   item.files = [
     { id: uid("folder"), name: "消息渠道", parentId: null, kind: "folder" },
     { id: uid("folder"), name: "自主任务", parentId: null, kind: "folder" },
