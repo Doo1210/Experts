@@ -7926,15 +7926,7 @@ button {
   padding: 11px 18px 13px;
 }
 .knowledge-method-row {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-}
-.knowledge-method-row-label {
-  flex: 0 0 auto;
-  color: #3b4d63;
-  font-size: 13px;
-  font-weight: 650;
+  display: block;
 }
 .knowledge-method-tabbar {
   display: flex;

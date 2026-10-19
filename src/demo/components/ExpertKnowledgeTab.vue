@@ -25,11 +25,12 @@
       >
         <div class="knowledge-section-head">
           <h3 id="knowledge-mode-title">处理方式</h3>
-          <p>点击方式名称设为默认；点击配置图标查看或编辑设置。</p>
+          <p>
+            选择专家检索知识时默认采用的处理方式；点击名称切换默认项，点击配置图标查看或编辑设置。
+          </p>
         </div>
         <div class="knowledge-mode-body">
           <div class="knowledge-method-row">
-            <strong class="knowledge-method-row-label">默认方式</strong>
             <div
               class="knowledge-method-tabbar"
               role="group"
@@ -469,6 +470,22 @@ export default {
       return { kind: "ready", label: "可用", reason: "" };
     },
     selectDefaultMethod(id) {
+      if (id === this.draft.defaultMethodId) return;
+      const nextMethod = this.allMethods.find((item) => item.id === id);
+      const nextName = nextMethod?.name || "自动选择";
+      this.$confirm(
+        `不同处理方式支持的知识库能力和文档类型不同。切换到「${nextName}」后，当前绑定的知识库或文件类型可能与处理方式不匹配，影响资料检索。请确认处理方式与当前知识范围、文件类型相对应；如不匹配，请在切换后调整。`,
+        "确认切换处理方式",
+        {
+          confirmButtonText: "确认切换",
+          cancelButtonText: "保持当前方式",
+          type: "warning",
+        },
+      )
+        .then(() => this.applyDefaultMethod(id))
+        .catch(() => {});
+    },
+    applyDefaultMethod(id) {
       this.draft.defaultMethodId = id;
       const method = this.allMethods.find((item) => item.id === id);
       if (method?.capability === "table") {

@@ -22,22 +22,27 @@ describe("知识菜单交互", () => {
     );
   });
 
-  it("设数据分析为默认方式时自动填入表格范围", () => {
+  it("确认设数据分析为默认方式时自动填入表格范围", async () => {
     const info = vi.fn();
+    const confirm = vi.fn(() => Promise.resolve());
     const context = {
       draft: { scope: "selected", fileTypes: ["PDF"] },
       allMethods: KNOWLEDGE_MODES,
       $message: { info },
+      $confirm: confirm,
     };
     ExpertKnowledgeTab.methods.selectDefaultMethod.call(
       context,
       "data-analysis",
     );
+    await Promise.resolve();
+    await Promise.resolve();
     expect(context.draft).toMatchObject({
       scope: "all",
       fileTypes: ["CSV", "Excel（XLSX）"],
       defaultMethodId: "data-analysis",
     });
+    expect(confirm).toHaveBeenCalledOnce();
     expect(info).toHaveBeenCalledOnce();
   });
 
