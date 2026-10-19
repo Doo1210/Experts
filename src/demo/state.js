@@ -16,7 +16,7 @@ const clone = (value) => JSON.parse(JSON.stringify(value));
 const uid = (prefix) =>
   `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`;
 const now = () => new Date().toISOString();
-const DEMO_DATA_REVISION = 13;
+const DEMO_DATA_REVISION = 15;
 
 const ADDITIONAL_EXPERT_SPECS = [
   {
@@ -175,6 +175,7 @@ function createSupplementalTemplate(spec) {
 export function createSeed() {
   return enrichProjectFixtures({
     demoDataRevision: DEMO_DATA_REVISION,
+    knowledgeMethodConfigs: {},
     experts: [
       {
         id: "exp_quality",
@@ -654,11 +655,13 @@ export function upgradeExpertFixtures(saved) {
         }));
     }
   }
-  if (previousRevision < 13) {
+  if (previousRevision < 14) {
     for (const expert of saved.experts) {
       expert.knowledge = migrateKnowledgeConfig(expert.knowledge, expert.id);
     }
   }
+  if (previousRevision < 15 && !saved.knowledgeMethodConfigs)
+    saved.knowledgeMethodConfigs = {};
   saved.demoDataRevision = DEMO_DATA_REVISION;
   return saved;
 }

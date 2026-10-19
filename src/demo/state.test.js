@@ -18,6 +18,7 @@ beforeEach(async () => {
 describe("演示状态", () => {
   it("知识配置按专家隔离，并将旧开关与方式迁移为新范围", () => {
     const seed = demo.createSeed();
+    expect(seed.knowledgeMethodConfigs).toEqual({});
     const quality = seed.experts.find((item) => item.id === "exp_quality");
     const ops = seed.experts.find((item) => item.id === "exp_ops");
     expect(quality.knowledge).toMatchObject({
@@ -25,6 +26,7 @@ describe("演示状态", () => {
       libraryIds: ["kb_quality", "kb_process"],
       defaultMethodId: "smart-reasoning",
     });
+    expect(quality.knowledge).not.toHaveProperty("methodIds");
     expect(ops.knowledge.scope).toBe("none");
     expect(ops.knowledge).not.toBe(quality.knowledge);
 
@@ -48,12 +50,21 @@ describe("演示状态", () => {
       scope: "selected",
       fileTypes: ["Excel（XLSX）"],
       defaultMethodId: "quick-answer",
-      methodIds: ["quick-answer"],
     });
     expect(ops.knowledge).toMatchObject({
       scope: "none",
       defaultMethodId: "data-analysis",
     });
+
+    const withSwitches = demo.createSeed();
+    withSwitches.demoDataRevision = 13;
+    withSwitches.experts.find(
+      (item) => item.id === "exp_quality",
+    ).knowledge.methodIds = ["smart-reasoning"];
+    demo.upgradeExpertFixtures(withSwitches);
+    expect(
+      withSwitches.experts.find((item) => item.id === "exp_quality").knowledge,
+    ).not.toHaveProperty("methodIds");
 
     const old = demo.createSeed();
     old.demoDataRevision = 12;

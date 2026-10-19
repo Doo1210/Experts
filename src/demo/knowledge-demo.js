@@ -62,6 +62,7 @@ export const KNOWLEDGE_MODES = [
     id: "quick-answer",
     name: "快速问答",
     description: "检索资料后快速形成回答",
+    hint: "适合问题明确、答案可从少量资料中直接找到的场景；先检索相关内容，再快速整理回答并保留来源。",
     requirement: "适合有明确问题的资料查询",
     capability: "rag",
     config: {
@@ -75,6 +76,7 @@ export const KNOWLEDGE_MODES = [
     id: "smart-reasoning",
     name: "智能推理",
     description: "多步检索、阅读并综合资料",
+    hint: "适合需要跨文档核对、比较或归纳的问题；专家会分步检索和阅读资料，综合证据后形成回答。",
     requirement: "适合跨资料归纳、比较和核对",
     capability: "rag",
     config: {
@@ -88,6 +90,7 @@ export const KNOWLEDGE_MODES = [
     id: "wiki-answer",
     name: "维基问答",
     description: "沿知识页面检索并追溯来源",
+    hint: "适合查询流程、术语及关联页面；专家会沿 Wiki 页面逐步查找，并在回答中保留来源路径。",
     requirement: "需要可访问的 Wiki 资料",
     capability: "wiki",
     config: {
@@ -101,6 +104,7 @@ export const KNOWLEDGE_MODES = [
     id: "data-analysis",
     name: "数据分析",
     description: "检索并分析表格，给出统计结果",
+    hint: "适合 CSV 或 Excel 表格中的统计、对比和趋势问题；专家会读取表结构与数据，分析后给出结论。",
     requirement: "需要 CSV 或 Excel（XLSX）表格",
     capability: "table",
     config: {
@@ -109,17 +113,6 @@ export const KNOWLEDGE_MODES = [
       rag: "不使用 RAG 召回",
       tools: ["读取表结构", "分析数据"],
     },
-  },
-];
-
-export const KNOWLEDGE_CUSTOM_CANDIDATES = [
-  {
-    id: "review-approved",
-    name: "合规审查",
-    description: "核对质量规范并列出待确认项",
-    model: "知识推理模型",
-    type: "RAG 问答",
-    status: "ready",
   },
 ];
 
@@ -133,10 +126,6 @@ export function defaultKnowledgeConfig(expertId = "") {
           : "all",
     libraryIds: expertId === "exp_quality" ? ["kb_quality", "kb_process"] : [],
     fileTypes: expertId === "exp_quality" ? ["PDF", "文本"] : [],
-    methodIds:
-      expertId === "exp_quality"
-        ? ["quick-answer", "smart-reasoning", "wiki-answer"]
-        : ["quick-answer", "smart-reasoning"],
     defaultMethodId: "smart-reasoning",
     customMethods: [],
   };
@@ -157,11 +146,6 @@ export function migrateKnowledgeConfig(previous, expertId = "") {
     previous.mode === "quick-retrieval" ? "quick-answer" : previous.mode;
   const defaultMethodId =
     previous.defaultMethodId || oldMode || base.defaultMethodId;
-  const methodIds = Array.isArray(previous.methodIds)
-    ? previous.methodIds.filter((id) => validIds.has(id))
-    : oldMode === "auto"
-      ? [...builtInIds]
-      : [validIds.has(oldMode) ? oldMode : base.defaultMethodId];
   const normalizedDefault =
     defaultMethodId === "auto" || validIds.has(defaultMethodId)
       ? defaultMethodId
@@ -182,7 +166,6 @@ export function migrateKnowledgeConfig(previous, expertId = "") {
       ? previous.libraryIds.slice()
       : base.libraryIds,
     fileTypes: [...new Set(fileTypes)],
-    methodIds: [...new Set(methodIds)],
     defaultMethodId: normalizedDefault,
     customMethods,
   };
