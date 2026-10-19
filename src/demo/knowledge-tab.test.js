@@ -31,12 +31,12 @@ describe("知识菜单交互", () => {
       $message: { info },
       $confirm: confirm,
     };
-    ExpertKnowledgeTab.methods.selectDefaultMethod.call(
+    context.applyDefaultMethod = (id) =>
+      ExpertKnowledgeTab.methods.applyDefaultMethod.call(context, id);
+    await ExpertKnowledgeTab.methods.selectDefaultMethod.call(
       context,
       "data-analysis",
     );
-    await Promise.resolve();
-    await Promise.resolve();
     expect(context.draft).toMatchObject({
       scope: "all",
       fileTypes: ["CSV", "Excel（XLSX）"],

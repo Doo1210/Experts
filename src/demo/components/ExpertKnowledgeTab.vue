@@ -473,7 +473,7 @@ export default {
       if (id === this.draft.defaultMethodId) return;
       const nextMethod = this.allMethods.find((item) => item.id === id);
       const nextName = nextMethod?.name || "自动选择";
-      this.$confirm(
+      return this.$confirm(
         `不同处理方式支持的知识库能力和文档类型不同。切换到「${nextName}」后，当前绑定的知识库或文件类型可能与处理方式不匹配，影响资料检索。请确认处理方式与当前知识范围、文件类型相对应；如不匹配，请在切换后调整。`,
         "确认切换处理方式",
         {
