@@ -10,7 +10,7 @@
     </div>
     <div class="channel-switcher">
       <button
-        v-for="item in expert.channels"
+        v-for="item in orderedChannels"
         :key="item.id"
         type="button"
         :class="{ active: item.id === activeId }"
@@ -503,7 +503,10 @@ export default {
   props: { expert: { type: Object, required: true } },
   data() {
     return {
-      activeId: this.expert.channels[0]?.id || "",
+      activeId:
+        this.expert.channels.find((item) => item.id === "dingtalk")?.id ||
+        this.expert.channels[0]?.id ||
+        "",
       botIdDraft: "",
       botSecretDraft: "",
       homeDraft: "",
@@ -525,6 +528,11 @@ export default {
     };
   },
   computed: {
+    orderedChannels() {
+      return [...this.expert.channels].sort(
+        (a, b) => Number(b.id === "dingtalk") - Number(a.id === "dingtalk"),
+      );
+    },
     channel() {
       return (
         this.expert.channels.find((item) => item.id === this.activeId) ||
@@ -550,7 +558,7 @@ export default {
       this.loadDraft();
     },
     "expert.id"() {
-      this.activeId = this.expert.channels[0]?.id || "";
+      this.activeId = this.orderedChannels[0]?.id || "";
       this.loadDraft();
     },
   },

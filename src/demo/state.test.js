@@ -6,8 +6,12 @@ vi.stubGlobal("localStorage", {
   setItem: (key, value) => storage.set(key, value),
   removeItem: (key) => storage.delete(key),
 });
-vi.mock("./file-db", () => ({ clearFiles: vi.fn(async () => {}) }));
+vi.mock("./file-db", () => ({
+  clearFiles: vi.fn(async () => {}),
+  deleteFile: vi.fn(async () => {}),
+}));
 const demo = await import("./state.js");
+const { deleteFile } = await import("./file-db.js");
 const { enrichProjectFixtures } = await import("./project-fixtures.js");
 
 beforeEach(async () => {
@@ -16,6 +20,35 @@ beforeEach(async () => {
 });
 
 describe("演示状态", () => {
+  it("质量分析专家多问题会话可用于定位滚动演示，升级不覆盖已有对话", () => {
+    const seed = demo.createSeed();
+    const sample = seed.conversations.find(
+      (item) => item.id === "conv_quality_question_navigation",
+    );
+    expect(sample.expertId).toBe("exp_quality");
+    expect(sample.messages.filter((item) => item.role === "user")).toHaveLength(
+      72,
+    );
+    expect(
+      sample.messages.filter((item) => item.role === "assistant"),
+    ).toHaveLength(72);
+
+    seed.demoDataRevision = 15;
+    seed.conversations = seed.conversations.filter(
+      (item) => item.id !== sample.id,
+    );
+    const original = seed.conversations.find(
+      (item) => item.id === "conv_quality_1",
+    );
+    original.messages[0].content = "用户保留的内容";
+    demo.upgradeExpertFixtures(seed);
+    demo.upgradeExpertFixtures(seed);
+    expect(
+      seed.conversations.filter((item) => item.id === sample.id),
+    ).toHaveLength(1);
+    expect(original.messages[0].content).toBe("用户保留的内容");
+  });
+
   it("知识配置按专家隔离，并将旧开关与方式迁移为新范围", () => {
     const seed = demo.createSeed();
     expect(seed.knowledgeMethodConfigs).toEqual({});
@@ -723,7 +756,92 @@ describe("演示状态", () => {
       });
       await vi.advanceTimersByTimeAsync(10000);
       expect(conversation.turns[0].status).toBe("complete");
+
       expect(conversation.messages[1].content).toContain("良率样例.csv");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+  it("本地上传仅作为任务附件保留，删除任务时清理文件", () => {
+    const expert = demo.expertById("exp_quality");
+    const workspaceFileCount = expert.files.length;
+    const conversation = demo.createConversation("exp_quality", "本地附件回合");
+    demo.sendDemoMessage(conversation.id, "", [
+      {
+        kind: "local_upload",
+        id: "upload_test_attachment",
+        name: "现场记录.docx",
+        size: 2048,
+      },
+    ]);
+    expect(conversation.messages[0]).toMatchObject({
+      content: "",
+      attachments: [
+        {
+          kind: "local_upload",
+          id: "upload_test_attachment",
+          name: "现场记录.docx",
+          size: 2048,
+        },
+      ],
+    });
+    expect(expert.files).toHaveLength(workspaceFileCount);
+    demo.deleteConversation(conversation.id);
+    expect(deleteFile).toHaveBeenCalledWith("upload_test_attachment");
+  });
+  it("仅引用资料也能发送，知识库、知识文档与工作空间文件保留各自来源", async () => {
+    vi.useFakeTimers();
+    try {
+      const conversation = demo.createConversation(
+        "exp_quality",
+        "资料引用回合",
+      );
+      demo.sendDemoMessage(
+        conversation.id,
+        "",
+        [],
+        [
+          { kind: "knowledge_library", id: "kb_quality" },
+          { kind: "knowledge_document", id: "doc_quality_yield" },
+          {
+            kind: "workspace_file",
+            id: "f_quality_csv",
+            path: "/良率样例.csv",
+          },
+          { kind: "knowledge_library", id: "kb_supplier" },
+          { kind: "knowledge_library", id: "kb_quality" },
+        ],
+      );
+      expect(conversation.messages[0]).toMatchObject({
+        content: "",
+        references: [
+          {
+            kind: "knowledge_library",
+            id: "kb_quality",
+            name: "质量标准与规范",
+          },
+          {
+            kind: "knowledge_document",
+            id: "doc_quality_yield",
+            libraryName: "质量标准与规范",
+          },
+          { kind: "workspace_file", id: "f_quality_csv" },
+        ],
+      });
+      await vi.advanceTimersByTimeAsync(10000);
+      expect(conversation.turns[0].status).toBe("complete");
+
+      const knowledgeDisabled = demo.createConversation(
+        "exp_ops",
+        "未启用知识的专家",
+      );
+      demo.sendDemoMessage(
+        knowledgeDisabled.id,
+        "",
+        [],
+        [{ kind: "knowledge_library", id: "kb_quality" }],
+      );
+      expect(knowledgeDisabled.messages).toHaveLength(0);
     } finally {
       vi.useRealTimers();
     }

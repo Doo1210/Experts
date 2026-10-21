@@ -9,10 +9,12 @@ import {
   emptySessionPresentation,
   normalizeSessionPresentation,
 } from "./conversation-session-state";
-import { clearFiles } from "./file-db";
+import { clearFiles, deleteFile } from "./file-db";
 import { createImDemoChats, createImWorkspaceItems } from "./im-fixtures";
 import { mcpDemoPreset } from "./mcp-demo";
 import {
+  KNOWLEDGE_CATALOG,
+  KNOWLEDGE_DOCUMENTS,
   defaultKnowledgeConfig,
   migrateKnowledgeConfig,
 } from "./knowledge-demo";
@@ -26,7 +28,69 @@ const clone = (value) => JSON.parse(JSON.stringify(value));
 const uid = (prefix) =>
   `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`;
 const now = () => new Date().toISOString();
-const DEMO_DATA_REVISION = 15;
+const DEMO_DATA_REVISION = 16;
+
+const QUALITY_NAVIGATION_TOPICS = [
+  [
+    "本周 1 号产线良率如何变化？",
+    "样例良率先下降后回升，建议先核对每日检验口径。",
+  ],
+  ["哪一天的波动最大？", "样例中周三波动最大，建议对照当日批次与设备记录。"],
+  [
+    "异常主要集中在哪些批次？",
+    "样例异常集中在两个连续批次，需进一步核对来料和工艺参数。",
+  ],
+  [
+    "是否与设备停机有关？",
+    "样例记录中有一次短暂停机，当前信息只能提示相关性。",
+  ],
+  [
+    "该先核对哪项检验数据？",
+    "建议先核对抽检数量、判定标准和原始记录是否一致。",
+  ],
+  [
+    "来料变化是否影响良率？",
+    "可以按供应批次对齐时间线，再比较变化前后的不良类型。",
+  ],
+  ["夜班和白班有差异吗？", "样例显示夜班波动略大，需结合产量和抽样数量核实。"],
+  ["需要复查哪些工艺参数？", "优先复查温度、压力及节拍记录，并标记异常时段。"],
+  [
+    "目前能否确定根因？",
+    "样例信息不足以确认根因，应先完成批次、设备与检验口径交叉核对。",
+  ],
+  ["怎样整理给现场负责人？", "可按现象、证据、待核查项和责任人形成简短清单。"],
+  ["下一步验证如何安排？", "建议先复测重点批次，再对照设备日志和来料记录。"],
+  [
+    "如何形成最终改进建议？",
+    "把已验证事实与待确认假设分开，再列出措施和验收条件。",
+  ],
+];
+
+function createQualityNavigationMessages() {
+  return Array.from({ length: 72 }, (_, index) => {
+    const number = String(index + 1).padStart(2, "0");
+    const topic =
+      QUALITY_NAVIGATION_TOPICS[index % QUALITY_NAVIGATION_TOPICS.length];
+    const round = Math.floor(index / QUALITY_NAVIGATION_TOPICS.length) + 1;
+    return [
+      {
+        id: `msg_quality_navigation_user_${number}`,
+        role: "user",
+        content: `演示问题 ${number}：${topic[0]}`,
+        createdAt: new Date(Date.UTC(2026, 9, 21, 1, index * 2)).toISOString(),
+      },
+      {
+        id: `msg_quality_navigation_assistant_${number}`,
+        role: "assistant",
+        content: `第 ${round} 组样例：${topic[1]}`,
+        createdAt: new Date(
+          Date.UTC(2026, 9, 21, 1, index * 2 + 1),
+        ).toISOString(),
+        status: "done",
+      },
+    ];
+  }).flat();
+}
 
 const ADDITIONAL_EXPERT_SPECS = [
   {
@@ -368,6 +432,17 @@ export function createSeed() {
     ],
     conversations: [
       {
+        id: "conv_quality_question_navigation",
+        expertId: "exp_quality",
+        title: "多问题定位演示（72问）",
+        status: "ready",
+        pinned: true,
+        archived: false,
+        cwd: "/",
+        updatedAt: "2026-10-21T11:23:00+08:00",
+        messages: createQualityNavigationMessages(),
+      },
+      {
         id: "conv_quality_1",
         expertId: "exp_quality",
         title: "分析本周良率波动",
@@ -672,6 +747,13 @@ export function upgradeExpertFixtures(saved) {
   }
   if (previousRevision < 15 && !saved.knowledgeMethodConfigs)
     saved.knowledgeMethodConfigs = {};
+  if (previousRevision < 16) {
+    const demo = seed.conversations.find(
+      (item) => item.id === "conv_quality_question_navigation",
+    );
+    if (demo && !saved.conversations.some((item) => item.id === demo.id))
+      saved.conversations.push(clone(demo));
+  }
   saved.demoDataRevision = DEMO_DATA_REVISION;
   return saved;
 }
@@ -825,6 +907,9 @@ export function deleteExpert(id) {
     .filter((item) => item.sourceExpertId === id)
     .forEach((item) => Vue.set(item, "snapshot", clone(expert)));
   state.experts.splice(index, 1);
+  discardConversationUploads(
+    state.conversations.filter((item) => item.expertId === id),
+  );
   state.conversations = state.conversations.filter(
     (item) => item.expertId !== id,
   );
@@ -894,8 +979,22 @@ export function updateConversation(id, patch) {
 }
 export function deleteConversation(id) {
   const index = state.conversations.findIndex((item) => item.id === id);
-  if (index >= 0) state.conversations.splice(index, 1);
+  if (index >= 0) {
+    discardConversationUploads([state.conversations[index]]);
+    state.conversations.splice(index, 1);
+  }
   persist();
+}
+
+function discardConversationUploads(conversations) {
+  for (const conversation of conversations) {
+    for (const message of conversation.messages || []) {
+      for (const attachment of message.attachments || []) {
+        if (attachment.kind === "local_upload")
+          void deleteFile(attachment.id).catch(() => {});
+      }
+    }
+  }
 }
 
 export function addProject(form) {
@@ -1087,29 +1186,103 @@ export function stopDemoStream(id) {
     persist();
   }
 }
-export function sendDemoMessage(conversationId, text, attachments = []) {
+export function sendDemoMessage(
+  conversationId,
+  text,
+  attachments = [],
+  references = [],
+) {
   const conversation = conversationById(conversationId);
   if (!conversation) return;
   const originalText = String(text || "").trim();
   const expertFiles = expertById(conversation.expertId)?.files || [];
   const fileRefs = Array.isArray(attachments)
     ? attachments
-        .map((attachment) =>
-          expertFiles.find(
-            (item) => item.id === attachment.id && item.kind === "file",
-          ),
-        )
+        .map((attachment) => {
+          if (
+            attachment?.kind === "local_upload" &&
+            /^upload_[\w-]+$/.test(String(attachment.id || "")) &&
+            String(attachment.name || "").trim()
+          )
+            return {
+              kind: "local_upload",
+              id: attachment.id,
+              name: String(attachment.name).trim(),
+              size: Number(attachment.size) || 0,
+            };
+          const file = expertFiles.find(
+            (item) => item.id === attachment?.id && item.kind === "file",
+          );
+          return file ? { id: file.id, name: file.name } : null;
+        })
         .filter(Boolean)
-        .map((file) => ({ id: file.id, name: file.name }))
     : [];
-  if (!originalText && !fileRefs.length) return;
-  text = originalText || fileRefs.map((file) => file.name).join("、");
+  const seenReferences = new Set();
+  const canUseKnowledge =
+    expertById(conversation.expertId)?.knowledge?.scope !== "none";
+  const sourceRefs = (Array.isArray(references) ? references : [])
+    .map((reference) => {
+      if (!reference || typeof reference !== "object") return null;
+      if (reference.kind === "knowledge_library") {
+        if (!canUseKnowledge) return null;
+        const library = KNOWLEDGE_CATALOG.find(
+          (item) => item.id === reference.id && item.status === "ready",
+        );
+        return library
+          ? { kind: reference.kind, id: library.id, name: library.name }
+          : null;
+      }
+      if (reference.kind === "knowledge_document") {
+        if (!canUseKnowledge) return null;
+        const document = KNOWLEDGE_DOCUMENTS.find(
+          (item) => item.id === reference.id,
+        );
+        const library = KNOWLEDGE_CATALOG.find(
+          (item) => item.id === document?.libraryId && item.status === "ready",
+        );
+        return document && library
+          ? {
+              kind: reference.kind,
+              id: document.id,
+              name: document.name,
+              libraryName: library.name,
+            }
+          : null;
+      }
+      if (reference.kind === "workspace_file") {
+        if (fileRefs.some((file) => file.id === reference.id)) return null;
+        const file = expertFiles.find(
+          (item) => item.id === reference.id && item.kind === "file",
+        );
+        return file
+          ? {
+              kind: reference.kind,
+              id: file.id,
+              name: file.name,
+              path: String(reference.path || file.name),
+            }
+          : null;
+      }
+      return null;
+    })
+    .filter((reference) => {
+      if (!reference) return false;
+      const key = `${reference.kind}:${reference.id}`;
+      if (seenReferences.has(key)) return false;
+      seenReferences.add(key);
+      return true;
+    });
+  if (!originalText && !fileRefs.length && !sourceRefs.length) return;
+  text =
+    originalText ||
+    [...fileRefs, ...sourceRefs].map((item) => item.name).join("、");
   stopDemoStream(conversationId);
   const userMessage = {
     id: uid("msg"),
     role: "user",
     content: originalText,
     attachments: fileRefs,
+    references: sourceRefs,
     createdAt: now(),
   };
   conversation.messages.push(userMessage);

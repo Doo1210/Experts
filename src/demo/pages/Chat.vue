@@ -60,7 +60,10 @@
       <section
         v-if="conversation"
         class="pc-main"
-        :class="{ 'is-task-list-collapsed': taskListCollapsed }"
+        :class="{
+          'is-task-list-collapsed': taskListCollapsed,
+          'has-workspace': workspaceOpen,
+        }"
       >
         <div v-if="conversation.archived" class="pc-archived">
           此任务已归档，不会出现在右侧任务列表。可在专家管理页「任务」的「归档任务」弹窗中恢复。
@@ -304,22 +307,51 @@
                     v-for="attachment in message.attachments"
                     :key="attachment.id"
                     type="button"
-                    :disabled="!fileItemById(attachment.id)"
-                    @click="previewFile(fileItemById(attachment.id))"
+                    :disabled="!attachmentItem(attachment)"
+                    @click="previewFile(attachmentItem(attachment))"
                   >
                     <i class="el-icon-document" /> {{ attachment.name }}
-                    <span v-if="!fileItemById(attachment.id)"
+                    <span v-if="!attachmentItem(attachment)"
                       >（文件已不可用）</span
                     >
                   </button>
+                </div>
+                <div
+                  v-if="message.references && message.references.length"
+                  class="pc-user-references"
+                >
+                  <span
+                    v-for="reference in message.references"
+                    :key="`${reference.kind}:${reference.id}`"
+                    :title="
+                      reference.path || reference.libraryName || reference.name
+                    "
+                  >
+                    {{ referenceTypeLabel(reference.kind) }} ·
+                    {{ reference.name }}
+                    <span
+                      v-if="
+                        reference.kind === 'workspace_file' &&
+                        !fileItemById(reference.id)
+                      "
+                      >（文件已不可用）</span
+                    >
+                  </span>
                 </div>
               </div>
             </div>
           </div>
           <div
             v-if="questionPreviews.length"
+            ref="questionRail"
             class="pc-question-rail"
+            :class="{
+              'is-dense': questionRailDense,
+              'can-scroll-up': questionRailCanScrollUp,
+              'can-scroll-down': questionRailCanScrollDown,
+            }"
             aria-label="问题快速定位"
+            @scroll.passive="updateQuestionRailEdges"
           >
             <el-popover
               v-for="(item, index) in questionPreviews"
@@ -639,51 +671,105 @@
           class="pc-input-area"
           :class="{ 'has-session-status': sessionStatusCards.length }"
         >
-          <div
-            v-if="
-              !pendingInteraction &&
-              expert.presetEnabled &&
-              expert.presetQuestions.length
-            "
-            class="pc-preset"
-          >
-            <el-popover
-              placement="top-start"
-              trigger="click"
-              width="420"
-              popper-class="pc-preset-popover"
-              ><strong>预置问题</strong
-              ><button
-                v-for="(question, index) in expert.presetQuestions"
-                :key="question"
-                @click="
-                  draft = question;
-                  focusComposer();
-                "
-              >
-                <b>{{ index + 1 }}</b
-                >{{ question }}</button
-              ><button slot="reference" class="pc-preset-trigger">
-                <i class="el-icon-chat-line-round" /> 预置问题
-                <i class="el-icon-arrow-up" /></button
-            ></el-popover>
-          </div>
           <div class="pc-composer">
-            <div v-if="pendingFiles.length" class="pc-pending-files">
-              <div
-                v-for="file in pendingFiles"
-                :key="file.id"
-                class="pc-pending-file"
+            <div
+              v-if="pendingFiles.length || pendingReferences.length"
+              class="pc-selected-resources"
+            >
+              <button
+                v-if="resourceCanScrollLeft"
+                type="button"
+                class="pc-resource-nav is-left"
+                aria-label="向左查看资料"
+                @click="scrollResourceStrip(-1)"
               >
-                <span class="pc-pending-icon"
-                  ><i class="el-icon-document"
-                /></span>
-                <span class="pc-pending-meta"
-                  ><strong :title="file.name">{{ file.name }}</strong
-                  ><small>{{ fileSizeLabel(file.size) }}</small></span
+                <i class="el-icon-arrow-left" />
+              </button>
+              <div
+                ref="resourceStrip"
+                class="pc-selected-resources-list"
+                role="list"
+                aria-label="待发送资料"
+                tabindex="0"
+                @scroll="updateResourceOverflow"
+                @keydown.left.prevent="scrollResourceStrip(-1)"
+                @keydown.right.prevent="scrollResourceStrip(1)"
+              >
+                <div
+                  v-for="file in pendingFiles"
+                  :key="file.id"
+                  class="pc-resource-chip is-upload"
+                  role="listitem"
+                  :title="`${file.name}\n本地上传 · ${fileSizeLabel(file.size)}`"
                 >
-                <button title="移除" @click="removePendingFile(file)">×</button>
+                  <img
+                    v-if="file.previewUrl"
+                    :src="file.previewUrl"
+                    :alt="file.name"
+                    class="pc-resource-thumbnail"
+                  />
+                  <span
+                    v-else
+                    class="pc-resource-format"
+                    :class="`is-${resourceFormat(file.name).tone}`"
+                    aria-hidden="true"
+                    >{{ resourceFormat(file.name).label }}</span
+                  >
+                  <span class="pc-resource-copy">
+                    <strong>{{ file.name }}</strong>
+                    <small>本地上传</small>
+                  </span>
+                  <button
+                    type="button"
+                    :aria-label="`移除本轮文件 ${file.name}`"
+                    @click="removePendingFile(file)"
+                  >
+                    <i class="el-icon-close" />
+                  </button>
+                </div>
+                <div
+                  v-for="reference in pendingReferences"
+                  :key="`${reference.kind}:${reference.id}`"
+                  class="pc-resource-chip"
+                  :class="`is-${reference.kind}`"
+                  role="listitem"
+                  :title="`${reference.name}\n${resourceSourceLabel(reference.kind)}${reference.path || reference.libraryName ? ` · ${reference.path || reference.libraryName}` : ''}`"
+                >
+                  <span
+                    v-if="reference.kind === 'knowledge_library'"
+                    class="pc-resource-icon is-library"
+                    aria-hidden="true"
+                    ><i class="el-icon-folder-opened"
+                  /></span>
+                  <span
+                    v-else
+                    class="pc-resource-format"
+                    :class="`is-${resourceFormat(reference.name).tone}`"
+                    aria-hidden="true"
+                    >{{ resourceFormat(reference.name).label }}</span
+                  >
+                  <span class="pc-resource-copy">
+                    <strong>{{ reference.name }}</strong>
+                    <small>{{ resourceSourceLabel(reference.kind) }}</small>
+                  </span>
+                  <button
+                    type="button"
+                    :aria-label="`移除本轮引用 ${reference.name}`"
+                    @click="removePendingReference(reference)"
+                  >
+                    <i class="el-icon-close" />
+                  </button>
+                </div>
               </div>
+              <button
+                v-if="resourceCanScrollRight"
+                type="button"
+                class="pc-resource-nav is-right"
+                aria-label="向右查看资料"
+                @click="scrollResourceStrip(1)"
+              >
+                <i class="el-icon-arrow-right" />
+              </button>
             </div>
             <textarea
               ref="composer"
@@ -709,125 +795,538 @@
                 ><small>{{ filePath(file) }}</small>
               </button>
             </div>
-            <div class="pc-composer-actions">
-              <label class="pc-attachment-control" title="上传文件">
-                <input
-                  type="file"
-                  aria-label="上传文件"
+            <div class="pc-composer-toolbar">
+              <div class="pc-composer-leading">
+                <el-popover
+                  v-if="expert.presetEnabled && expert.presetQuestions.length"
+                  placement="top-start"
+                  trigger="click"
+                  width="340"
+                  popper-class="pc-preset-popover"
                   :disabled="!!pendingInteraction"
+                >
+                  <strong>预置问题</strong>
+                  <button
+                    v-for="(question, index) in expert.presetQuestions"
+                    :key="question"
+                    type="button"
+                    @click="selectPresetQuestion(question)"
+                  >
+                    <b>{{ index + 1 }}</b
+                    >{{ question }}
+                  </button>
+                  <button
+                    slot="reference"
+                    type="button"
+                    class="pc-composer-tool"
+                    title="预置问题"
+                    aria-label="预置问题"
+                    :disabled="!!pendingInteraction"
+                  >
+                    <svg
+                      class="pc-preset-question-icon"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="1.8"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      aria-hidden="true"
+                    >
+                      <circle cx="12" cy="12" r="9" />
+                      <path
+                        d="M9.6 9a2.5 2.5 0 0 1 4.8.8c0 1.7-2.4 2.1-2.4 3.8"
+                      />
+                      <circle
+                        cx="12"
+                        cy="17"
+                        r="0.8"
+                        fill="currentColor"
+                        stroke="none"
+                      />
+                    </svg>
+                  </button>
+                </el-popover>
+                <button
+                  type="button"
+                  class="pc-composer-tool"
+                  title="上传本地文件"
+                  aria-label="上传本地文件"
+                  :disabled="!!pendingInteraction || uploadingFiles"
+                  @click="$refs.composerUpload.click()"
+                >
+                  <i class="el-icon-paperclip" />
+                </button>
+                <input
+                  ref="composerUpload"
+                  type="file"
+                  hidden
+                  multiple
                   @change="attachFile"
                 />
-                <i class="el-icon-paperclip" /> </label
-              ><button
-                class="pc-send"
-                :class="{ 'pc-send-stop': conversation.status === 'running' }"
-                :disabled="
-                  !!pendingInteraction ||
-                  (!draft.trim() &&
-                    !pendingFiles.length &&
-                    conversation.status !== 'running')
-                "
-                :title="
-                  conversation.status === 'running'
-                    ? '停止生成'
-                    : '发送 (Enter)'
-                "
-                @click="conversation.status === 'running' ? stop() : send()"
-              >
-                <i
-                  :class="
-                    conversation.status === 'running'
-                      ? 'el-icon-video-pause'
-                      : 'el-icon-position'
-                  "
-                />
-              </button>
-            </div>
-            <div class="pc-composer-hint">
-              {{
-                pendingInteraction
-                  ? "请先处理上方确认"
-                  : "Enter 发送 · Shift + Enter 换行 · @file: 引用文件"
-              }}
-            </div>
-            <div class="pc-config">
-              <el-popover
-                v-model="modelPickerVisible"
-                placement="top-start"
-                trigger="click"
-                width="560"
-                popper-class="pc-model-picker-popper"
-                ><div class="pc-model-picker">
-                  <div class="pc-model-tabs">
-                    <button
-                      :class="{ active: modelTab === 'platform' }"
-                      @click="modelTab = 'platform'"
+                <el-popover
+                  v-model="referencePickerVisible"
+                  placement="top-start"
+                  trigger="click"
+                  width="440"
+                  popper-class="pc-reference-popper"
+                  :disabled="!!pendingInteraction"
+                  @show="beginReferenceSelection"
+                >
+                  <div class="pc-reference-picker">
+                    <div
+                      class="pc-reference-tabs"
+                      role="tablist"
+                      aria-label="引用来源"
                     >
-                      平台模型
-                    </button>
-                    <button
-                      :class="{ active: modelTab === 'manual' }"
-                      @click="modelTab = 'manual'"
-                    >
-                      手动填写的模型
-                    </button>
-                  </div>
-                  <div class="pc-model-list">
-                    <template v-if="modelTab === 'platform'">
                       <button
-                        v-for="option in platformModels"
-                        :key="option.name"
-                        class="pc-model-option"
-                        :class="{ active: model === option.name }"
-                        @click="selectModel(option.name)"
+                        type="button"
+                        role="tab"
+                        :aria-selected="referenceTab === 'knowledge'"
+                        :class="{ active: referenceTab === 'knowledge' }"
+                        @click="referenceTab = 'knowledge'"
                       >
-                        <strong>{{ option.name }}</strong
-                        ><span class="pc-model-tag">{{ option.tag }}</span
-                        ><small>{{ option.context }}</small>
+                        知识中心
                       </button>
-                    </template>
-                    <template v-else
-                      ><button
-                        class="pc-model-option"
-                        :class="{ active: model === '通用大模型' }"
-                        @click="selectModel('通用大模型')"
+                      <button
+                        type="button"
+                        role="tab"
+                        :aria-selected="referenceTab === 'workspace'"
+                        :class="{ active: referenceTab === 'workspace' }"
+                        @click="referenceTab = 'workspace'"
                       >
-                        <strong>通用大模型</strong
-                        ><span class="pc-model-tag manual">手动</span
-                        ><small>演示模型</small>
-                      </button></template
-                    >
+                        工作空间
+                      </button>
+                    </div>
+                    <template v-if="referenceTab === 'knowledge'">
+                      <p
+                        v-if="!knowledgeReferenceEnabled"
+                        class="pc-reference-notice"
+                      >
+                        当前专家未启用知识库，请先在专家管理中开启。
+                      </p>
+                      <div
+                        v-if="activeKnowledgeLibrary"
+                        class="pc-reference-breadcrumb"
+                      >
+                        <button type="button" @click="backToKnowledgeLibraries">
+                          <i class="el-icon-arrow-left" /> 知识库
+                        </button>
+                        <span>{{ activeKnowledgeLibrary.name }}</span>
+                      </div>
+                      <div class="pc-reference-search">
+                        <i class="el-icon-search" />
+                        <input
+                          v-model="knowledgeSearch"
+                          type="search"
+                          :placeholder="
+                            activeKnowledgeLibrary
+                              ? '搜索当前知识库的文档'
+                              : '搜索知识库'
+                          "
+                        />
+                      </div>
+                      <div class="pc-reference-list">
+                        <template v-if="!activeKnowledgeLibrary">
+                          <div
+                            v-for="library in filteredKnowledgeLibraries"
+                            :key="library.id"
+                            class="pc-reference-row"
+                            :class="{
+                              disabled:
+                                library.status !== 'ready' ||
+                                !knowledgeReferenceEnabled,
+                            }"
+                          >
+                            <button
+                              type="button"
+                              class="pc-reference-entry"
+                              :disabled="
+                                library.status !== 'ready' ||
+                                !knowledgeReferenceEnabled
+                              "
+                              @click="enterKnowledgeLibrary(library)"
+                            >
+                              <i class="el-icon-folder-opened" />
+                              <span
+                                ><strong>{{ library.name }}</strong
+                                ><small>{{
+                                  library.status === "ready"
+                                    ? `${demoDocumentCount(library.id)} 个演示文档 · ${library.source}`
+                                    : library.statusReason
+                                }}</small></span
+                              >
+                            </button>
+                            <el-tooltip
+                              :content="
+                                knowledgeLibraryActionHint(library, 'open')
+                              "
+                              placement="top"
+                              effect="light"
+                              :open-delay="0"
+                              :enterable="false"
+                            >
+                              <span class="pc-reference-action-wrap">
+                                <button
+                                  type="button"
+                                  class="pc-reference-open"
+                                  :aria-label="`打开知识库 ${library.name}`"
+                                  :disabled="
+                                    library.status !== 'ready' ||
+                                    !knowledgeReferenceEnabled
+                                  "
+                                  @click="enterKnowledgeLibrary(library)"
+                                >
+                                  <i class="el-icon-arrow-right" />
+                                </button>
+                              </span>
+                            </el-tooltip>
+                            <el-tooltip
+                              :content="
+                                knowledgeLibraryActionHint(library, 'reference')
+                              "
+                              placement="top"
+                              effect="light"
+                              :open-delay="0"
+                              :enterable="false"
+                            >
+                              <span class="pc-reference-action-wrap">
+                                <button
+                                  type="button"
+                                  class="pc-reference-select"
+                                  :class="{
+                                    selected: isReferenceSelected(
+                                      'knowledge_library',
+                                      library.id,
+                                    ),
+                                  }"
+                                  :aria-label="`${isReferenceSelected('knowledge_library', library.id) ? '取消引用' : '引用'}知识库 ${library.name}`"
+                                  :disabled="
+                                    library.status !== 'ready' ||
+                                    !knowledgeReferenceEnabled
+                                  "
+                                  @click="
+                                    toggleReference(libraryReference(library))
+                                  "
+                                >
+                                  <i
+                                    v-if="
+                                      isReferenceSelected(
+                                        'knowledge_library',
+                                        library.id,
+                                      )
+                                    "
+                                    class="el-icon-check"
+                                  /><i v-else class="pc-reference-at-icon">@</i>
+                                </button>
+                              </span>
+                            </el-tooltip>
+                          </div>
+                          <p
+                            v-if="!filteredKnowledgeLibraries.length"
+                            class="pc-reference-empty"
+                          >
+                            没有匹配的知识库
+                          </p>
+                        </template>
+                        <template v-else>
+                          <button
+                            v-for="document in filteredKnowledgeDocuments"
+                            :key="document.id"
+                            type="button"
+                            class="pc-reference-document"
+                            :class="{
+                              selected: isReferenceSelected(
+                                'knowledge_document',
+                                document.id,
+                              ),
+                            }"
+                            @click="
+                              toggleReference(documentReference(document))
+                            "
+                          >
+                            <i class="el-icon-document" />
+                            <span
+                              ><strong>{{ document.name }}</strong
+                              ><small
+                                >{{ document.type }} ·
+                                {{ activeKnowledgeLibrary.name }}</small
+                              ></span
+                            >
+                            <i
+                              v-if="
+                                isReferenceSelected(
+                                  'knowledge_document',
+                                  document.id,
+                                )
+                              "
+                              class="el-icon-check"
+                            /><i v-else class="pc-reference-at-icon">@</i>
+                          </button>
+                          <p
+                            v-if="!filteredKnowledgeDocuments.length"
+                            class="pc-reference-empty"
+                          >
+                            当前知识库没有匹配的文档
+                          </p>
+                        </template>
+                      </div>
+                    </template>
+                    <template v-else>
+                      <div class="pc-reference-search">
+                        <i class="el-icon-search" />
+                        <input
+                          v-model="workspaceSearch"
+                          type="search"
+                          placeholder="搜索工作空间文件"
+                        />
+                      </div>
+                      <div class="pc-reference-list">
+                        <div
+                          v-for="node in referenceWorkspaceRows"
+                          :key="node.item.id"
+                          class="pc-reference-tree-row"
+                          :style="{ paddingLeft: `${8 + node.depth * 16}px` }"
+                        >
+                          <button
+                            v-if="node.item.kind === 'folder'"
+                            type="button"
+                            class="pc-reference-tree-entry"
+                            @click="toggleReferenceFolder(node.item.id)"
+                          >
+                            <i
+                              :class="
+                                referenceExpandedFolderIds.includes(
+                                  node.item.id,
+                                )
+                                  ? 'el-icon-arrow-down'
+                                  : 'el-icon-arrow-right'
+                              "
+                            />
+                            <i class="el-icon-folder" />
+                            <span>{{ node.item.name }}</span>
+                          </button>
+                          <button
+                            v-else
+                            type="button"
+                            class="pc-reference-tree-entry"
+                            :class="{
+                              selected: isReferenceSelected(
+                                'workspace_file',
+                                node.item.id,
+                              ),
+                            }"
+                            :title="filePath(node.item)"
+                            @click="
+                              toggleReference(workspaceReference(node.item))
+                            "
+                          >
+                            <span class="pc-reference-tree-spacer" />
+                            <i class="el-icon-document" />
+                            <span>{{ node.item.name }}</span>
+                            <i
+                              v-if="
+                                isReferenceSelected(
+                                  'workspace_file',
+                                  node.item.id,
+                                )
+                              "
+                              class="el-icon-check"
+                            /><i v-else class="pc-reference-at-icon">@</i>
+                          </button>
+                        </div>
+                        <p
+                          v-if="!referenceWorkspaceRows.length"
+                          class="pc-reference-empty"
+                        >
+                          没有匹配的工作空间文件
+                        </p>
+                      </div>
+                    </template>
                   </div>
+                  <button
+                    slot="reference"
+                    type="button"
+                    class="pc-composer-tool pc-reference-trigger"
+                    title="引用知识中心或工作空间资料"
+                    aria-label="引用知识中心或工作空间资料"
+                    :disabled="!!pendingInteraction"
+                  >
+                    @
+                  </button>
+                </el-popover>
+              </div>
+              <div class="pc-composer-trailing">
+                <div class="pc-composer-settings">
+                  <el-popover
+                    v-model="modelPickerVisible"
+                    placement="top"
+                    trigger="click"
+                    width="380"
+                    popper-class="pc-model-picker-popper"
+                  >
+                    <div class="pc-model-picker">
+                      <div class="pc-model-tabs">
+                        <button
+                          :class="{ active: modelTab === 'platform' }"
+                          @click="modelTab = 'platform'"
+                        >
+                          平台模型
+                        </button>
+                        <button
+                          :class="{ active: modelTab === 'manual' }"
+                          @click="modelTab = 'manual'"
+                        >
+                          手动填写的模型
+                        </button>
+                      </div>
+                      <div class="pc-model-list">
+                        <template v-if="modelTab === 'platform'">
+                          <button
+                            v-for="option in platformModels"
+                            :key="option.name"
+                            class="pc-model-option"
+                            :class="{ active: model === option.name }"
+                            @click="selectModel(option.name)"
+                          >
+                            <strong>{{ option.name }}</strong
+                            ><span class="pc-model-tag">{{ option.tag }}</span
+                            ><small>{{ option.context }}</small>
+                          </button>
+                        </template>
+                        <button
+                          v-else
+                          class="pc-model-option"
+                          :class="{ active: model === '通用大模型' }"
+                          @click="selectModel('通用大模型')"
+                        >
+                          <strong>通用大模型</strong
+                          ><span class="pc-model-tag manual">手动</span
+                          ><small>演示模型</small>
+                        </button>
+                      </div>
+                    </div>
+                    <button
+                      slot="reference"
+                      type="button"
+                      class="pc-config-trigger"
+                    >
+                      模型：{{ model }} <i class="el-icon-caret-bottom" />
+                    </button>
+                  </el-popover>
+                  <el-popover
+                    v-model="cwdPickerVisible"
+                    placement="top"
+                    trigger="click"
+                    width="270"
+                    popper-class="pc-cwd-picker-popper"
+                    :disabled="
+                      !!pendingInteraction || conversation.status === 'running'
+                    "
+                    @show="beginCwdSelection"
+                  >
+                    <div class="pc-cwd-picker">
+                      <div class="pc-cwd-picker-title">选择工作目录</div>
+                      <button
+                        type="button"
+                        class="pc-cwd-picker-root"
+                        :class="{ selected: conversation.cwd === '/' }"
+                        @click="chooseCwd('/')"
+                      >
+                        <i class="el-icon-folder-opened" /> workspace
+                        <i
+                          v-if="conversation.cwd === '/'"
+                          class="el-icon-check"
+                        />
+                      </button>
+                      <div class="pc-cwd-picker-list">
+                        <div
+                          v-for="node in cwdFolderRows"
+                          :key="node.item.id"
+                          class="pc-cwd-picker-row"
+                          :style="{ paddingLeft: `${8 + node.depth * 16}px` }"
+                        >
+                          <button
+                            v-if="node.hasChildren"
+                            type="button"
+                            class="pc-cwd-expand"
+                            :aria-label="`展开或收起 ${node.item.name}`"
+                            @click="toggleCwdFolder(node.item.id)"
+                          >
+                            <i
+                              :class="
+                                cwdExpandedFolderIds.includes(node.item.id)
+                                  ? 'el-icon-arrow-down'
+                                  : 'el-icon-arrow-right'
+                              "
+                            />
+                          </button>
+                          <span v-else class="pc-cwd-expand-spacer" />
+                          <button
+                            type="button"
+                            class="pc-cwd-folder"
+                            :class="{
+                              selected:
+                                conversation.cwd === folderPath(node.item.id),
+                            }"
+                            :title="folderPath(node.item.id)"
+                            @click="chooseCwd(folderPath(node.item.id))"
+                          >
+                            <i class="el-icon-folder" /> {{ node.item.name }}
+                            <i
+                              v-if="
+                                conversation.cwd === folderPath(node.item.id)
+                              "
+                              class="el-icon-check"
+                            />
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                    <button
+                      slot="reference"
+                      type="button"
+                      class="pc-config-trigger"
+                      :title="`工作目录：${cwdLabel(conversation.cwd, 'workspace')}`"
+                      :disabled="
+                        !!pendingInteraction ||
+                        conversation.status === 'running'
+                      "
+                    >
+                      工作目录：{{ taskCwdName(conversation.cwd) }}
+                      <i class="el-icon-caret-bottom" />
+                    </button>
+                  </el-popover>
                 </div>
-                <button slot="reference" class="pc-config-trigger">
-                  模型: {{ model }} <i class="el-icon-caret-bottom" /></button
-              ></el-popover>
-              <el-popover
-                v-model="cwdPickerVisible"
-                placement="top-start"
-                trigger="click"
-                width="230"
-                popper-class="pc-config-popover"
-                ><button
-                  @click="
-                    setCwd('/');
-                    cwdPickerVisible = false;
-                  "
-                >
-                  工作空间
-                </button>
                 <button
-                  class="pc-cwd-workspace"
-                  @click="
-                    cwdPickerVisible = false;
-                    showWorkspaceForCwd();
+                  type="button"
+                  class="pc-send"
+                  :class="{ 'pc-send-stop': conversation.status === 'running' }"
+                  :disabled="
+                    !!pendingInteraction ||
+                    uploadingFiles ||
+                    (!draft.trim() &&
+                      !pendingFiles.length &&
+                      !pendingReferences.length &&
+                      conversation.status !== 'running')
                   "
+                  :title="
+                    conversation.status === 'running'
+                      ? '停止生成'
+                      : '发送 (Enter)'
+                  "
+                  :aria-label="
+                    conversation.status === 'running' ? '停止生成' : '发送'
+                  "
+                  @click="conversation.status === 'running' ? stop() : send()"
                 >
-                  在工作空间中选择…</button
-                ><button slot="reference" class="pc-config-trigger">
-                  工作目录: {{ cwdLabel(conversation.cwd) }}
-                  <i class="el-icon-caret-bottom" /></button
-              ></el-popover>
+                  <span
+                    v-if="conversation.status === 'running'"
+                    class="pc-stop-square"
+                  />
+                  <i v-else class="el-icon-position" />
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -1063,9 +1562,29 @@
                 <span class="pc-folder-settings-icon" aria-hidden="true">
                   <i class="el-icon-folder" /><i class="el-icon-setting" />
                 </span></button></el-tooltip
+            ><el-tooltip
+              v-if="node.item.kind === 'file'"
+              content="引用文件"
+              placement="top"
+              effect="light"
+              :open-delay="320"
+              :enterable="false"
+            >
+              <button
+                class="pc-workspace-file-action"
+                aria-label="引用文件"
+                :disabled="!!pendingInteraction"
+                @click.stop="referenceWorkspaceFile(node.item)"
+              >
+                <span class="pc-workspace-reference-at" aria-hidden="true"
+                  >@</span
+                >
+              </button> </el-tooltip
             ><button
               v-if="node.item.kind === 'file'"
+              class="pc-workspace-file-action"
               title="下载文件"
+              aria-label="下载文件"
               @click="downloadFile(node.item)"
             >
               <i class="el-icon-download" />
@@ -1129,7 +1648,7 @@
           {{
             taskDialogMode === "archive"
               ? "归档当前任务将放弃未发送的输入，确定继续？"
-              : "确定删除该任务？对话记录将被删除，相关产物不会删除"
+              : "确定删除该任务？对话记录和本任务上传的附件将被删除，工作空间文件保留"
           }}
         </p>
       </div>
@@ -1194,8 +1713,7 @@
       ><div slot="title" class="pc-dialog-head">
         <div class="pc-dialog-icon"><i class="el-icon-document" /></div>
         <div>
-          <strong>{{ previewItem && previewItem.name }}</strong
-          ><span>工作空间文件 · 只读预览</span>
+          <strong>{{ previewItem && previewItem.name }}</strong>
         </div>
       </div>
       <div class="pc-preview-body">
@@ -1230,9 +1748,11 @@ import {
   resolveDemoRequest,
   stopDemoStream,
   addWorkspaceItem,
+  removeWorkspaceItems,
   persist,
 } from "../state";
-import { saveFile, readFile } from "../file-db";
+import { KNOWLEDGE_CATALOG, KNOWLEDGE_DOCUMENTS } from "../knowledge-demo";
+import { saveFile, readFile, deleteFile } from "../file-db";
 import { avatarSrcFor } from "../avatar";
 import {
   conversationProcessBlocks,
@@ -1250,6 +1770,7 @@ function emptyConversation() {
     status: "ready",
     archived: false,
     cwd: "/",
+    model: "gpt-4o",
     messages: [],
     turns: [],
     sessionPresentation: emptySessionPresentation(),
@@ -1286,6 +1807,9 @@ export default {
       },
       expandedQueueItemId: null,
       hoveredQuestionIndex: null,
+      questionRailDense: false,
+      questionRailCanScrollUp: false,
+      questionRailCanScrollDown: false,
       workspaceFolderId: null,
       expandedFolderIds: [],
       model: "gpt-4o",
@@ -1297,6 +1821,18 @@ export default {
         { name: "通用大模型", tag: "平台", context: "演示配置" },
       ],
       pendingFiles: [],
+      uploadingFiles: false,
+      uploadGeneration: 0,
+      pendingReferences: [],
+      resourceCanScrollLeft: false,
+      resourceCanScrollRight: false,
+      referencePickerVisible: false,
+      referenceTab: "knowledge",
+      activeKnowledgeLibraryId: null,
+      knowledgeSearch: "",
+      workspaceSearch: "",
+      referenceExpandedFolderIds: [],
+      cwdExpandedFolderIds: [],
       clarifyDraft: "",
       clarifyAnswers: {},
       pathPopoverDismissed: false,
@@ -1320,6 +1856,9 @@ export default {
     };
   },
   computed: {
+    knowledgeReferenceEnabled() {
+      return this.expert?.knowledge?.scope !== "none";
+    },
     taskListVisible() {
       return this.isNarrowViewport
         ? this.taskListOpen
@@ -1395,6 +1934,99 @@ export default {
             item.kind === "folder" &&
             this.expandedFolderIds.includes(item.id)
           )
+            visit(item.id, depth + 1);
+        }
+      };
+      visit(null, 0);
+      return rows;
+    },
+    activeKnowledgeLibrary() {
+      return (
+        KNOWLEDGE_CATALOG.find(
+          (item) => item.id === this.activeKnowledgeLibraryId,
+        ) || null
+      );
+    },
+    filteredKnowledgeLibraries() {
+      const search = this.knowledgeSearch.trim().toLowerCase();
+      return KNOWLEDGE_CATALOG.filter(
+        (item) =>
+          !search ||
+          `${item.name} ${item.description}`.toLowerCase().includes(search),
+      );
+    },
+    filteredKnowledgeDocuments() {
+      const search = this.knowledgeSearch.trim().toLowerCase();
+      return KNOWLEDGE_DOCUMENTS.filter(
+        (item) =>
+          item.libraryId === this.activeKnowledgeLibraryId &&
+          (!search || item.name.toLowerCase().includes(search)),
+      );
+    },
+    referenceWorkspaceRows() {
+      if (!this.expert) return [];
+      const search = this.workspaceSearch.trim().toLowerCase();
+      const seenFiles = new Set();
+      if (search)
+        return this.expert.files
+          .filter(
+            (item) =>
+              item.kind === "file" &&
+              this.filePath(item).toLowerCase().includes(search),
+          )
+          .filter((item) => {
+            const path = this.filePath(item);
+            if (seenFiles.has(path)) return false;
+            seenFiles.add(path);
+            return true;
+          })
+          .map((item) => ({ item, depth: 0 }));
+      const rows = [];
+      const visit = (parentId, depth) => {
+        const children = this.expert.files
+          .filter((item) => item.parentId === parentId)
+          .sort((a, b) =>
+            a.kind === b.kind
+              ? a.name.localeCompare(b.name)
+              : a.kind === "folder"
+                ? -1
+                : 1,
+          );
+        for (const item of children) {
+          if (item.kind === "file") {
+            const path = this.filePath(item);
+            if (seenFiles.has(path)) continue;
+            seenFiles.add(path);
+          }
+          rows.push({ item, depth });
+          if (
+            item.kind === "folder" &&
+            this.referenceExpandedFolderIds.includes(item.id)
+          )
+            visit(item.id, depth + 1);
+        }
+      };
+      visit(null, 0);
+      return rows;
+    },
+    cwdFolderRows() {
+      if (!this.expert) return [];
+      const rows = [];
+      const visit = (parentId, depth) => {
+        const folders = this.expert.files
+          .filter(
+            (item) => item.kind === "folder" && item.parentId === parentId,
+          )
+          .sort((a, b) => a.name.localeCompare(b.name));
+        for (const item of folders) {
+          rows.push({
+            item,
+            depth,
+            hasChildren: this.expert.files.some(
+              (child) => child.kind === "folder" && child.parentId === item.id,
+            ),
+          });
+          if (this.cwdExpandedFolderIds.includes(item.id))
             visit(item.id, depth + 1);
         }
       };
@@ -1617,7 +2249,16 @@ export default {
     },
   },
   mounted() {
+    this.model = this.conversation?.model || "gpt-4o";
     window.addEventListener("resize", this.handleViewportResize);
+    if (typeof ResizeObserver !== "undefined") {
+      this._resourceResizeObserver = new ResizeObserver(
+        this.updateResourceOverflow,
+      );
+      this._questionRailResizeObserver = new ResizeObserver(
+        this.updateQuestionRail,
+      );
+    }
     this.turnClock = setInterval(() => {
       if (["running", "recovering"].includes(this.conversation?.status))
         this.clockNow = Date.now();
@@ -1628,15 +2269,32 @@ export default {
         .replace({ name: "chat", params: { id: this.expert.id }, query })
         .catch(() => {});
     }
-    this.$nextTick(this.scrollBottom);
+    this.$nextTick(() => {
+      this.resizeComposer();
+      this.updateResourceOverflow();
+      this.observeQuestionRail();
+      this.scrollBottom();
+    });
   },
   beforeDestroy() {
     window.removeEventListener("resize", this.handleViewportResize);
+    this._resourceResizeObserver?.disconnect();
+    this._questionRailResizeObserver?.disconnect();
     clearInterval(this.turnClock);
     if (this.$route.query.conv) stopDemoStream(this.$route.query.conv);
+    this.discardPendingUploads();
     this.clearPreview();
   },
   watch: {
+    draft() {
+      this.$nextTick(this.resizeComposer);
+    },
+    pendingFiles() {
+      this.$nextTick(this.updateResourceOverflow);
+    },
+    pendingReferences() {
+      this.$nextTick(this.updateResourceOverflow);
+    },
     "$route.query.conv"(next, prior) {
       if (prior && next !== prior) stopDemoStream(prior);
       Object.keys(this.statusExpanded).forEach((key) => {
@@ -1645,10 +2303,22 @@ export default {
       this.expandedQueueItemId = null;
       this.hoveredQuestionIndex = null;
       this.draft = "";
+      this.discardPendingUploads();
       this.pendingFiles = [];
+      this.pendingReferences = [];
+      this.referencePickerVisible = false;
+      this.cwdPickerVisible = false;
+      this.modelPickerVisible = false;
+      this.model = this.conversation?.model || "gpt-4o";
       this.clarifyDraft = "";
       this.clarifyAnswers = {};
-      this.$nextTick(this.scrollBottom);
+      this.$nextTick(() => {
+        this.observeQuestionRail();
+        this.scrollBottom();
+      });
+    },
+    "questionPreviews.length"() {
+      this.$nextTick(this.observeQuestionRail);
     },
     "conversation.messages.length"() {
       this.$nextTick(this.scrollBottom);
@@ -1664,11 +2334,259 @@ export default {
     },
   },
   methods: {
+    updateResourceOverflow() {
+      const strip = this.$refs.resourceStrip;
+      if (strip !== this._resourceObservedElement) {
+        this._resourceResizeObserver?.disconnect();
+        if (strip) this._resourceResizeObserver?.observe(strip);
+        this._resourceObservedElement = strip;
+      }
+      if (!strip) {
+        this.resourceCanScrollLeft = false;
+        this.resourceCanScrollRight = false;
+        return;
+      }
+      const maxScrollLeft = Math.max(0, strip.scrollWidth - strip.clientWidth);
+      this.resourceCanScrollLeft = strip.scrollLeft > 1;
+      this.resourceCanScrollRight = strip.scrollLeft < maxScrollLeft - 1;
+    },
+    scrollResourceStrip(direction) {
+      const strip = this.$refs.resourceStrip;
+      if (!strip) return;
+      strip.scrollBy({
+        left: direction * Math.max(200, Math.floor(strip.clientWidth * 0.75)),
+        behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches
+          ? "auto"
+          : "smooth",
+      });
+    },
+    resizeComposer() {
+      const composer = this.$refs.composer;
+      if (!composer) return;
+      const style = window.getComputedStyle(composer);
+      const lineHeight = Number.parseFloat(style.lineHeight) || 21;
+      const padding =
+        (Number.parseFloat(style.paddingTop) || 0) +
+        (Number.parseFloat(style.paddingBottom) || 0);
+      const minHeight = Math.ceil(lineHeight * 2 + padding);
+      const maxHeight = Math.ceil(lineHeight * 10 + padding);
+      composer.style.height = `${minHeight}px`;
+      const contentHeight = composer.scrollHeight;
+      composer.style.height = `${Math.min(maxHeight, Math.max(minHeight, contentHeight))}px`;
+      composer.style.overflowY = contentHeight > maxHeight ? "auto" : "hidden";
+    },
     avatarSrcFor,
+    demoDocumentCount(libraryId) {
+      return KNOWLEDGE_DOCUMENTS.filter((item) => item.libraryId === libraryId)
+        .length;
+    },
+    referenceTypeLabel(kind) {
+      return (
+        {
+          knowledge_library: "知识库 · 本轮检索范围",
+          knowledge_document: "知识中心文档",
+          workspace_file: "工作空间文件",
+        }[kind] || "引用资料"
+      );
+    },
+    knowledgeLibraryActionHint(library, action) {
+      if (!this.knowledgeReferenceEnabled) return "当前专家未启用知识库";
+      if (library.status !== "ready") return library.statusReason;
+      if (action === "open") return "打开知识库";
+      return this.isReferenceSelected("knowledge_library", library.id)
+        ? "取消引用知识库"
+        : "引用知识库";
+    },
+    resourceSourceLabel(kind) {
+      return (
+        {
+          knowledge_library: "知识库",
+          knowledge_document: "知识中心",
+          workspace_file: "工作空间",
+        }[kind] || "引用资料"
+      );
+    },
+    resourceFormat(name) {
+      const extension = String(name || "")
+        .split(".")
+        .pop()
+        .toLowerCase();
+      return (
+        {
+          doc: { label: "DOC", tone: "word" },
+          docx: { label: "DOC", tone: "word" },
+          pdf: { label: "PDF", tone: "pdf" },
+          xls: { label: "XLS", tone: "sheet" },
+          xlsx: { label: "XLS", tone: "sheet" },
+          csv: { label: "CSV", tone: "sheet" },
+          png: { label: "IMG", tone: "image" },
+          jpg: { label: "IMG", tone: "image" },
+          jpeg: { label: "IMG", tone: "image" },
+          webp: { label: "IMG", tone: "image" },
+          gif: { label: "IMG", tone: "image" },
+          ppt: { label: "PPT", tone: "slides" },
+          pptx: { label: "PPT", tone: "slides" },
+          md: { label: "MD", tone: "text" },
+          txt: { label: "TXT", tone: "text" },
+          json: { label: "JSON", tone: "text" },
+          zip: { label: "ZIP", tone: "archive" },
+        }[extension] || { label: "FILE", tone: "file" }
+      );
+    },
+    libraryReference(library) {
+      return { kind: "knowledge_library", id: library.id, name: library.name };
+    },
+    documentReference(document) {
+      return {
+        kind: "knowledge_document",
+        id: document.id,
+        name: document.name,
+        libraryName: this.activeKnowledgeLibrary?.name || "知识中心",
+      };
+    },
+    workspaceReference(file) {
+      return {
+        kind: "workspace_file",
+        id: file.id,
+        name: file.name,
+        path: this.filePath(file),
+      };
+    },
+    referenceWorkspaceFile(file) {
+      if (this.pendingInteraction || file.kind !== "file") return;
+      if (
+        this.pendingReferences.some(
+          (item) => item.kind === "workspace_file" && item.id === file.id,
+        )
+      ) {
+        this.$message.info("文件已在本轮引用中");
+        return;
+      }
+      const reference = this.workspaceReference(file);
+      this.pendingReferences = [...this.pendingReferences, reference];
+      this.$message.success("已添加到本轮引用");
+    },
+    isReferenceSelected(kind, id) {
+      return this.pendingReferences.some(
+        (item) => item.kind === kind && item.id === id,
+      );
+    },
+    toggleReference(reference) {
+      const selected = this.isReferenceSelected(reference.kind, reference.id);
+      this.pendingReferences = selected
+        ? this.pendingReferences.filter(
+            (item) => item.kind !== reference.kind || item.id !== reference.id,
+          )
+        : [...this.pendingReferences, reference];
+    },
+    removePendingReference(reference) {
+      this.pendingReferences = this.pendingReferences.filter(
+        (item) => item.kind !== reference.kind || item.id !== reference.id,
+      );
+    },
+    beginReferenceSelection() {
+      this.referenceTab = "knowledge";
+      this.activeKnowledgeLibraryId = null;
+      this.knowledgeSearch = "";
+      this.workspaceSearch = "";
+      this.referenceExpandedFolderIds = [];
+    },
+    enterKnowledgeLibrary(library) {
+      if (library.status !== "ready") return;
+      this.activeKnowledgeLibraryId = library.id;
+      this.knowledgeSearch = "";
+    },
+    backToKnowledgeLibraries() {
+      this.activeKnowledgeLibraryId = null;
+      this.knowledgeSearch = "";
+    },
+    toggleReferenceFolder(id) {
+      this.referenceExpandedFolderIds =
+        this.referenceExpandedFolderIds.includes(id)
+          ? this.referenceExpandedFolderIds.filter((item) => item !== id)
+          : [...this.referenceExpandedFolderIds, id];
+    },
+    beginCwdSelection() {
+      const cwd = this.conversation?.cwd;
+      const folder = this.expert?.files.find(
+        (item) => item.kind === "folder" && this.folderPath(item.id) === cwd,
+      );
+      const ids = [];
+      let current = folder;
+      while (current) {
+        ids.unshift(current.id);
+        current = this.expert.files.find(
+          (item) => item.id === current.parentId,
+        );
+      }
+      this.cwdExpandedFolderIds = ids;
+    },
+    toggleCwdFolder(id) {
+      this.cwdExpandedFolderIds = this.cwdExpandedFolderIds.includes(id)
+        ? this.cwdExpandedFolderIds.filter((item) => item !== id)
+        : [...this.cwdExpandedFolderIds, id];
+    },
+    chooseCwd(path) {
+      this.setCwd(path);
+      this.cwdPickerVisible = false;
+    },
+    selectPresetQuestion(question) {
+      const apply = () => {
+        this.draft = question;
+        this.focusComposer();
+      };
+      if (!this.draft.trim()) return apply();
+      this.$confirm("当前输入尚未发送，是否用预置问题替换？", "替换输入", {
+        confirmButtonText: "替换",
+        cancelButtonText: "取消",
+        type: "warning",
+      })
+        .then(apply)
+        .catch(() => {});
+    },
     handleViewportResize() {
       const narrow = window.innerWidth <= 900;
       if (narrow !== this.isNarrowViewport) this.taskListOpen = false;
       this.isNarrowViewport = narrow;
+      this.$nextTick(() => {
+        this.updateResourceOverflow();
+        this.updateQuestionRail();
+      });
+    },
+    observeQuestionRail() {
+      this._questionRailResizeObserver?.disconnect();
+      const rail = this.$refs.questionRail;
+      if (rail?.parentElement)
+        this._questionRailResizeObserver?.observe(rail.parentElement);
+      this.updateQuestionRail();
+    },
+    updateQuestionRail() {
+      const rail = this.$refs.questionRail;
+      if (!rail) {
+        this.questionRailDense = false;
+        this.questionRailCanScrollUp = false;
+        this.questionRailCanScrollDown = false;
+        return;
+      }
+      const wrapHeight = rail.parentElement?.clientHeight || 0;
+      const normalHeight = wrapHeight - Math.min(123, wrapHeight * 0.45);
+      const contentHeight = Array.from(rail.children).reduce(
+        (height, item) => height + item.offsetHeight,
+        0,
+      );
+      const dense = contentHeight > normalHeight + 1;
+      if (this.questionRailDense !== dense) {
+        this.questionRailDense = dense;
+        this.$nextTick(this.updateQuestionRailEdges);
+      } else this.updateQuestionRailEdges();
+    },
+    updateQuestionRailEdges() {
+      const rail = this.$refs.questionRail;
+      if (!rail) return;
+      const remaining = rail.scrollHeight - rail.clientHeight;
+      this.questionRailCanScrollUp = remaining > 1 && rail.scrollTop > 1;
+      this.questionRailCanScrollDown =
+        remaining > 1 && rail.scrollTop < remaining - 1;
     },
     toggleStatus(key) {
       this.statusExpanded[key] = !this.statusExpanded[key];
@@ -1827,11 +2745,18 @@ export default {
         ) || null
       );
     },
+    attachmentItem(attachment) {
+      return attachment.kind === "local_upload"
+        ? attachment
+        : this.fileItemById(attachment.id);
+    },
     userQuestionLabel(message) {
       return (
         message.content ||
-        (message.attachments || []).map((file) => file.name).join("、") ||
-        "文件消息"
+        [...(message.attachments || []), ...(message.references || [])]
+          .map((item) => item.name)
+          .join("、") ||
+        "资料消息"
       );
     },
     isQuestionMarked(id) {
@@ -1927,8 +2852,11 @@ export default {
     newTask() {
       this.taskListOpen = false;
       this.draftConversation = emptyConversation();
+      this.model = this.draftConversation.model;
       this.draft = "";
+      this.discardPendingUploads();
       this.pendingFiles = [];
+      this.pendingReferences = [];
       this.clarifyDraft = "";
       this.clarifyAnswers = {};
       this.workspaceOpen = false;
@@ -1941,13 +2869,18 @@ export default {
       if (
         !this.conversation ||
         this.pendingInteraction ||
-        (!this.draft.trim() && !this.pendingFiles.length) ||
+        this.uploadingFiles ||
+        (!this.draft.trim() &&
+          !this.pendingFiles.length &&
+          !this.pendingReferences.length) ||
         ["running", "recovering"].includes(this.conversation.status)
       )
         return;
       const content =
         this.draft.trim() ||
-        this.pendingFiles.map((file) => file.name).join("、");
+        [...this.pendingFiles, ...this.pendingReferences]
+          .map((item) => item.name)
+          .join("、");
       let conversationId = this.conversation.id;
       if (this.isDraftTask) {
         const created = createConversation(
@@ -1955,14 +2888,23 @@ export default {
           conversationTitleFromFirstMessage(content),
         );
         conversationId = created.id;
+        if (this.model !== "gpt-4o")
+          updateConversation(conversationId, { model: this.model });
         if (this.draftConversation.cwd !== "/")
           updateConversation(conversationId, {
             cwd: this.draftConversation.cwd,
           });
       }
-      sendDemoMessage(conversationId, this.draft.trim(), this.pendingFiles);
+      sendDemoMessage(
+        conversationId,
+        this.draft.trim(),
+        this.pendingFiles,
+        this.pendingReferences,
+      );
       this.draft = "";
+      this.clearPendingFilePreviews();
       this.pendingFiles = [];
+      this.pendingReferences = [];
       if (this.isDraftTask)
         this.$router
           .replace({
@@ -1980,6 +2922,9 @@ export default {
     },
     selectModel(name) {
       this.model = name;
+      if (this.isDraftTask) this.draftConversation.model = name;
+      else if (this.conversation?.id)
+        updateConversation(this.conversation.id, { model: name });
       this.modelPickerVisible = false;
     },
     stop() {
@@ -2240,7 +3185,21 @@ export default {
     fileSizeLabel(size) {
       return size < 1024 ? size + " B" : (size / 1024).toFixed(1) + " KB";
     },
+    clearPendingFilePreviews() {
+      for (const file of this.pendingFiles)
+        if (file.previewUrl) URL.revokeObjectURL(file.previewUrl);
+    },
+    discardPendingUploads() {
+      this.uploadGeneration++;
+      this.clearPendingFilePreviews();
+      for (const file of this.pendingFiles)
+        if (file.kind === "local_upload")
+          void deleteFile(file.id).catch(() => {});
+    },
     removePendingFile(file) {
+      if (file.previewUrl) URL.revokeObjectURL(file.previewUrl);
+      if (file.kind === "local_upload")
+        void deleteFile(file.id).catch(() => {});
       this.pendingFiles = this.pendingFiles.filter(
         (item) => item.id !== file.id,
       );
@@ -2251,47 +3210,94 @@ export default {
         parentId,
         kind: "file",
       });
-      await saveFile(entry.id, file);
+      try {
+        await saveFile(entry.id, file);
+      } catch (error) {
+        removeWorkspaceItems(this.expert.id, [entry.id]);
+        throw error;
+      }
       return entry;
     },
     async attachFile(event) {
-      const file = event.target.files[0];
-      if (!file) return;
-      const entry = await this.storeFile(file, this.workspaceFolderId);
-      this.pendingFiles.push({
-        id: entry.id,
-        name: file.name,
-        size: file.size,
-      });
+      const files = [...(event.target.files || [])];
       event.target.value = "";
-      this.$message.success("文件已添加到演示工作空间");
+      if (!files.length || this.uploadingFiles) return;
+      const generation = this.uploadGeneration;
+      this.uploadingFiles = true;
+      let added = 0;
+      try {
+        for (const file of files) {
+          try {
+            const id = `upload_${globalThis.crypto?.randomUUID?.() || `${Date.now()}_${Math.random().toString(36).slice(2)}`}`;
+            await saveFile(id, file);
+            if (generation !== this.uploadGeneration) {
+              await deleteFile(id).catch(() => {});
+              continue;
+            }
+            this.pendingFiles.push({
+              kind: "local_upload",
+              id,
+              name: file.name,
+              size: file.size,
+              previewUrl: file.type.startsWith("image/")
+                ? URL.createObjectURL(file)
+                : "",
+            });
+            added++;
+          } catch {
+            if (generation === this.uploadGeneration)
+              this.$message.error(`无法添加 ${file.name}`);
+          }
+        }
+      } finally {
+        this.uploadingFiles = false;
+      }
+      if (added && generation === this.uploadGeneration)
+        this.$message.success(`已添加 ${added} 个本地文件`);
     },
     async uploadWorkspaceFiles(event) {
       const files = [...event.target.files];
-      for (const file of files)
-        await this.storeFile(file, this.workspaceFolderId);
       event.target.value = "";
-      if (files.length) this.$message.success("文件已保存到浏览器演示数据");
+      let added = 0;
+      for (const file of files) {
+        try {
+          await this.storeFile(file, this.workspaceFolderId);
+          added++;
+        } catch {
+          this.$message.error(`无法保存 ${file.name}`);
+        }
+      }
+      if (added) this.$message.success("文件已保存到浏览器演示数据");
     },
     async fileBlob(item) {
-      return (
-        (await readFile(item.id)) ||
-        new Blob([item.content || ""], {
-          type: item.name.endsWith(".csv") ? "text/csv" : "text/plain",
-        })
-      );
+      const stored = await readFile(item.id);
+      if (stored) return stored;
+      if (item.kind === "local_upload") throw new Error("文件已不可用");
+      return new Blob([item.content || ""], {
+        type: item.name.endsWith(".csv") ? "text/csv" : "text/plain",
+      });
     },
     async previewFile(item) {
+      if (!item) return;
       this.clearPreview();
       this.previewItem = item;
-      const blob = await this.fileBlob(item);
-      if (blob.type.startsWith("image/"))
-        this.previewUrl = URL.createObjectURL(blob);
-      else this.previewText = await blob.text();
-      this.previewVisible = true;
+      try {
+        const blob = await this.fileBlob(item);
+        if (blob.type.startsWith("image/"))
+          this.previewUrl = URL.createObjectURL(blob);
+        else this.previewText = await blob.text();
+        this.previewVisible = true;
+      } catch {
+        this.$message.error("文件已不可用");
+      }
     },
     async downloadFile(item) {
-      if (item) saveBlob(await this.fileBlob(item), item.name);
+      if (!item) return;
+      try {
+        saveBlob(await this.fileBlob(item), item.name);
+      } catch {
+        this.$message.error("文件已不可用");
+      }
     },
     clearPreview() {
       if (this.previewUrl) URL.revokeObjectURL(this.previewUrl);

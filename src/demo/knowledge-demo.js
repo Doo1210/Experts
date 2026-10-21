@@ -48,6 +48,51 @@ export const KNOWLEDGE_CATALOG = [
   },
 ];
 
+export const KNOWLEDGE_DOCUMENTS = [
+  {
+    id: "doc_quality_incoming",
+    libraryId: "kb_quality",
+    name: "来料检验规范.pdf",
+    type: "PDF",
+  },
+  {
+    id: "doc_quality_yield",
+    libraryId: "kb_quality",
+    name: "良率统计口径说明.md",
+    type: "Markdown",
+  },
+  {
+    id: "doc_quality_exception",
+    libraryId: "kb_quality",
+    name: "质量异常判定规则.docx",
+    type: "Word",
+  },
+  {
+    id: "doc_process_manual",
+    libraryId: "kb_process",
+    name: "关键工序作业指导书.pdf",
+    type: "PDF",
+  },
+  {
+    id: "doc_process_changeover",
+    libraryId: "kb_process",
+    name: "产线换型操作指南.md",
+    type: "Markdown",
+  },
+  {
+    id: "doc_case_night",
+    libraryId: "kb_cases",
+    name: "夜班良率波动案例.pdf",
+    type: "PDF",
+  },
+  {
+    id: "doc_case_tracking",
+    libraryId: "kb_cases",
+    name: "整改闭环记录.xlsx",
+    type: "Excel",
+  },
+];
+
 export const KNOWLEDGE_FILE_TYPES = [
   "PDF",
   "Word",
