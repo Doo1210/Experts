@@ -120,7 +120,7 @@
           ><span
             ><strong
               >归档任务 <em>{{ archived.length }}</em></strong
-            ><small>已归档的对话任务可以恢复或查看历史记录</small></span
+            ><small>恢复任务后，才能查看历史记录或继续对话</small></span
           >
         </div>
         <el-input
@@ -138,10 +138,8 @@
             ><template slot-scope="scope">{{
               formatTime(scope.row.updatedAt)
             }}</template></el-table-column
-          ><el-table-column label="操作" width="220"
+          ><el-table-column label="操作" width="160"
             ><template slot-scope="scope"
-              ><el-button type="text" @click="openConversation(scope.row)"
-                >打开</el-button
               ><el-button type="text" @click="restore(scope.row)"
                 >恢复</el-button
               ><el-button type="text" @click="remove(scope.row)"

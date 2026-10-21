@@ -28,10 +28,25 @@ npm run check:versions -- --host-lock D:\CodingWorkSpace\wanwu\wanwu-web\web\pnp
 
 - 专家、模板、渠道与事件由 `src/demo/state.js` 初始化；`src/demo/project-fixtures.js` 补充 4 个项目、32 项看板任务、8 条目标记录及各项目的动态和工作空间样例。所有业务操作都在浏览器本地执行。
 - 已有浏览器演示数据首次加载新版时会增量加入这些固定样例，不替换手动创建的项目；之后不会反复补回已删除的样例。需要从头查看完整固定场景时，可使用“重置演示数据”。
-- JSON 状态保存在版本化的 `localStorage` 键 `digital-employee-demo-v3`；上传文件正文保存在 IndexedDB。右下角或嵌入态顶部的“重置演示数据”会清除两者。
+- JSON 状态保存在版本化的 `localStorage` 键 `digital-employee-demo-v3`；上传文件正文保存在 IndexedDB。左侧导航底部的“重置演示数据”会清除两者。
 - 对话流、工具过程、澄清、审批和自主任务执行是本地计时器模拟；切换或离开对话会停止该对话的模拟流。
 - 页面明确标注“演示数据”。模拟发送、渠道连接和 MCP 测通不产生真实外部操作。
 - 宿主可能仍在 iframe URL 上传入 token、用户和组织参数；本应用不读取它们，并立即从地址栏移除这些参数。
+
+## 对话呈现演示场景
+
+在专家对话页输入以下文字，可查看固定的本地事件路径：
+
+- `演示过程`：中途说明前后形成两个独立活动组；`工具详情`：展开命令活动查看安全入参和可读输出；`文件差异`：查看固定差异，演示不会修改真实文件。
+- `请展示思考`、`请使用并行模型`、`后台子代理核对资料`：分别展示可见推理、MoA 参考意见和晚于父答复完成的子任务。
+- `请多题澄清`、`已答多题澄清`、`请审批后演示失败`：查看人工请求、已接收答案恢复及批准后工具失败。
+- `凭据演示`：只模拟安全提交状态，不输入或保存真实密码与密钥。
+- `生成待办结果`、`层级待办和目标等待`：区分本轮结果与当前会话状态。
+- `Markdown 展示`：查看无气泡正文、表格、代码块和链接；点击纸夹上传本地文件，可纯附件发送并刷新后预览。
+
+完整触发词、组合优先级及限制见 [专家对话演示触发语](docs/conversation_demo_triggers.md)。
+
+所有场景均为浏览器本地演示，不代表真实模型或外部工具执行。
 
 ## 目录
 
@@ -44,3 +59,5 @@ npm run check:versions -- --host-lock D:\CodingWorkSpace\wanwu\wanwu-web\web\pnp
 - `scripts/check-versions.mjs`：与宿主实际锁定版本的核对。
 
 本工程后续确认的产品与交互需求统一维护在 [docs/experts_prd.md](docs/experts_prd.md)；实现或验收新需求时，同步更新对应章节和修改记录。该文档未覆盖的规则再按“1023 PRD → MVP PRD → 原型现状”核对。覆盖与检查记录见 `docs/prototype-coverage.md` 和 `docs/verification.md`。
+
+现有对话页的呈现规则、逐节验收与上游待定项，见 [docs/conversation_prd.md](docs/conversation_prd.md)。上游尚未定稿的规则保持待确认状态。

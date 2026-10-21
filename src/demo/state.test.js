@@ -497,4 +497,339 @@ describe("演示状态", () => {
       old.projects.find((project) => project.id === "user_project").name,
     ).toBe("我的项目");
   });
+  it("普通回合无需工具，停止时保留部分输出并保存中断状态", async () => {
+    vi.useFakeTimers();
+    try {
+      const conversation = demo.createConversation("exp_quality", "测试回合");
+      demo.sendDemoMessage(conversation.id, "你好");
+      await vi.advanceTimersByTimeAsync(140);
+      const partial = conversation.messages[1].content;
+      expect(partial.length).toBeGreaterThan(0);
+      demo.stopDemoStream(conversation.id);
+      await vi.advanceTimersByTimeAsync(10000);
+      expect(conversation.turns[0]).toMatchObject({
+        status: "interrupted",
+        activities: [],
+      });
+      expect(conversation.messages[1].content).toBe(partial);
+      expect(conversation.status).toBe("ready");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+  it("关键词演示保留可观察的处理过程，普通回复仍能较快结束", async () => {
+    vi.useFakeTimers();
+    try {
+      const scripted = demo.createConversation("exp_quality", "工具演示节奏");
+      demo.sendDemoMessage(scripted.id, "工具详情");
+      await vi.advanceTimersByTimeAsync(5600);
+      expect(scripted.turns[0].status).toBe("running");
+      expect(scripted.turns[0].activities.length).toBeGreaterThan(0);
+      await vi.advanceTimersByTimeAsync(2500);
+      expect(scripted.turns[0].status).toBe("complete");
+
+      const ordinary = demo.createConversation("exp_quality", "普通回复节奏");
+      demo.sendDemoMessage(ordinary.id, "你好");
+      await vi.advanceTimersByTimeAsync(3000);
+      expect(ordinary.turns[0].status).toBe("complete");
+
+      const interrupted = demo.createConversation("exp_quality", "中止演示");
+      demo.sendDemoMessage(interrupted.id, "演示进度");
+      await vi.advanceTimersByTimeAsync(2000);
+      const partial = interrupted.messages[1].content;
+      expect(interrupted.turns[0].status).toBe("running");
+      demo.stopDemoStream(interrupted.id);
+      await vi.advanceTimersByTimeAsync(10000);
+      expect(interrupted.turns[0].status).toBe("interrupted");
+      expect(interrupted.messages[1].content).toBe(partial);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+  it("澄清请求与用户回复留在同一回合，重复提交无效", async () => {
+    vi.useFakeTimers();
+    try {
+      const conversation = demo.createConversation("exp_quality", "澄清回合");
+      demo.sendDemoMessage(conversation.id, "请澄清");
+      await vi.advanceTimersByTimeAsync(10000);
+      const turn = conversation.turns[0];
+      const request = turn.requests[0];
+      expect(turn.status).toBe("waiting");
+      expect(request.status).toBe("waiting");
+      expect(conversation.messages[1].content).toBe("");
+      expect(
+        demo.resolveDemoRequest(conversation.id, request.id, "最近一周"),
+      ).toBe(true);
+      expect(
+        demo.resolveDemoRequest(conversation.id, request.id, "重复回复"),
+      ).toBe(false);
+      await vi.advanceTimersByTimeAsync(2000);
+      expect(turn.status).toBe("complete");
+      expect(request.response).toBe("最近一周");
+      expect(conversation.messages).toHaveLength(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+  it("会话状态原位更新，本轮证据只引用存在的演示文件", async () => {
+    vi.useFakeTimers();
+    try {
+      const conversation = demo.createConversation("exp_quality", "结果回合");
+      demo.sendDemoMessage(conversation.id, "列出待办并引用资料");
+      const revision = conversation.sessionPresentation.todoRevision;
+      await vi.advanceTimersByTimeAsync(10000);
+      const fileId = conversation.turns[0].results[0]?.fileId;
+      expect(fileId).toBeTruthy();
+      expect(
+        demo.expertById("exp_quality").files.some((item) => item.id === fileId),
+      ).toBe(true);
+      demo.sendDemoMessage(conversation.id, "完成待办");
+      expect(conversation.sessionPresentation.todoRevision).toBe(revision + 1);
+      expect(conversation.sessionPresentation.todos[0].status).toBe(
+        "completed",
+      );
+    } finally {
+      demo.stopDemoStream(demo.state.conversations[0].id);
+      vi.useRealTimers();
+    }
+  });
+  it("审批通过只启动后续活动，拒绝直接中断回合", async () => {
+    vi.useFakeTimers();
+    try {
+      const approved = demo.createConversation("exp_quality", "审批通过");
+      demo.sendDemoMessage(approved.id, "请审批");
+      await vi.advanceTimersByTimeAsync(10000);
+      const request = approved.turns[0].requests[0];
+      expect(demo.resolveDemoRequest(approved.id, request.id, "approved")).toBe(
+        true,
+      );
+      expect(approved.turns[0].status).toBe("running");
+      expect(approved.turns[0].activities[0].status).toBe("running");
+      await vi.advanceTimersByTimeAsync(2000);
+      expect(approved.turns[0].status).toBe("complete");
+      expect(approved.turns[0].activities[0].status).toBe("complete");
+
+      const rejected = demo.createConversation("exp_quality", "审批拒绝");
+      demo.sendDemoMessage(rejected.id, "请审批");
+      await vi.advanceTimersByTimeAsync(10000);
+      expect(
+        demo.resolveDemoRequest(
+          rejected.id,
+          rejected.turns[0].requests[0].id,
+          "rejected",
+        ),
+      ).toBe(true);
+      expect(rejected.turns[0].status).toBe("interrupted");
+      expect(rejected.turns[0].activities).toHaveLength(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+  it("推理以外的活动与文件工具并存时，工具仍按各自 ID 正常结算", async () => {
+    vi.useFakeTimers();
+    try {
+      const conversation = demo.createConversation(
+        "exp_quality",
+        "子任务与工具",
+      );
+      demo.sendDemoMessage(conversation.id, "请用子代理分析资料");
+      await vi.advanceTimersByTimeAsync(10000);
+      const activities = conversation.turns[0].activities;
+      expect(activities.map((item) => item.title)).toEqual([
+        "子代理",
+        "读取文件",
+        "分析任务",
+      ]);
+      expect(activities.every((item) => item.status === "complete")).toBe(true);
+      expect(activities[1].argumentSummary).toBe("良率样例.csv");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+  it("并行模型演示只形成一项活动和一条父助手答复", async () => {
+    vi.useFakeTimers();
+    try {
+      const conversation = demo.createConversation("exp_quality", "并行模型");
+      demo.sendDemoMessage(conversation.id, "请使用并行模型");
+      await vi.advanceTimersByTimeAsync(10000);
+      expect(conversation.turns[0].activities).toMatchObject([
+        {
+          kind: "moa",
+          title: "并行模型",
+          status: "complete",
+          references: [{ label: "参考模型甲" }, { label: "参考模型乙" }],
+        },
+      ]);
+      expect(conversation.messages).toHaveLength(2);
+      expect(conversation.messages[1].content).toContain("我已收到你的任务");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+  it("多题澄清只接受完整有效答案，审批通过后失败与授权决定分开记录", async () => {
+    vi.useFakeTimers();
+    try {
+      const multi = demo.createConversation("exp_quality", "多题澄清");
+      demo.sendDemoMessage(multi.id, "请多题澄清");
+      await vi.advanceTimersByTimeAsync(10000);
+      const request = multi.turns[0].requests[0];
+      expect(request.questions).toHaveLength(2);
+      expect(
+        demo.resolveDemoRequest(multi.id, request.id, {
+          answers: {
+            time: "最近一周",
+            line: [],
+          },
+        }),
+      ).toBe(false);
+      expect(
+        demo.resolveDemoRequest(multi.id, request.id, {
+          answers: {
+            time: "最近一周",
+            line: ["1 号产线"],
+          },
+        }),
+      ).toBe(true);
+      await vi.advanceTimersByTimeAsync(2000);
+      expect(request.answers).toEqual({ time: "最近一周", line: ["1 号产线"] });
+      expect(multi.turns[0].status).toBe("complete");
+
+      const approval = demo.createConversation("exp_quality", "审批失败");
+      demo.sendDemoMessage(approval.id, "请审批后演示失败");
+      await vi.advanceTimersByTimeAsync(10000);
+      const decision = approval.turns[0].requests[0];
+      expect(
+        demo.resolveDemoRequest(approval.id, decision.id, "approved"),
+      ).toBe(true);
+      await vi.advanceTimersByTimeAsync(2000);
+      expect(decision.response).toBe("approved");
+      expect(approval.turns[0].status).toBe("error");
+      expect(approval.messages[1].error).toContain("后续演示操作失败");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+  it("用户仅发送附件时保留文件引用，消息不重复填写文件名正文", async () => {
+    vi.useFakeTimers();
+    try {
+      const conversation = demo.createConversation("exp_quality", "附件回合");
+      demo.sendDemoMessage(conversation.id, "", [
+        { id: "f_quality_csv" },
+        { id: "missing" },
+      ]);
+      expect(conversation.messages[0]).toMatchObject({
+        content: "",
+        attachments: [{ id: "f_quality_csv", name: "良率样例.csv" }],
+      });
+      await vi.advanceTimersByTimeAsync(10000);
+      expect(conversation.turns[0].status).toBe("complete");
+      expect(conversation.messages[1].content).toContain("良率样例.csv");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+  it("层级待办与目标等待仅由结构化快照驱动，取消项不计完成分母", async () => {
+    vi.useFakeTimers();
+    try {
+      const conversation = demo.createConversation("exp_quality", "结构化状态");
+      demo.sendDemoMessage(conversation.id, "层级待办和目标等待");
+      const presentation = conversation.sessionPresentation;
+      expect(presentation.todos.map((item) => item.parent)).toEqual([
+        null,
+        "todo_root",
+        "todo_sample",
+        null,
+      ]);
+      expect(presentation.control.goal.wait_barrier.type).toBe("until");
+      expect(presentation.control.goal.subgoals).toEqual([
+        "核对资料",
+        "形成建议",
+      ]);
+      await vi.advanceTimersByTimeAsync(10000);
+      expect(conversation.turns[0].status).toBe("complete");
+      expect(presentation.control.goal.status).toBe("active");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+  it("排队任务演示显示多条独立任务并可清空", async () => {
+    vi.useFakeTimers();
+    try {
+      const conversation = demo.createConversation("exp_quality", "队列演示");
+      demo.sendDemoMessage(conversation.id, "演示排队任务");
+      expect(conversation.sessionPresentation.queuedTasks).toHaveLength(3);
+      expect(conversation.sessionPresentation.queuedTasks[0].title).toBe(
+        "核对异常批次",
+      );
+      await vi.advanceTimersByTimeAsync(10000);
+      demo.sendDemoMessage(conversation.id, "清空排队任务");
+      expect(conversation.sessionPresentation.queuedTasks).toEqual([]);
+    } finally {
+      demo.stopDemoStream(demo.state.conversations[0].id);
+      vi.useRealTimers();
+    }
+  });
+  it("本轮待办结果独立于后续会话当前待办状态", async () => {
+    vi.useFakeTimers();
+    try {
+      const conversation = demo.createConversation("exp_quality", "待办结果");
+      demo.sendDemoMessage(conversation.id, "生成待办结果");
+      await vi.advanceTimersByTimeAsync(10000);
+      const result = conversation.turns[0].results[0];
+      expect(result.kind).toBe("todo");
+      expect(result.items[0].status).toBe("pending");
+      demo.sendDemoMessage(conversation.id, "完成待办");
+      expect(conversation.sessionPresentation.todos[0].status).toBe(
+        "completed",
+      );
+      expect(result.items[0].status).toBe("pending");
+    } finally {
+      demo.stopDemoStream(demo.state.conversations[0].id);
+      vi.useRealTimers();
+    }
+  });
+  it("后台子代理晚于父答复更新原活动；任务切换可取消旧演示事件", async () => {
+    vi.useFakeTimers();
+    try {
+      const conversation = demo.createConversation("exp_quality", "后台委派");
+      demo.sendDemoMessage(conversation.id, "后台子代理核对资料");
+      for (
+        let index = 0;
+        index < 100 && conversation.turns[0].status === "running";
+        index++
+      )
+        await vi.advanceTimersByTimeAsync(70);
+      expect(conversation.turns[0].status).toBe("complete");
+      const parentText = conversation.messages[1].content;
+      expect(
+        conversation.turns[0].activities.find(
+          (item) => item.kind === "subagent",
+        ).status,
+      ).toBe("unknown");
+      await vi.advanceTimersByTimeAsync(2200);
+      expect(
+        conversation.turns[0].activities.find(
+          (item) => item.kind === "subagent",
+        ).status,
+      ).toBe("complete");
+      expect(conversation.messages[1].content).toBe(parentText);
+
+      const cancelled = demo.createConversation("exp_quality", "离开任务");
+      demo.sendDemoMessage(cancelled.id, "后台子代理核对资料");
+      for (
+        let index = 0;
+        index < 100 && cancelled.turns[0].status === "running";
+        index++
+      )
+        await vi.advanceTimersByTimeAsync(70);
+      demo.stopDemoStream(cancelled.id);
+      await vi.advanceTimersByTimeAsync(2200);
+      expect(
+        cancelled.turns[0].activities.find((item) => item.kind === "subagent")
+          .status,
+      ).toBe("unknown");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

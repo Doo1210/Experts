@@ -18,19 +18,50 @@
         </button>
       </div>
       <div class="pc-top-actions">
-        <button class="pc-primary" @click="newTask">
+        <button
+          class="pc-primary"
+          title="新建任务"
+          aria-label="新建任务"
+          @click="newTask"
+        >
           <i class="el-icon-plus" /> 新建任务</button
         ><button
-          class="pc-outline"
+          type="button"
+          class="pc-outline pc-panel-toggle"
+          :class="{ active: taskListVisible }"
+          :title="taskListVisible ? '收起任务列表' : '展开任务列表'"
+          :aria-label="taskListVisible ? '收起任务列表' : '展开任务列表'"
+          :aria-expanded="taskListVisible ? 'true' : 'false'"
+          aria-controls="pc-task-panel"
+          @click="toggleTaskList"
+        >
+          <i class="el-icon-tickets" /> 任务列表
+        </button>
+        <button
+          type="button"
+          class="pc-outline pc-panel-toggle"
           :class="{ active: workspaceOpen }"
+          :title="workspaceOpen ? '收起工作空间' : '展开工作空间'"
+          :aria-label="workspaceOpen ? '收起工作空间' : '展开工作空间'"
+          :aria-expanded="workspaceOpen ? 'true' : 'false'"
+          aria-controls="pc-workspace-panel"
           @click="toggleWorkspace"
         >
-          <i class="el-icon-house" /> 工作空间
+          <i class="el-icon-folder-opened" /> 工作空间
         </button>
       </div>
     </header>
+    <div v-if="pageNotifications.length" class="pc-page-notices">
+      <span v-for="notice in pageNotifications" :key="notice.key">{{
+        notice.text
+      }}</span>
+    </div>
     <div class="pc-body">
-      <section v-if="conversation" class="pc-main">
+      <section
+        v-if="conversation"
+        class="pc-main"
+        :class="{ 'is-task-list-collapsed': taskListCollapsed }"
+      >
         <div v-if="conversation.archived" class="pc-archived">
           此任务已归档，不会出现在右侧任务列表。可在专家管理页「任务」的「归档任务」弹窗中恢复。
         </div>
@@ -60,149 +91,554 @@
                   }}</span>
                 </div>
                 <div class="pc-process">
-                  <button @click="toggleProcess(message.id)">
-                    {{
-                      message.status === "streaming" ? "正在处理" : "处理完成"
-                    }}
-                    <span>{{
-                      message.status === "streaming"
-                        ? ""
-                        : message.duration || "4.7 秒"
+                  <button
+                    type="button"
+                    :aria-expanded="processExpanded(message)"
+                    @click="toggleProcess(message.id)"
+                  >
+                    {{ turnStatusLabel(message) }}
+                    <span v-if="turnDurationLabel(message)">{{
+                      turnDurationLabel(message)
                     }}</span>
-                    <span
-                      v-if="message.status !== 'streaming'"
-                      class="pc-process-check"
-                      >✓</span
-                    >
                     <i
-                      v-if="message.steps && message.steps.length"
+                      v-if="hasProcessContent(message)"
                       :class="
-                        expandedProcess.includes(message.id)
+                        processExpanded(message)
                           ? 'el-icon-arrow-down'
                           : 'el-icon-arrow-right'
                       "
                     />
                   </button>
                   <div
-                    v-if="message.steps && expandedProcess.includes(message.id)"
+                    v-if="
+                      hasProcessContent(message) && processExpanded(message)
+                    "
                     class="pc-process-steps"
                   >
-                    <div
-                      v-for="step in message.steps"
-                      :key="step.title"
-                      class="pc-process-step"
-                    >
-                      <span class="pc-process-step-mark">◉</span>
-                      <span>{{ step.title }}</span>
-                      <b :class="step.status">{{
-                        step.status === "done"
-                          ? "✓"
-                          : step.status === "error"
-                            ? "×"
-                            : "…"
-                      }}</b>
-                    </div>
+                    <template v-for="block in turnProcessBlocks(message)">
+                      <div
+                        v-if="block.type === 'group'"
+                        :key="block.id"
+                        class="pc-activity-group"
+                      >
+                        <button
+                          type="button"
+                          class="pc-activity-title"
+                          :aria-expanded="expandedActivities.includes(block.id)"
+                          @click="toggleActivityGroup(block.id)"
+                        >
+                          {{ activityGroupLabel(block.activities) }}
+                          <i
+                            :class="
+                              expandedActivities.includes(block.id)
+                                ? 'el-icon-arrow-down'
+                                : 'el-icon-arrow-right'
+                            "
+                          />
+                        </button>
+                        <div
+                          v-for="step in expandedActivities.includes(block.id)
+                            ? block.activities
+                            : []"
+                          :key="step.id"
+                          class="pc-process-activity"
+                        >
+                          <button
+                            type="button"
+                            class="pc-process-step"
+                            :disabled="!activityHasDetail(step)"
+                            :aria-expanded="
+                              activityHasDetail(step)
+                                ? expandedActivityIds.includes(step.id)
+                                : undefined
+                            "
+                            @click="toggleActivityDetail(step.id)"
+                          >
+                            <span class="pc-process-step-mark">◉</span>
+                            <span>{{ activityItemTitle(step) }}</span>
+                            <i
+                              v-if="activityHasDetail(step)"
+                              :class="
+                                expandedActivityIds.includes(step.id)
+                                  ? 'el-icon-arrow-down'
+                                  : 'el-icon-arrow-right'
+                              "
+                            />
+                          </button>
+                          <div
+                            v-if="
+                              activityHasDetail(step) &&
+                              expandedActivityIds.includes(step.id)
+                            "
+                            class="pc-process-detail"
+                          >
+                            <pre
+                              v-if="
+                                step.inputDetail &&
+                                ['terminal', 'execute_code'].includes(step.name)
+                              "
+                              class="pc-tool-code"
+                              >{{ step.inputDetail }}</pre>
+                            <div v-else-if="step.inputDetail">
+                              {{ step.inputDetail }}
+                            </div>
+                            <div v-if="step.detail">{{ step.detail }}</div>
+                            <pre
+                              v-if="
+                                step.outputDetail && step.outputKind === 'diff'
+                              "
+                              class="pc-tool-diff"
+                              >{{ step.outputDetail }}</pre>
+                            <div v-else-if="step.outputDetail">
+                              {{ step.outputDetail }}
+                            </div>
+                            <button
+                              v-if="childConversationFor(step)"
+                              type="button"
+                              class="pc-child-session-link"
+                              @click="selectTask(childConversationFor(step))"
+                            >
+                              查看子会话
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                      <div
+                        v-else
+                        :key="block.id"
+                        class="pc-reply pc-process-interim"
+                      >
+                        <ConversationMarkdown :text="block.text" />
+                      </div>
+                    </template>
                   </div>
                 </div>
-                <div
-                  v-if="message.error && message.status !== 'streaming'"
-                  class="pc-error-line"
-                >
-                  <i class="el-icon-warning-outline" /> {{ message.error }}
+                <div v-if="turnTemporary(message)" class="pc-temporary">
+                  {{ turnTemporary(message) }}
                 </div>
-                <div class="pc-reply">
-                  {{ message.content
-                  }}<span
+                <div
+                  v-for="request in turnRequests(message)"
+                  :key="request.id"
+                  class="pc-human-record"
+                >
+                  <span class="pc-human-question"
+                    >{{ requestKindLabel(request.kind) }}：{{
+                      request.prompt
+                    }}</span
+                  >
+                  <span
+                    v-for="question in request.questions || []"
+                    :key="question.qid"
+                    class="pc-human-question"
+                  >
+                    {{ question.question }}
+                    <strong
+                      v-if="acceptedAnswerLabel(request, question.qid)"
+                      class="pc-human-answer"
+                    >
+                      已接收：{{ acceptedAnswerLabel(request, question.qid) }}
+                    </strong>
+                  </span>
+                  <strong
+                    v-if="
+                      request.status === 'resolved' &&
+                      !(request.questions || []).length
+                    "
+                    class="pc-human-answer"
+                  >
+                    {{ requestResponseLabel(request) }}
+                  </strong>
+                  <span
+                    v-if="request.status !== 'resolved'"
+                    class="pc-human-waiting"
+                    >{{
+                      request.status === "expired" ? "请求已失效" : "等待回应"
+                    }}</span
+                  >
+                </div>
+                <div v-if="message.content" class="pc-reply">
+                  <ConversationMarkdown :text="message.content" /><span
                     v-if="message.status === 'streaming'"
                     class="typing-cursor"
                     >▍</span
                   >
                 </div>
+                <div
+                  v-if="
+                    turnResultFiles(message).length ||
+                    turnTodoResults(message).length
+                  "
+                  class="pc-results"
+                >
+                  <div class="pc-results-label">本轮结果</div>
+                  <button
+                    v-for="item in turnResultFiles(message)"
+                    :key="item.id"
+                    type="button"
+                    @click="previewFile(item)"
+                  >
+                    <i class="el-icon-document" /> {{ item.name }}
+                  </button>
+                  <div
+                    v-for="result in turnTodoResults(message)"
+                    :key="result.id"
+                    class="pc-result-todo"
+                  >
+                    <strong>{{ result.label }}</strong>
+                    <div v-for="item in result.items" :key="item.id">
+                      {{ todoStatusLabel(item.status) }} · {{ item.content }}
+                    </div>
+                  </div>
+                </div>
+                <div v-if="message.error" class="pc-error-line">
+                  <i class="el-icon-warning-outline" /> {{ message.error }}
+                </div>
               </template>
-              <div v-else class="pc-user-bubble">{{ message.content }}</div>
+              <div v-else class="pc-user-bubble">
+                <div v-if="message.content">{{ message.content }}</div>
+                <div
+                  v-if="message.attachments && message.attachments.length"
+                  class="pc-user-attachments"
+                >
+                  <button
+                    v-for="attachment in message.attachments"
+                    :key="attachment.id"
+                    type="button"
+                    :disabled="!fileItemById(attachment.id)"
+                    @click="previewFile(fileItemById(attachment.id))"
+                  >
+                    <i class="el-icon-document" /> {{ attachment.name }}
+                    <span v-if="!fileItemById(attachment.id)"
+                      >（文件已不可用）</span
+                    >
+                  </button>
+                </div>
+              </div>
             </div>
           </div>
-          <el-popover
-            v-if="questions.length"
-            placement="left"
-            trigger="hover"
-            :open-delay="320"
-            width="300"
-            popper-class="pc-question-popover"
-            ><button
-              v-for="(message, index) in questions"
-              :key="message.id"
-              @click="jumpTo(message.id)"
+          <div
+            v-if="questionPreviews.length"
+            class="pc-question-rail"
+            aria-label="问题快速定位"
+          >
+            <el-popover
+              v-for="(item, index) in questionPreviews"
+              :key="item.message.id"
+              placement="right"
+              trigger="hover"
+              :open-delay="120"
+              width="360"
+              popper-class="pc-question-popover"
             >
-              {{ index + 1 }}. {{ message.content }}
-            </button>
-            <div
-              slot="reference"
-              class="pc-question-rail"
-              aria-label="问题快速定位"
-            >
+              <div class="pc-question-preview">
+                <div class="pc-question-preview-head">
+                  <strong>{{ userQuestionLabel(item.message) }}</strong>
+                  <button
+                    type="button"
+                    class="pc-question-mark"
+                    :class="{ 'is-marked': isQuestionMarked(item.message.id) }"
+                    :title="
+                      isQuestionMarked(item.message.id)
+                        ? '取消标记'
+                        : '标记问题'
+                    "
+                    :aria-label="
+                      isQuestionMarked(item.message.id)
+                        ? '取消标记'
+                        : '标记问题'
+                    "
+                    :aria-pressed="isQuestionMarked(item.message.id)"
+                    @click.stop="toggleQuestionMark(item.message.id)"
+                  >
+                    <svg viewBox="0 0 20 22" aria-hidden="true">
+                      <path
+                        d="M4 2.5h12a1 1 0 0 1 1 1v16l-7-4.5-7 4.5v-16a1 1 0 0 1 1-1Z"
+                      />
+                    </svg>
+                  </button>
+                </div>
+                <p>
+                  {{ item.finalReply || "尚无最终回复" }}
+                </p>
+              </div>
               <button
-                v-for="message in questions"
-                :key="message.id"
-                :aria-label="message.content"
-                @click="jumpTo(message.id)"
-              /></div
-          ></el-popover>
+                slot="reference"
+                type="button"
+                class="pc-question-bar"
+                :class="{
+                  'is-marked': isQuestionMarked(item.message.id),
+                  'is-hovered': hoveredQuestionIndex === index,
+                  'is-neighbor':
+                    hoveredQuestionIndex !== null &&
+                    Math.abs(hoveredQuestionIndex - index) === 1,
+                  'is-nearby':
+                    hoveredQuestionIndex !== null &&
+                    Math.abs(hoveredQuestionIndex - index) === 2,
+                }"
+                :aria-label="userQuestionLabel(item.message)"
+                :aria-pressed="isQuestionMarked(item.message.id)"
+                @mouseenter="hoveredQuestionIndex = index"
+                @mouseleave="hoveredQuestionIndex = null"
+                @focus="hoveredQuestionIndex = index"
+                @blur="hoveredQuestionIndex = null"
+                @click="jumpTo(item.message.id)"
+              />
+            </el-popover>
+          </div>
         </div>
         <div
           v-if="pendingInteraction"
           class="pc-hitl-pin"
-          :class="{ danger: pendingInteraction.kind === 'approval' }"
+          :class="{
+            attention: ['approval', 'mcp_setup'].includes(
+              pendingInteraction.kind,
+            ),
+          }"
         >
           <div class="pc-hitl-card">
             <div class="pc-hitl-header">
               <span class="pc-hitl-icon"
                 ><i
                   :class="
-                    pendingInteraction.kind === 'approval'
+                    ['approval', 'mcp_setup'].includes(pendingInteraction.kind)
                       ? 'el-icon-lock'
                       : 'el-icon-question'
                   " /></span
-              ><strong>{{
-                pendingInteraction.kind === "approval"
-                  ? "需要操作审批"
-                  : "需要澄清信息"
-              }}</strong
+              ><strong>{{ requestKindLabel(pendingInteraction.kind) }}</strong
               ><span class="pc-hitl-badge">等待回应</span>
             </div>
             <div class="pc-hitl-body">
               <p>{{ pendingInteraction.content }}</p>
               <template v-if="pendingInteraction.kind === 'clarify'"
-                ><el-input
+                ><div
+                  v-if="
+                    pendingInteraction.questions &&
+                    pendingInteraction.questions.length
+                  "
+                  class="pc-hitl-questions"
+                >
+                  <div
+                    v-for="question in pendingInteraction.questions"
+                    :key="question.qid"
+                    class="pc-hitl-question"
+                  >
+                    <p>{{ question.question }}</p>
+                    <el-checkbox-group
+                      v-if="question.multiSelect"
+                      :value="
+                        acceptedAnswerValue(pendingInteraction, question.qid) ||
+                        clarifyAnswers[question.qid] ||
+                        []
+                      "
+                      :disabled="
+                        !!acceptedAnswerLabel(pendingInteraction, question.qid)
+                      "
+                      @input="setClarifyAnswer(question.qid, $event)"
+                    >
+                      <el-checkbox
+                        v-for="choice in question.choices"
+                        :key="choice"
+                        :label="choice"
+                      />
+                    </el-checkbox-group>
+                    <el-radio-group
+                      v-else-if="question.choices.length"
+                      :value="
+                        acceptedAnswerValue(pendingInteraction, question.qid) ||
+                        clarifyAnswers[question.qid] ||
+                        ''
+                      "
+                      :disabled="
+                        !!acceptedAnswerLabel(pendingInteraction, question.qid)
+                      "
+                      @input="setClarifyAnswer(question.qid, $event)"
+                    >
+                      <el-radio
+                        v-for="choice in question.choices"
+                        :key="choice"
+                        :label="choice"
+                      />
+                    </el-radio-group>
+                    <el-input
+                      v-else
+                      :value="
+                        acceptedAnswerValue(pendingInteraction, question.qid) ||
+                        clarifyAnswers[question.qid] ||
+                        ''
+                      "
+                      :disabled="
+                        !!acceptedAnswerLabel(pendingInteraction, question.qid)
+                      "
+                      placeholder="请输入补充信息"
+                      @input="setClarifyAnswer(question.qid, $event)"
+                    />
+                  </div>
+                </div>
+                <el-input
+                  v-else
                   v-model="clarifyDraft"
                   placeholder="请输入补充信息"
                 />
                 <div class="pc-hitl-actions">
-                  <button @click="clarifyDraft = '分析最近一周的 1 号产线'">
+                  <button
+                    v-if="
+                      !pendingInteraction.questions ||
+                      !pendingInteraction.questions.length
+                    "
+                    class="pc-hitl-suggestion"
+                    @click="clarifyDraft = '分析最近一周的 1 号产线'"
+                  >
                     最近一周 · 1 号产线</button
                   ><button
                     class="primary"
-                    :disabled="!clarifyDraft.trim()"
+                    :disabled="!canSubmitClarification"
                     @click="submitClarification"
                   >
                     提交回复
                   </button>
                 </div></template
               >
+              <div
+                v-else-if="['secret', 'sudo'].includes(pendingInteraction.kind)"
+                class="pc-hitl-actions"
+              >
+                <span>纯演示模式不收集真实凭据</span>
+                <button @click="resolveDecision('rejected')">取消</button>
+                <button class="primary" @click="resolveDecision('submitted')">
+                  模拟安全提交
+                </button>
+              </div>
               <div v-else class="pc-hitl-actions">
-                <button @click="resolveApproval(pendingInteraction, false)">
-                  拒绝</button
-                ><button
-                  class="primary"
-                  @click="resolveApproval(pendingInteraction, true)"
+                <button
+                  v-for="choice in pendingInteraction.choices"
+                  :key="choice.value"
+                  :class="{
+                    primary: choice.value !== 'rejected',
+                    reject: choice.value === 'rejected',
+                  }"
+                  @click="resolveDecision(choice.value)"
                 >
-                  批准
+                  {{ choice.label }}
                 </button>
               </div>
             </div>
           </div>
         </div>
-        <div class="pc-input-area">
+        <div v-if="sessionStatusCards.length" class="pc-status-pin">
+          <div
+            v-for="card in sessionStatusCards"
+            :key="card.key"
+            class="pc-status-card"
+            :class="`is-${card.key}`"
+          >
+            <button
+              type="button"
+              class="pc-status-header"
+              :aria-expanded="statusExpanded[card.key]"
+              :aria-controls="`pc-status-body-${card.key}`"
+              @click="toggleStatus(card.key)"
+            >
+              <span class="pc-status-icon"
+                ><i :class="controlCardIcon(card.key)"
+              /></span>
+              <strong>{{ card.title }}</strong>
+              <span class="pc-status-summary" :title="card.summary">{{
+                card.summary
+              }}</span>
+              <span class="pc-status-meta">{{ card.meta }}</span>
+              <i
+                class="pc-status-chevron"
+                :class="
+                  statusExpanded[card.key]
+                    ? 'el-icon-arrow-up'
+                    : 'el-icon-arrow-down'
+                "
+              />
+            </button>
+            <div
+              v-if="card.key === 'todo'"
+              class="pc-todo-progress"
+              role="progressbar"
+              :aria-valuenow="card.progress.done"
+              aria-valuemin="0"
+              :aria-valuemax="card.progress.total"
+              :aria-label="card.meta"
+            >
+              <span :style="{ width: `${card.progress.percent}%` }" />
+            </div>
+            <div
+              v-show="statusExpanded[card.key]"
+              :id="`pc-status-body-${card.key}`"
+              class="pc-status-body"
+            >
+              <div v-if="card.key === 'todo'" class="pc-todo-body">
+                <div
+                  v-for="item in card.items"
+                  :key="item.id"
+                  class="pc-todo-item"
+                  :class="`is-${item.state}`"
+                  :style="{ paddingLeft: `${item.depth * 20 + 14}px` }"
+                >
+                  <span class="pc-todo-item-icon"
+                    ><i :class="todoStatusIcon(item.state)"
+                  /></span>
+                  <span class="pc-todo-item-text">{{ item.text }}</span>
+                  <span class="pc-todo-item-status">{{ item.status }}</span>
+                </div>
+              </div>
+              <div v-else-if="card.key === 'queue'" class="pc-queue-body">
+                <div
+                  v-for="(item, index) in card.items"
+                  :key="item.id"
+                  class="pc-queue-item"
+                >
+                  <button
+                    type="button"
+                    class="pc-queue-row"
+                    :aria-expanded="expandedQueueItemId === item.id"
+                    @click="
+                      expandedQueueItemId =
+                        expandedQueueItemId === item.id ? null : item.id
+                    "
+                  >
+                    <span class="pc-queue-order">{{ index + 1 }}</span>
+                    <span class="pc-queue-title">{{ item.title }}</span>
+                    <span class="pc-queue-state">{{ item.status }}</span>
+                    <i
+                      :class="
+                        expandedQueueItemId === item.id
+                          ? 'el-icon-arrow-up'
+                          : 'el-icon-arrow-down'
+                      "
+                    />
+                  </button>
+                  <p
+                    v-if="expandedQueueItemId === item.id"
+                    class="pc-queue-detail"
+                  >
+                    {{ item.content }}
+                  </p>
+                </div>
+              </div>
+              <div v-else-if="card.items.length" class="pc-control-items">
+                <div
+                  v-for="item in card.items"
+                  :key="item.id"
+                  class="pc-control-item"
+                  :style="{ paddingLeft: `${item.depth * 16}px` }"
+                >
+                  <span>{{ item.status }}</span>
+                  <span>{{ item.text }}</span>
+                </div>
+              </div>
+              <div v-else class="pc-status-empty">暂无更多详情</div>
+            </div>
+          </div>
+        </div>
+        <div
+          class="pc-input-area"
+          :class="{ 'has-session-status': sessionStatusCards.length }"
+        >
           <div
             v-if="
               !pendingInteraction &&
@@ -274,12 +710,14 @@
               </button>
             </div>
             <div class="pc-composer-actions">
-              <button
-                title="上传文件"
-                :disabled="!!pendingInteraction"
-                @click="$refs.attachment.click()"
-              >
-                <i class="el-icon-paperclip" /></button
+              <label class="pc-attachment-control" title="上传文件">
+                <input
+                  type="file"
+                  aria-label="上传文件"
+                  :disabled="!!pendingInteraction"
+                  @change="attachFile"
+                />
+                <i class="el-icon-paperclip" /> </label
               ><button
                 class="pc-send"
                 :class="{ 'pc-send-stop': conversation.status === 'running' }"
@@ -391,20 +829,23 @@
                   <i class="el-icon-caret-bottom" /></button
               ></el-popover>
             </div>
-            <input ref="attachment" type="file" hidden @change="attachFile" />
           </div>
         </div>
       </section>
       <aside
+        id="pc-task-panel"
         class="pc-tasks"
-        :class="{ 'is-action-reveal-paused': taskActionsPaused }"
+        :class="{
+          'is-action-reveal-paused': taskActionsPaused,
+          'mobile-open': taskListOpen,
+          'is-collapsed': taskListCollapsed,
+        }"
         @mousemove="taskActionsPaused = false"
         @mouseleave="taskActionsPaused = false"
       >
         <div class="pc-panel-head">
-          <span class="pc-panel-icon"><i class="el-icon-s-unfold" /></span
-          ><strong>任务列表</strong
-          ><small>{{ visibleConversations.length }}</small>
+          <span class="pc-panel-icon"><i class="el-icon-tickets" /></span
+          ><strong>任务列表</strong>
         </div>
         <div class="pc-task-scroll">
           <div class="pc-task-list">
@@ -501,19 +942,31 @@
                   </button>
                 </div>
               </div>
-              <button class="pc-task-cwd" @click.stop="openWorkspace(item)">
-                <i class="el-icon-folder" /> 工作目录：
-                <span>{{ cwdLabel(item.cwd, "workspace") }}</span
-                ><i class="el-icon-arrow-right" />
+              <button
+                class="pc-task-cwd"
+                :title="'打开工作目录：' + cwdLabel(item.cwd, 'workspace')"
+                :aria-label="'打开工作目录：' + cwdLabel(item.cwd, 'workspace')"
+                @click.stop="openWorkspace(item)"
+              >
+                <i class="el-icon-folder pc-task-cwd-icon" />
+                <span class="pc-task-cwd-label">工作目录：</span>
+                <span class="pc-task-cwd-name">{{
+                  taskCwdName(item.cwd)
+                }}</span>
+                <i class="el-icon-arrow-right pc-task-cwd-arrow" />
               </button>
             </div>
             <div v-if="!visibleConversations.length" class="pc-task-empty">
-              暂无任务<br /><small>点击上方「新建任务」开始</small>
+              暂无任务
             </div>
           </div>
         </div>
       </aside>
-      <aside v-if="workspaceOpen" class="pc-workspace">
+      <aside
+        v-show="workspaceOpen"
+        id="pc-workspace-panel"
+        class="pc-workspace"
+      >
         <div class="pc-panel-head">
           <span class="pc-panel-icon"><i class="el-icon-folder-opened" /></span
           ><strong>工作空间</strong
@@ -526,9 +979,7 @@
             :title="'在' + workspaceFolderName + '下新建文件夹'"
             @click="openFolderDialog"
           >
-            <i class="el-icon-folder-add" /></button
-          ><button title="关闭" @click="workspaceOpen = false">
-            <i class="el-icon-close" />
+            <i class="el-icon-folder-add" />
           </button>
         </div>
         <div class="pc-workspace-tree">
@@ -569,10 +1020,11 @@
               cwd:
                 conversation && conversation.cwd === folderPath(node.item.id),
             }"
-            :style="{ paddingLeft: 8 + node.depth * 16 + 'px' }"
+            :style="{ paddingLeft: 8 + node.depth * 8 + 'px' }"
           >
             <button
               class="pc-workspace-entry"
+              :title="node.item.name"
               @click="
                 node.item.kind === 'folder'
                   ? toggleFolder(node.item)
@@ -775,11 +1227,22 @@ import {
   updateConversation,
   deleteConversation,
   sendDemoMessage,
+  resolveDemoRequest,
   stopDemoStream,
   addWorkspaceItem,
+  persist,
 } from "../state";
 import { saveFile, readFile } from "../file-db";
 import { avatarSrcFor } from "../avatar";
+import {
+  conversationProcessBlocks,
+  formatTurnDuration,
+} from "../conversation-turns";
+import {
+  emptySessionPresentation,
+  todoProgress,
+} from "../conversation-session-state";
+import ConversationMarkdown from "../components/ConversationMarkdown.vue";
 function emptyConversation() {
   return {
     id: null,
@@ -788,6 +1251,8 @@ function emptyConversation() {
     archived: false,
     cwd: "/",
     messages: [],
+    turns: [],
+    sessionPresentation: emptySessionPresentation(),
   };
 }
 function saveBlob(blob, name) {
@@ -800,6 +1265,7 @@ function saveBlob(blob, name) {
 }
 export default {
   name: "DemoChatPage",
+  components: { ConversationMarkdown },
   data() {
     return {
       state,
@@ -807,6 +1273,19 @@ export default {
       draftConversation: emptyConversation(),
       taskActionsPaused: false,
       workspaceOpen: false,
+      taskListOpen: false,
+      taskListCollapsed: false,
+      isNarrowViewport:
+        typeof window !== "undefined" && window.innerWidth <= 900,
+      statusExpanded: {
+        goal: false,
+        todo: false,
+        queue: false,
+        loop: false,
+        heartbeat: false,
+      },
+      expandedQueueItemId: null,
+      hoveredQuestionIndex: null,
       workspaceFolderId: null,
       expandedFolderIds: [],
       model: "gpt-4o",
@@ -819,11 +1298,15 @@ export default {
       ],
       pendingFiles: [],
       clarifyDraft: "",
+      clarifyAnswers: {},
       pathPopoverDismissed: false,
       marqueeTaskId: null,
       marqueeDistance: 0,
       marqueeDuration: 6,
       expandedProcess: [],
+      expandedActivities: [],
+      expandedActivityIds: [],
+      clockNow: Date.now(),
       taskDialogVisible: false,
       taskDialogMode: "rename",
       taskDialogTarget: null,
@@ -837,6 +1320,11 @@ export default {
     };
   },
   computed: {
+    taskListVisible() {
+      return this.isNarrowViewport
+        ? this.taskListOpen
+        : !this.taskListCollapsed;
+    },
     expert() {
       return expertById(this.$route.params.id);
     },
@@ -926,26 +1414,214 @@ export default {
         .slice(0, 8);
     },
     pendingInteraction() {
-      return (
-        this.conversation?.messages
-          .slice()
-          .reverse()
-          .find(
-            (message) =>
-              ["clarify", "approval"].includes(message.kind) &&
-              message.status === "waiting",
-          ) || null
-      );
+      for (const turn of [...(this.conversation?.turns || [])].reverse()) {
+        const request = turn.requests?.find(
+          (item) => item.status === "waiting",
+        );
+        if (request)
+          return {
+            ...request,
+            content: request.prompt,
+            choices: request.choices?.length
+              ? request.choices
+              : ["approval", "mcp_setup"].includes(request.kind)
+                ? [
+                    { value: "rejected", label: "拒绝" },
+                    { value: "approved", label: "允许本次" },
+                  ]
+                : [],
+          };
+      }
+      return null;
     },
-    questions() {
-      return this.conversation
-        ? this.conversation.messages.filter(
-            (message) => message.role === "user",
-          )
-        : [];
+    canSubmitClarification() {
+      const request = this.pendingInteraction;
+      if (!request || request.kind !== "clarify") return false;
+      if (!request.questions?.length) return Boolean(this.clarifyDraft.trim());
+      return request.questions.every((question) => {
+        const answer =
+          request.answers?.[question.qid] || this.clarifyAnswers[question.qid];
+        return question.multiSelect
+          ? Array.isArray(answer) && answer.length > 0
+          : Boolean(String(answer || "").trim());
+      });
+    },
+    sessionStatusCards() {
+      const presentation = this.conversation?.sessionPresentation;
+      if (!presentation) return [];
+      const cards = [];
+      const control = presentation.control || {};
+      if (control.goal) {
+        const goal = control.goal;
+        const turns =
+          Number.isInteger(goal.turns_used) && Number.isInteger(goal.max_turns)
+            ? ` · 已用 ${goal.turns_used}/${goal.max_turns} 轮`
+            : "";
+        cards.push({
+          key: "goal",
+          title: "大目标",
+          summary: goal.title || "当前目标",
+          meta: `${this.controlStatusLabel(goal.status)}${turns}`,
+          items: [
+            ...(typeof goal.contract === "string" && goal.contract.trim()
+              ? [
+                  {
+                    id: "contract",
+                    status: "说明",
+                    text: goal.contract,
+                    depth: 0,
+                  },
+                ]
+              : []),
+            ...(Array.isArray(goal.subgoals)
+              ? goal.subgoals.map((item, index) => ({
+                  id: `subgoal_${index}`,
+                  status: "阶段",
+                  text: String(item?.title || item),
+                  depth: 0,
+                }))
+              : []),
+            ...(goal.status === "active" &&
+            goal.wait_barrier?.type === "until" &&
+            this.validDateLabel(goal.wait_barrier.until_at, true)
+              ? [
+                  {
+                    id: "wait",
+                    status: "等待",
+                    text: `至 ${this.validDateLabel(goal.wait_barrier.until_at, true)}`,
+                    depth: 0,
+                  },
+                ]
+              : []),
+          ],
+        });
+      }
+      const todos = presentation.todos || [];
+      if (todos.length) {
+        const progress = todoProgress(todos);
+        const active =
+          todos.find((item) => item.status === "in_progress") ||
+          todos.find((item) => item.status === "pending");
+        cards.push({
+          key: "todo",
+          title: "执行计划",
+          summary: active
+            ? `${active.status === "in_progress" ? "正在执行" : "下一步"}：${active.content}`
+            : "所有步骤已处理",
+          meta: `已完成 ${progress.done}/${progress.total}`,
+          progress: {
+            ...progress,
+            percent: progress.total
+              ? Math.round((progress.done / progress.total) * 100)
+              : 0,
+          },
+          items: todos.map((item) => ({
+            id: item.id,
+            text: item.content,
+            state: item.status,
+            status: {
+              pending: "待处理",
+              in_progress: "进行中",
+              completed: "已完成",
+              cancelled: "已取消",
+            }[item.status],
+            depth: this.todoDepth(item, todos),
+          })),
+        });
+      }
+      const queuedTasks = presentation.queuedTasks || [];
+      if (queuedTasks.length)
+        cards.push({
+          key: "queue",
+          title: "排队任务",
+          summary: `下一项：${queuedTasks[0].title}`,
+          meta: `${queuedTasks.length} 条等待执行`,
+          items: queuedTasks.map((item) => ({
+            ...item,
+            status: item.status === "running" ? "执行中" : "等待执行",
+          })),
+        });
+      if (control.loop) {
+        const loop = control.loop;
+        cards.push({
+          key: "loop",
+          title: "循环任务",
+          summary: "按设定间隔执行",
+          meta: [
+            this.controlStatusLabel(loop.status),
+            Number.isFinite(loop.interval_seconds)
+              ? `间隔 ${loop.interval_seconds} 秒`
+              : "",
+            Number.isInteger(loop.ticks_fired)
+              ? `已触发 ${loop.ticks_fired} 次`
+              : "",
+            this.validDateLabel(loop.next_due_at)
+              ? `下次 ${this.validDateLabel(loop.next_due_at)}`
+              : "",
+          ]
+            .filter(Boolean)
+            .join(" · "),
+          items: [],
+        });
+      }
+      if (control.heartbeat) {
+        const heartbeat = control.heartbeat;
+        cards.push({
+          key: "heartbeat",
+          title: "定时检查",
+          summary: "按设定间隔检查",
+          meta: [
+            this.controlStatusLabel(heartbeat.status),
+            Number.isFinite(heartbeat.interval_seconds)
+              ? `间隔 ${heartbeat.interval_seconds} 秒`
+              : "",
+            Number.isInteger(heartbeat.fire_count)
+              ? `已检查 ${heartbeat.fire_count} 次`
+              : "",
+            this.validDateLabel(heartbeat.last_fired_at)
+              ? `最近 ${this.validDateLabel(heartbeat.last_fired_at)}`
+              : "",
+          ]
+            .filter(Boolean)
+            .join(" · "),
+          items: [],
+        });
+      }
+      return cards;
+    },
+    pageNotifications() {
+      return this.conversation?.sessionPresentation?.notifications || [];
+    },
+    questionPreviews() {
+      const previews = [];
+      let current = null;
+      for (const message of this.conversation?.messages || []) {
+        if (message.role === "user") {
+          current = { message, finalReply: "" };
+          previews.push(current);
+        } else if (
+          current &&
+          message.role === "assistant" &&
+          (!message.status || message.status === "done") &&
+          String(message.content || "").trim()
+        ) {
+          current.finalReply = message.content.trim();
+        }
+      }
+      return previews;
+    },
+    lastAssistantContentLength() {
+      const messages = this.conversation?.messages || [];
+      const last = messages[messages.length - 1];
+      return last?.role === "assistant" ? last.content.length : 0;
     },
   },
   mounted() {
+    window.addEventListener("resize", this.handleViewportResize);
+    this.turnClock = setInterval(() => {
+      if (["running", "recovering"].includes(this.conversation?.status))
+        this.clockNow = Date.now();
+    }, 1000);
     if (this.$route.query.conv && this.isDraftTask && this.expert) {
       const { conv, ...query } = this.$route.query;
       this.$router
@@ -955,23 +1631,265 @@ export default {
     this.$nextTick(this.scrollBottom);
   },
   beforeDestroy() {
+    window.removeEventListener("resize", this.handleViewportResize);
+    clearInterval(this.turnClock);
     if (this.$route.query.conv) stopDemoStream(this.$route.query.conv);
     this.clearPreview();
   },
   watch: {
     "$route.query.conv"(next, prior) {
       if (prior && next !== prior) stopDemoStream(prior);
+      Object.keys(this.statusExpanded).forEach((key) => {
+        this.statusExpanded[key] = false;
+      });
+      this.expandedQueueItemId = null;
+      this.hoveredQuestionIndex = null;
       this.draft = "";
       this.pendingFiles = [];
       this.clarifyDraft = "";
+      this.clarifyAnswers = {};
       this.$nextTick(this.scrollBottom);
     },
     "conversation.messages.length"() {
       this.$nextTick(this.scrollBottom);
     },
+    lastAssistantContentLength() {
+      const scroller = this.$refs.scroller;
+      if (
+        !scroller ||
+        scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight > 120
+      )
+        return;
+      this.$nextTick(this.scrollBottom);
+    },
   },
   methods: {
     avatarSrcFor,
+    handleViewportResize() {
+      const narrow = window.innerWidth <= 900;
+      if (narrow !== this.isNarrowViewport) this.taskListOpen = false;
+      this.isNarrowViewport = narrow;
+    },
+    toggleStatus(key) {
+      this.statusExpanded[key] = !this.statusExpanded[key];
+      if (key === "queue" && !this.statusExpanded.queue)
+        this.expandedQueueItemId = null;
+    },
+    requestKindLabel(kind) {
+      return (
+        {
+          clarify: "需要澄清信息",
+          approval: "需要操作审批",
+          mcp_setup: "需要确认 MCP 设置",
+          secret: "凭据操作演示",
+          sudo: "管理员权限演示",
+        }[kind] || "需要确认"
+      );
+    },
+    requestResponseLabel(request) {
+      if (["approval", "mcp_setup"].includes(request.kind))
+        return request.response === "approved" ? "已允许本次尝试" : "已拒绝";
+      if (["secret", "sudo"].includes(request.kind)) return request.response;
+      return `用户回复：${request.response}`;
+    },
+    setClarifyAnswer(qid, value) {
+      if (this.acceptedAnswerLabel(this.pendingInteraction, qid)) return;
+      this.$set(this.clarifyAnswers, qid, value);
+    },
+    acceptedAnswerLabel(request, qid) {
+      const answer = this.acceptedAnswerValue(request, qid);
+      return Array.isArray(answer) ? answer.join("、") : String(answer || "");
+    },
+    acceptedAnswerValue(request, qid) {
+      return request?.answers?.[qid];
+    },
+    controlStatusLabel(status) {
+      return (
+        { active: "进行中", paused: "已暂停", done: "已完成" }[status] ||
+        "状态待核对"
+      );
+    },
+    todoStatusIcon(status) {
+      return (
+        {
+          pending: "el-icon-time",
+          in_progress: "el-icon-loading",
+          completed: "el-icon-check",
+          cancelled: "el-icon-close",
+        }[status] || "el-icon-more"
+      );
+    },
+    controlCardIcon(key) {
+      return (
+        {
+          goal: "el-icon-aim",
+          todo: "el-icon-tickets",
+          queue: "el-icon-time",
+          loop: "el-icon-refresh",
+          heartbeat: "el-icon-time",
+        }[key] || "el-icon-info"
+      );
+    },
+    validDateLabel(value, futureOnly = false) {
+      if (!value) return "";
+      const time = new Date(value).getTime();
+      if (!Number.isFinite(time) || (futureOnly && time <= Date.now()))
+        return "";
+      return new Date(time).toLocaleString("zh-CN", {
+        month: "2-digit",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+      });
+    },
+    todoDepth(item, todos) {
+      let depth = 0;
+      let parent = item.parent;
+      const visited = new Set([item.id]);
+      while (parent && !visited.has(parent)) {
+        visited.add(parent);
+        const next = todos.find((candidate) => candidate.id === parent);
+        if (!next) break;
+        depth++;
+        parent = next.parent;
+      }
+      return Math.min(depth, 3);
+    },
+    turnFor(message) {
+      return this.conversation?.turns?.find(
+        (turn) => turn.assistantMessageId === message.id,
+      );
+    },
+    turnStatusLabel(message) {
+      const status = this.turnFor(message)?.status;
+      return (
+        {
+          running: "处理中",
+          recovering: "正在恢复 · 核对回合状态",
+          unknown: "运行异常 · 未能确认本轮结束状态",
+          waiting: "等待回应",
+          complete: "已完成",
+          interrupted: "已中断",
+          error: "处理失败",
+        }[status] || (message.status === "streaming" ? "处理中" : "状态待核对")
+      );
+    },
+    turnDurationLabel(message) {
+      const turn = this.turnFor(message);
+      if (!turn) return "";
+      const duration = ["running", "recovering"].includes(turn.status)
+        ? this.clockNow - new Date(turn.startedAt).getTime()
+        : turn.durationMs;
+      const label = formatTurnDuration(duration);
+      return label ? `用时 ${label}` : "";
+    },
+    turnActivities(message) {
+      return this.turnFor(message)?.activities || [];
+    },
+    hasProcessContent(message) {
+      return this.turnProcessBlocks(message).length > 0;
+    },
+    turnInterims(message) {
+      return this.turnFor(message)?.interims || [];
+    },
+    turnProcessBlocks(message) {
+      return conversationProcessBlocks(this.turnFor(message));
+    },
+    turnRequests(message) {
+      return this.turnFor(message)?.requests || [];
+    },
+    turnResultFiles(message) {
+      return (this.turnFor(message)?.results || [])
+        .map((result) =>
+          this.expert?.files?.find((file) => file.id === result.fileId),
+        )
+        .filter(Boolean);
+    },
+    turnTodoResults(message) {
+      return (this.turnFor(message)?.results || []).filter(
+        (result) => result.kind === "todo" && result.items?.length,
+      );
+    },
+    todoStatusLabel(status) {
+      return (
+        {
+          pending: "待处理",
+          in_progress: "进行中",
+          completed: "已完成",
+          cancelled: "已取消",
+        }[status] || "待核对"
+      );
+    },
+    fileItemById(id) {
+      return (
+        this.expert?.files?.find(
+          (file) => file.id === id && file.kind === "file",
+        ) || null
+      );
+    },
+    userQuestionLabel(message) {
+      return (
+        message.content ||
+        (message.attachments || []).map((file) => file.name).join("、") ||
+        "文件消息"
+      );
+    },
+    isQuestionMarked(id) {
+      return (this.conversation?.bookmarkedQuestionIds || []).includes(id);
+    },
+    toggleQuestionMark(id) {
+      if (!this.conversation?.id) return;
+      const marked = new Set(this.conversation.bookmarkedQuestionIds || []);
+      if (marked.has(id)) marked.delete(id);
+      else marked.add(id);
+      this.$set(this.conversation, "bookmarkedQuestionIds", [...marked]);
+      persist();
+    },
+    turnTemporary(message) {
+      return this.turnFor(message)?.temporary || "";
+    },
+    runningActivitiesLabel(activities) {
+      return activities
+        .filter((activity) => activity.status === "running")
+        .map((activity) => activity.title)
+        .join("、");
+    },
+    activityGroupLabel(activities) {
+      const running = this.runningActivitiesLabel(activities);
+      if (running) return `正在推进 · ${running}`;
+      return `处理经过 · ${activities.map((item) => item.title).join("、")}`;
+    },
+    activityItemTitle(activity) {
+      return (
+        activity.title +
+        (activity.progressText
+          ? ` · ${activity.progressText}`
+          : activity.argumentSummary
+            ? ` ${activity.argumentSummary}`
+            : "")
+      );
+    },
+    activityDetail(activity) {
+      return [activity.inputDetail, activity.detail, activity.outputDetail]
+        .filter(Boolean)
+        .join("\n\n");
+    },
+    childConversationFor(activity) {
+      if (activity.kind !== "subagent" || !activity.childSessionId) return null;
+      const child = conversationById(activity.childSessionId);
+      return child?.expertId === this.expert?.id ? child : null;
+    },
+    activityHasDetail(activity) {
+      return Boolean(
+        this.activityDetail(activity) || this.childConversationFor(activity),
+      );
+    },
+    processExpanded(message) {
+      return (
+        ["running", "recovering"].includes(this.turnFor(message)?.status) ||
+        this.expandedProcess.includes(message.id)
+      );
+    },
     back() {
       this.$router
         .push({
@@ -997,6 +1915,7 @@ export default {
       this.$nextTick(() => this.$refs.composer?.focus());
     },
     selectTask(item) {
+      this.taskListOpen = false;
       this.$router
         .push({
           name: "chat",
@@ -1006,10 +1925,12 @@ export default {
         .catch(() => {});
     },
     newTask() {
+      this.taskListOpen = false;
       this.draftConversation = emptyConversation();
       this.draft = "";
       this.pendingFiles = [];
       this.clarifyDraft = "";
+      this.clarifyAnswers = {};
       this.workspaceOpen = false;
       const { conv, ...query } = this.$route.query;
       this.$router
@@ -1021,7 +1942,7 @@ export default {
         !this.conversation ||
         this.pendingInteraction ||
         (!this.draft.trim() && !this.pendingFiles.length) ||
-        this.conversation.status === "running"
+        ["running", "recovering"].includes(this.conversation.status)
       )
         return;
       const content =
@@ -1039,7 +1960,7 @@ export default {
             cwd: this.draftConversation.cwd,
           });
       }
-      sendDemoMessage(conversationId, content);
+      sendDemoMessage(conversationId, this.draft.trim(), this.pendingFiles);
       this.draft = "";
       this.pendingFiles = [];
       if (this.isDraftTask)
@@ -1066,6 +1987,14 @@ export default {
     },
     cwdLabel(cwd, rootName = "工作空间") {
       return !cwd || cwd === "/" ? rootName : String(cwd).replace(/^\//, "");
+    },
+    taskCwdName(cwd) {
+      return (
+        String(cwd || "")
+          .split(/[\\/]+/)
+          .filter(Boolean)
+          .pop() || "workspace"
+      );
     },
     setCwd(cwd) {
       if (this.isDraftTask) this.draftConversation.cwd = cwd;
@@ -1115,6 +2044,7 @@ export default {
     },
     openWorkspace(item) {
       this.selectTask(item);
+      if (this.isNarrowViewport) this.taskListOpen = false;
       this.workspaceOpen = true;
       this.workspaceFolderId =
         this.expert.files.find(
@@ -1135,9 +2065,19 @@ export default {
     },
     toggleWorkspace() {
       if (this.workspaceOpen) this.workspaceOpen = false;
-      else this.showWorkspaceForCwd();
+      else {
+        if (this.isNarrowViewport) this.taskListOpen = false;
+        this.showWorkspaceForCwd();
+      }
+    },
+    toggleTaskList() {
+      if (this.isNarrowViewport) {
+        this.taskListOpen = !this.taskListOpen;
+        if (this.taskListOpen) this.workspaceOpen = false;
+      } else this.taskListCollapsed = !this.taskListCollapsed;
     },
     showWorkspaceForCwd() {
+      if (this.isNarrowViewport) this.taskListOpen = false;
       this.workspaceOpen = true;
       const cwd = this.conversation?.cwd;
       const folder = this.expert?.files.find(
@@ -1231,28 +2171,57 @@ export default {
       this.$message.success("已归档，可在专家管理的「已归档」中恢复");
     },
     toggleProcess(id) {
+      const message = this.conversation?.messages.find(
+        (item) => item.id === id,
+      );
+      if (
+        message &&
+        ["running", "recovering"].includes(this.turnFor(message)?.status)
+      )
+        return;
       this.expandedProcess = this.expandedProcess.includes(id)
         ? this.expandedProcess.filter((value) => value !== id)
         : [...this.expandedProcess, id];
+    },
+    toggleActivityGroup(id) {
+      this.expandedActivities = this.expandedActivities.includes(id)
+        ? this.expandedActivities.filter((value) => value !== id)
+        : [...this.expandedActivities, id];
+    },
+    toggleActivityDetail(id) {
+      this.expandedActivityIds = this.expandedActivityIds.includes(id)
+        ? this.expandedActivityIds.filter((value) => value !== id)
+        : [...this.expandedActivityIds, id];
     },
     jumpTo(id) {
       document
         .getElementById("message-" + id)
         ?.scrollIntoView({ behavior: "smooth", block: "center" });
     },
-    resolveApproval(message, approved) {
-      message.status = "done";
-      message.content += approved
-        ? "\n\n用户已批准，演示任务可以继续。"
-        : "\n\n用户已拒绝，本次演示操作停止。";
-      updateConversation(this.conversation.id, {});
+    resolveDecision(value) {
+      if (!this.pendingInteraction) return;
+      resolveDemoRequest(
+        this.conversation.id,
+        this.pendingInteraction.id,
+        value,
+      );
     },
     submitClarification() {
-      if (!this.pendingInteraction || !this.clarifyDraft.trim()) return;
-      this.pendingInteraction.status = "done";
-      updateConversation(this.conversation.id, {});
-      sendDemoMessage(this.conversation.id, this.clarifyDraft.trim());
+      if (!this.canSubmitClarification) return;
+      resolveDemoRequest(
+        this.conversation.id,
+        this.pendingInteraction.id,
+        this.pendingInteraction.questions?.length
+          ? {
+              answers: {
+                ...this.pendingInteraction.answers,
+                ...this.clarifyAnswers,
+              },
+            }
+          : this.clarifyDraft.trim(),
+      );
       this.clarifyDraft = "";
+      this.clarifyAnswers = {};
       this.$nextTick(this.scrollBottom);
     },
     createFolder() {

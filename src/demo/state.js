@@ -1,4 +1,14 @@
 import Vue from "vue";
+import {
+  applyConversationEvent,
+  createConversationTurn,
+  normalizeConversationTurns,
+} from "./conversation-turns";
+import {
+  applySessionPresentationEvent,
+  emptySessionPresentation,
+  normalizeSessionPresentation,
+} from "./conversation-session-state";
 import { clearFiles } from "./file-db";
 import { createImDemoChats, createImWorkspaceItems } from "./im-fixtures";
 import { mcpDemoPreset } from "./mcp-demo";
@@ -682,7 +692,12 @@ function readSeed() {
           !parsed.projectFixtureVersion ||
           Number(parsed.demoDataRevision || 1) < DEMO_DATA_REVISION;
         const enriched = upgradeExpertFixtures(enrichProjectFixtures(parsed));
-        if (needsFixtureUpgrade)
+        let turnsChanged = false;
+        enriched.conversations.forEach((conversation) => {
+          if (normalizeConversationTurns(conversation)) turnsChanged = true;
+          if (normalizeSessionPresentation(conversation)) turnsChanged = true;
+        });
+        if (needsFixtureUpgrade || turnsChanged)
           localStorage.setItem(STORAGE_KEY, JSON.stringify(enriched));
         return enriched;
       }
@@ -690,7 +705,12 @@ function readSeed() {
   } catch {
     /* corrupted demo state resets to fixture */
   }
-  return createSeed();
+  const seed = createSeed();
+  seed.conversations.forEach((conversation) => {
+    normalizeConversationTurns(conversation);
+    normalizeSessionPresentation(conversation);
+  });
+  return seed;
 }
 
 export const state = Vue.observable(readSeed());
@@ -857,6 +877,8 @@ export function createConversation(expertId, title = "新对话任务") {
     cwd: "/",
     updatedAt: now(),
     messages: [],
+    turns: [],
+    sessionPresentation: emptySessionPresentation(),
   };
   state.conversations.unshift(item);
   persist();
@@ -1026,82 +1048,619 @@ export function removeWorkspaceItems(expertId, ids) {
 export async function resetDemo() {
   for (const timer of activeTimers.values()) clearInterval(timer);
   activeTimers.clear();
+  for (const timer of backgroundTimers.values()) clearTimeout(timer);
+  backgroundTimers.clear();
   const fresh = createSeed();
+  fresh.conversations.forEach((conversation) => {
+    normalizeConversationTurns(conversation);
+    normalizeSessionPresentation(conversation);
+  });
   for (const key of Object.keys(state)) Vue.set(state, key, fresh[key]);
   localStorage.removeItem(STORAGE_KEY);
   await clearFiles();
 }
 
 const activeTimers = new Map();
+const backgroundTimers = new Map();
 export function stopDemoStream(id) {
   const timer = activeTimers.get(id);
   if (timer) clearInterval(timer);
   activeTimers.delete(id);
+  const backgroundTimer = backgroundTimers.get(id);
+  if (backgroundTimer) clearTimeout(backgroundTimer);
+  backgroundTimers.delete(id);
   const conversation = conversationById(id);
-  if (conversation?.status === "running") {
+  if (["running", "recovering"].includes(conversation?.status)) {
+    const turn = conversation.turns?.find((item) =>
+      ["running", "recovering"].includes(item.status),
+    );
+    if (turn)
+      applyConversationEvent(conversation, {
+        type: "message.complete",
+        sessionId: id,
+        turnId: turn.id,
+        seq: turn.lastSeq + 1,
+        status: "interrupted",
+        at: now(),
+      });
     conversation.status = "ready";
-    const last = conversation.messages[conversation.messages.length - 1];
-    if (last?.status === "streaming") last.status = "stopped";
     persist();
   }
 }
-export function sendDemoMessage(conversationId, text) {
+export function sendDemoMessage(conversationId, text, attachments = []) {
   const conversation = conversationById(conversationId);
-  if (!conversation || !String(text).trim()) return;
+  if (!conversation) return;
+  const originalText = String(text || "").trim();
+  const expertFiles = expertById(conversation.expertId)?.files || [];
+  const fileRefs = Array.isArray(attachments)
+    ? attachments
+        .map((attachment) =>
+          expertFiles.find(
+            (item) => item.id === attachment.id && item.kind === "file",
+          ),
+        )
+        .filter(Boolean)
+        .map((file) => ({ id: file.id, name: file.name }))
+    : [];
+  if (!originalText && !fileRefs.length) return;
+  text = originalText || fileRefs.map((file) => file.name).join("、");
   stopDemoStream(conversationId);
-  conversation.messages.push({
+  const userMessage = {
     id: uid("msg"),
     role: "user",
-    content: text.trim(),
+    content: originalText,
+    attachments: fileRefs,
     createdAt: now(),
-  });
+  };
+  conversation.messages.push(userMessage);
   const isErrorDemo = text.includes("错误") || text.includes("失败");
-  const answer = text.includes("澄清")
-    ? "为了继续处理，请先说明希望分析的时间范围和目标产线。"
-    : text.includes("审批")
-      ? "此步骤需要确认是否允许继续执行演示操作。"
-      : isErrorDemo
-        ? "以上是错误流程：工具执行失败后已停止当前步骤。请核查工作目录和演示数据后重试。"
-        : `我已收到你的任务：“${text.trim()}”。\n\n演示过程：读取当前工作目录、分析资料、整理结论。\n\n建议先核对关键数据，再根据结果推进下一步。`;
+  const showProgress = text.includes("进度");
+  const showToolDetail = text.includes("工具详情");
+  const showDiff = text.includes("文件差异");
+  const withTools =
+    isErrorDemo || /资料|工作目录|文件|工具|并行过程|过程|进度/.test(text);
+  const withInterim = /中途|过程/.test(text);
+  const isParallel = /并行工具|并行过程/.test(text);
+  const activityKind = text.includes("子代理")
+    ? "subagent"
+    : text.includes("并行模型")
+      ? "moa"
+      : text.includes("思考")
+        ? "reasoning"
+        : null;
+  const backgroundDelegation =
+    activityKind === "subagent" && text.includes("后台");
+  const requestKind = text.includes("凭据演示")
+    ? "secret"
+    : text.includes("管理员密码演示")
+      ? "sudo"
+      : text.includes("MCP 设置确认")
+        ? "mcp_setup"
+        : text.includes("审批")
+          ? "approval"
+          : text.includes("澄清")
+            ? "clarify"
+            : null;
+  const scriptedScene = Boolean(
+    withTools ||
+    withInterim ||
+    activityKind ||
+    requestKind ||
+    /等待|待办|目标|循环|心跳|排队任务|账户通知|Markdown 展示/.test(text),
+  );
+  if (text.includes("清除账户通知"))
+    applySessionPresentationEvent(conversation, {
+      type: "notification.clear",
+      sessionId: conversationId,
+      key: "credits.low",
+    });
+  else if (text.includes("账户通知"))
+    applySessionPresentationEvent(conversation, {
+      type: "notification.show",
+      sessionId: conversationId,
+      key: "credits.low",
+      text: "演示额度提醒（非真实账户信息）",
+      level: "warning",
+    });
+  if (text.includes("待办")) {
+    const existing = conversation.sessionPresentation.todos;
+    const todos = existing.length
+      ? existing.map((item, index) => ({
+          ...item,
+          status:
+            text.includes("完成待办") && index === 0
+              ? "completed"
+              : item.status,
+        }))
+      : text.includes("层级待办")
+        ? [
+            {
+              id: "todo_root",
+              content: "核对演示资料",
+              status: "in_progress",
+              parent: null,
+            },
+            {
+              id: "todo_sample",
+              content: "抽样核查",
+              status: "completed",
+              parent: "todo_root",
+            },
+            {
+              id: "todo_compare",
+              content: "比较异常批次",
+              status: "pending",
+              parent: "todo_sample",
+            },
+            {
+              id: "todo_skip",
+              content: "跳过无关批次",
+              status: "cancelled",
+              parent: null,
+            },
+          ]
+        : [
+            {
+              id: "todo_check",
+              content: "核对演示资料",
+              status: text.includes("完成待办") ? "completed" : "pending",
+              parent: null,
+            },
+            {
+              id: "todo_summary",
+              content: "整理分析结论",
+              status: "pending",
+              parent: null,
+            },
+          ];
+    applySessionPresentationEvent(conversation, {
+      type: "todo.updated",
+      sessionId: conversationId,
+      revision: conversation.sessionPresentation.todoRevision + 1,
+      todos,
+    });
+  }
+  if (text.includes("排队任务")) {
+    applySessionPresentationEvent(conversation, {
+      type: "queue.updated",
+      sessionId: conversationId,
+      revision: conversation.sessionPresentation.queueRevision + 1,
+      tasks: text.includes("清空排队任务")
+        ? []
+        : [
+            {
+              id: "queue_quality",
+              title: "核对异常批次",
+              content: "对照本周质量数据，核对异常批次和检验口径。",
+            },
+            {
+              id: "queue_report",
+              title: "整理质量日报",
+              content: "汇总核对结果，整理一份质量日报。",
+            },
+            {
+              id: "queue_next",
+              title: "形成改进建议",
+              content: "根据已核对的资料，归纳下一步改进建议。",
+            },
+          ],
+    });
+  }
+  if (/目标|循环|心跳/.test(text)) {
+    const control = { ...conversation.sessionPresentation.control };
+    if (text.includes("目标"))
+      control.goal = {
+        title: "形成可核对的质量分析建议",
+        status: "active",
+        turns_used: 1,
+        max_turns: 5,
+        contract: "核对质量资料与异常批次，形成可复查的分析建议。",
+        subgoals: ["核对资料", "形成建议"],
+        ...(text.includes("目标等待")
+          ? {
+              contract: "等待演示资料就绪后继续分析",
+              wait_barrier: {
+                type: "until",
+                until_at: new Date(Date.now() + 30 * 60 * 1000).toISOString(),
+              },
+            }
+          : {}),
+      };
+    if (text.includes("循环"))
+      control.loop = {
+        status: "active",
+        mode: "interval",
+        interval_seconds: 300,
+        ticks_fired: 2,
+      };
+    if (text.includes("心跳"))
+      control.heartbeat = {
+        status: "active",
+        interval_seconds: 600,
+        fire_count: 1,
+      };
+    applySessionPresentationEvent(conversation, {
+      type: "session.control.update",
+      sessionId: conversationId,
+      revision: uid("control"),
+      control,
+    });
+  }
+  const answer =
+    requestKind === "clarify"
+      ? text.includes("多题")
+        ? "为了继续处理，请补充时间范围和目标产线。"
+        : "为了继续处理，请先说明希望分析的时间范围和目标产线。"
+      : requestKind === "approval"
+        ? "此步骤需要确认是否允许继续执行演示操作。"
+        : requestKind === "mcp_setup"
+          ? "演示 MCP 服务配置请求：请确认是否允许尝试设置示例服务。"
+          : requestKind === "secret" || requestKind === "sudo"
+            ? "这是凭据操作的安全展示演示，请勿输入真实密码或密钥。"
+            : isErrorDemo
+              ? "已保留当前可用的部分分析。失败的演示工具未产出最终结论，请核查资料后重试。"
+              : text.includes("Markdown 展示")
+                ? "## 质量分析摘要\n\n| 日期 | 良率 |\n| --- | --- |\n| 10 月 8 日 | 97.2% |\n| 10 月 9 日 | 96.8% |\n\n" +
+                  `![质量分析专家](${import.meta.env.BASE_URL}avatars/quality-man.svg)\n\n` +
+                  "建议先核对 **检验口径**，再查看示例命令：\n\n```text\ncompare-quality --from 2026-10-08 --to 2026-10-09\n```\n\n演示说明见 [公开示例](https://example.com/quality/report)。"
+                : showDiff
+                  ? "这是固定的文件差异演示，未修改真实文件。可在上方活动详情中查看差异内容。"
+                  : `我已收到你的任务：“${text.trim()}”。\n\n${withTools ? "已演示读取工作目录与整理资料。" : "这是一条无需工具的演示回复。"}\n\n建议核对关键数据，再根据结果推进下一步。`;
   const assistant = {
     id: uid("msg"),
+    turnId: uid("turn"),
     role: "assistant",
     content: "",
     createdAt: now(),
     status: "streaming",
-    kind: text.includes("澄清")
-      ? "clarify"
-      : text.includes("审批")
-        ? "approval"
-        : isErrorDemo
-          ? "error"
-          : "normal",
-    ...(isErrorDemo
-      ? { error: "工具执行失败：连接数据源超时，已重试 2 次。" }
-      : {}),
-    steps: [
-      { title: "读取工作目录", status: "done" },
-      { title: "分析任务", status: "running" },
-    ],
+    kind: requestKind || (isErrorDemo ? "error" : "normal"),
+    error: "",
   };
+  userMessage.turnId = assistant.turnId;
   conversation.messages.push(assistant);
+  const turn = createConversationTurn(userMessage, assistant);
+  conversation.turns.push(turn);
+  let seq = 0;
+  const emit = (type, payload = {}) =>
+    applyConversationEvent(conversation, {
+      type,
+      ...payload,
+      sessionId: conversationId,
+      turnId: turn.id,
+      seq: ++seq,
+    });
+  const folderToolId = uid("tool");
+  const analysisToolId = uid("tool");
+  const demoFile = expertById(conversation.expertId)?.files.find(
+    (item) => item.kind === "file",
+  );
+  const extraActivityId =
+    activityKind && activityKind !== "reasoning" ? uid("activity") : null;
+  if (activityKind === "reasoning") {
+    emit("reasoning.delta", { text: "可见分析摘要：先核对输入范围，" });
+    emit("reasoning.delta", { text: "再组织答复。" });
+  } else if (activityKind === "subagent") {
+    emit("subagent.spawn_requested", {
+      subagentId: extraActivityId,
+      goal: "核对资料范围",
+    });
+    emit("subagent.start", { subagentId: extraActivityId });
+    emit("subagent.progress", {
+      subagentId: extraActivityId,
+      text: "正在核对演示资料",
+    });
+  } else if (activityKind === "moa") {
+    emit("moa.progress", { refsDone: 1, refsTotal: 2 });
+    emit("moa.reference", {
+      index: 1,
+      label: "参考模型甲",
+      text: "先确认输入数据范围。",
+    });
+  }
+  if (withTools) {
+    emit(
+      "tool.start",
+      showProgress
+        ? {
+            toolId: folderToolId,
+            name: "web_extract",
+            args: {
+              urls: [
+                "https://example.com/demo/a",
+                "https://example.com/demo/b",
+              ],
+            },
+          }
+        : showToolDetail
+          ? {
+              toolId: folderToolId,
+              name: "terminal",
+              args: { command: "echo 演示核对完成", cwd: "/workspace" },
+            }
+          : showDiff
+            ? { toolId: folderToolId, name: "patch", args: { path: "报告.md" } }
+            : demoFile
+              ? {
+                  toolId: folderToolId,
+                  name: "read_file",
+                  args: { path: demoFile.name },
+                }
+              : { toolId: folderToolId, title: "读取工作目录" },
+    );
+    if (isParallel)
+      emit("tool.start", { toolId: analysisToolId, title: "分析资料" });
+  } else if (text.includes("等待")) {
+    emit("thinking.delta", { text: "正在等待演示回复" });
+  }
   conversation.status = "running";
   conversation.updatedAt = now();
   persist();
+  const tickMs = scriptedScene ? 140 : 70;
+  const minimumTicks = scriptedScene ? Math.ceil(6000 / tickMs) : 0;
+  const answerChunkSize = scriptedScene
+    ? Math.max(1, Math.round(answer.length / 36))
+    : 4;
   let offset = 0;
+  let phase = withInterim ? "interim" : "answer";
+  let ticks = 0;
+  const interimText = "已确认分析范围，继续整理资料。";
   const timer = setInterval(() => {
-    offset = Math.min(answer.length, offset + 4);
-    assistant.content = answer.slice(0, offset);
-    if (offset >= answer.length) {
-      assistant.status = assistant.kind === "normal" ? "done" : "waiting";
-      assistant.steps[1].status = isErrorDemo ? "error" : "done";
-      conversation.status = "ready";
+    ticks++;
+    const currentText = phase === "interim" ? interimText : answer;
+    const chunkSize =
+      phase === "interim" && scriptedScene ? 2 : answerChunkSize;
+    const nextOffset = Math.min(currentText.length, offset + chunkSize);
+    const advanced = nextOffset > offset;
+    if (advanced)
+      emit("message.delta", { text: currentText.slice(offset, nextOffset) });
+    offset = nextOffset;
+    if (phase === "interim" && offset >= interimText.length) {
+      emit("message.interim", { text: interimText });
+      phase = "answer";
+      offset = 0;
+    } else if (
+      showProgress &&
+      phase === "answer" &&
+      offset >= Math.floor(answer.length / 4) &&
+      !turn.activities.find((item) => item.id === folderToolId)?.progressText &&
+      turn.activities.find((item) => item.id === folderToolId)?.status ===
+        "running"
+    ) {
+      emit("tool.progress", {
+        toolId: folderToolId,
+        preview: "演示：已读取 2/5 个网页",
+      });
+    }
+    if (
+      withTools &&
+      !isParallel &&
+      phase === "answer" &&
+      offset >= Math.floor(answer.length * (showProgress ? 0.65 : 0.5)) &&
+      !turn.activities.some((item) => item.id === analysisToolId)
+    ) {
+      emit(
+        "tool.complete",
+        showToolDetail
+          ? {
+              toolId: folderToolId,
+              result: { exit_code: 0, stdout: "演示核对完成" },
+            }
+          : showDiff
+            ? { toolId: folderToolId, inlineDiff: "-旧值\n+新值" }
+            : { toolId: folderToolId },
+      );
+      emit("tool.start", { toolId: analysisToolId, title: "分析任务" });
+    }
+    if (
+      isParallel &&
+      phase === "answer" &&
+      offset >= Math.floor(answer.length / 2) &&
+      turn.activities.find((item) => item.id === folderToolId)?.status ===
+        "running"
+    )
+      emit("tool.complete", { toolId: folderToolId });
+    if (phase === "answer" && offset >= answer.length && ticks < minimumTicks) {
+      if (advanced) persist();
+      return;
+    }
+    if (
+      phase === "answer" &&
+      offset >= answer.length &&
+      ticks >= minimumTicks
+    ) {
+      if (activityKind === "subagent" && !backgroundDelegation)
+        emit("subagent.complete", {
+          subagentId: extraActivityId,
+          status: "completed",
+          summary: "已核对演示资料范围。",
+        });
+      else if (activityKind === "moa") {
+        emit("moa.reference", {
+          index: 2,
+          label: "参考模型乙",
+          text: "再比较异常时段。",
+        });
+        emit("moa.phase", { phase: "aggregator" });
+        emit("activity.complete", { activityId: `moa_${turn.id}` });
+      }
+      if (withTools) {
+        if (
+          isParallel &&
+          turn.activities.find((item) => item.id === folderToolId)?.status ===
+            "running"
+        )
+          emit("tool.complete", { toolId: folderToolId });
+        emit("tool.complete", { toolId: analysisToolId, error: isErrorDemo });
+      }
+      if (requestKind) {
+        emit("request.open", {
+          requestId: uid("request"),
+          kind: requestKind,
+          prompt: answer,
+          questions:
+            requestKind === "clarify" && text.includes("多题")
+              ? [
+                  {
+                    qid: "time",
+                    question: "分析哪个时间范围？",
+                    choices: ["最近一周", "本月"],
+                    multiSelect: false,
+                  },
+                  {
+                    qid: "line",
+                    question: "关注哪些产线？",
+                    choices: ["1 号产线", "2 号产线"],
+                    multiSelect: true,
+                  },
+                ]
+              : [],
+          answers:
+            requestKind === "clarify" && text.includes("已答")
+              ? { time: "最近一周" }
+              : undefined,
+          choices: ["approval", "mcp_setup"].includes(requestKind)
+            ? [
+                { value: "approved", label: "允许本次" },
+                { value: "rejected", label: "拒绝" },
+              ]
+            : [],
+          failAfterApproval:
+            ["approval", "mcp_setup"].includes(requestKind) && isErrorDemo,
+        });
+        assistant.content = "";
+      } else {
+        if (
+          !isErrorDemo &&
+          text.includes("生成待办结果") &&
+          conversation.sessionPresentation.todos.length
+        )
+          emit("result.add", {
+            resultId: uid("result"),
+            kind: "todo",
+            label: "本轮演示清单",
+            items: conversation.sessionPresentation.todos,
+          });
+        if (!isErrorDemo && text.includes("引用资料")) {
+          const file = expertById(conversation.expertId)?.files.find(
+            (item) => item.kind === "file" && item.content != null,
+          );
+          if (file)
+            emit("result.add", {
+              resultId: uid("result"),
+              label: "关联文件",
+              fileId: file.id,
+            });
+        }
+        emit("message.complete", {
+          status: isErrorDemo ? "error" : "complete",
+          error: isErrorDemo
+            ? "工具执行失败：请核查工作目录和演示数据后重试。"
+            : "",
+          at: now(),
+        });
+      }
       activeTimers.delete(conversationId);
       clearInterval(timer);
+      if (backgroundDelegation && turn.status === "complete") {
+        const backgroundTimer = setTimeout(() => {
+          backgroundTimers.delete(conversationId);
+          if (conversationById(conversationId) !== conversation) return;
+          emit("subagent.complete", {
+            subagentId: extraActivityId,
+            status: "completed",
+            summary: "后台演示子任务已完成资料核对。",
+          });
+          persist();
+        }, 2000);
+        backgroundTimers.set(conversationId, backgroundTimer);
+      }
     }
     persist();
-  }, 70);
+  }, tickMs);
   activeTimers.set(conversationId, timer);
+}
+
+export function resolveDemoRequest(conversationId, requestId, response) {
+  const conversation = conversationById(conversationId);
+  const turn = conversation?.turns?.find((item) =>
+    item.requests.some(
+      (request) => request.id === requestId && request.status === "waiting",
+    ),
+  );
+  if (!turn) return false;
+  const request = turn.requests.find((item) => item.id === requestId);
+  const validResponse = ["approval", "mcp_setup"].includes(request.kind)
+    ? ["approved", "rejected"].includes(response) &&
+      (!request.choices?.length ||
+        request.choices.some((choice) => choice.value === response))
+    : ["secret", "sudo"].includes(request.kind)
+      ? ["submitted", "rejected"].includes(response)
+      : request.questions?.length
+        ? request.questions.every((question) => {
+            const answer = response?.answers?.[question.qid];
+            return question.multiSelect
+              ? Array.isArray(answer) &&
+                  answer.length > 0 &&
+                  answer.every((item) => question.choices.includes(item))
+              : question.choices.length
+                ? question.choices.includes(answer)
+                : Boolean(String(answer || "").trim());
+          })
+        : Boolean(String(response || "").trim());
+  if (!validResponse) return false;
+  const event = (type, payload = {}) =>
+    applyConversationEvent(conversation, {
+      type,
+      ...payload,
+      sessionId: conversationId,
+      turnId: turn.id,
+      seq: turn.lastSeq + 1,
+    });
+  event("request.resolve", { requestId, response, at: now() });
+  conversation.updatedAt = now();
+  if (response !== "rejected") {
+    const followupToolId = ["approval", "mcp_setup"].includes(request.kind)
+      ? uid("tool")
+      : null;
+    if (followupToolId)
+      event("tool.start", {
+        toolId: followupToolId,
+        title:
+          request.kind === "mcp_setup"
+            ? "检查示例 MCP 配置"
+            : "执行已批准的演示操作",
+      });
+    const timer = setTimeout(() => {
+      if (turn.status !== "running") return;
+      if (followupToolId)
+        event("tool.complete", {
+          toolId: followupToolId,
+          error: request.failAfterApproval ? "后续演示操作失败" : false,
+        });
+      const answer = request.failAfterApproval
+        ? "已记录本次授权；后续演示操作未完成。"
+        : ["secret", "sudo"].includes(request.kind)
+          ? "凭据流程的安全展示已结束，未收集或保存真实凭据。"
+          : request.kind === "mcp_setup"
+            ? "已记录本次配置决定，示例 MCP 配置检查流程已结束。"
+            : request.kind === "approval"
+              ? "已记录你的批准。演示操作已继续，建议核对工作目录中的资料后再使用结果。"
+              : `已收到补充信息：“${request.response}”。演示分析已继续，请核对输入资料后再推进下一步。`;
+      event("message.complete", {
+        status: request.failAfterApproval ? "error" : "complete",
+        text: answer,
+        error: request.failAfterApproval
+          ? "后续演示操作失败，请核查演示数据。"
+          : "",
+        at: now(),
+      });
+      activeTimers.delete(conversationId);
+      persist();
+    }, 1500);
+    activeTimers.set(conversationId, timer);
+  }
+  persist();
+  return true;
 }
 
 export function triggerEvent(id) {
