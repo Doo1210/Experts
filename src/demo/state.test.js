@@ -20,6 +20,63 @@ beforeEach(async () => {
 });
 
 describe("演示状态", () => {
+  it("消息渠道名单按专家与平台隔离，升级保留已有目标", () => {
+    const seed = demo.createSeed();
+    const quality = seed.experts.find((item) => item.id === "exp_quality");
+    const ops = seed.experts.find((item) => item.id === "exp_ops");
+    const qualityWecom = quality.channels.find((item) => item.id === "wecom");
+    const opsWecom = ops.channels.find((item) => item.id === "wecom");
+    expect(qualityWecom.people.map((item) => item.id)).toContain("wc-owner");
+    expect(opsWecom.people).toEqual([]);
+
+    const opsDingtalk = ops.channels.find((item) => item.id === "dingtalk");
+    opsDingtalk.people = [{ id: "custom-user", name: "已有演示目标" }];
+    delete opsDingtalk.groups;
+    opsDingtalk.deliveries = [{ id: "custom-delivery", status: "unknown" }];
+    ops.files = ops.files.filter((item) => item.id !== "f_ops_report");
+    seed.demoDataRevision = 16;
+    demo.upgradeExpertFixtures(seed);
+    expect(opsDingtalk.people).toMatchObject([
+      {
+        id: "custom-user",
+        name: "已有演示目标",
+        approved: true,
+        source: "管理员添加",
+      },
+    ]);
+    expect(opsDingtalk.groups[0].id).toBe("cid_demo_line_001");
+    expect(opsDingtalk.deliveries).toEqual([
+      { id: "custom-delivery", status: "unknown" },
+    ]);
+    expect(ops.files.some((item) => item.id === "f_ops_report")).toBe(true);
+    expect(qualityWecom.people).not.toBe(opsWecom.people);
+  });
+
+  it("新增的发送状态样例只补齐已知目标，不覆盖已有名单", () => {
+    const saved = demo.createSeed();
+    const quality = saved.experts.find((item) => item.id === "exp_quality");
+    const wecom = quality.channels.find((item) => item.id === "wecom");
+    wecom.people = [
+      { id: "custom-target", name: "用户自定义目标", result: "未知" },
+      { id: "wc-owner", name: "授权人", result: "失败" },
+    ];
+    wecom.groups = [];
+    saved.demoDataRevision = 19;
+    demo.upgradeExpertFixtures(saved);
+    expect(wecom.people.find((item) => item.id === "wc-owner").result).toBe(
+      "失败",
+    );
+    expect(wecom.people.some((item) => item.id === "custom-target")).toBe(true);
+    expect(wecom.people.map((item) => item.id)).toEqual(
+      expect.arrayContaining([
+        "wc-shift-lead",
+        "wc-maintenance",
+        "wc-inspector",
+      ]),
+    );
+    expect(wecom.groups.map((item) => item.id)).toContain("wc-group-partial");
+  });
+
   it("质量分析专家多问题会话可用于定位滚动演示，升级不覆盖已有对话", () => {
     const seed = demo.createSeed();
     const sample = seed.conversations.find(

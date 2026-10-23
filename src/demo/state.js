@@ -1,5 +1,9 @@
 import Vue from "vue";
 import {
+  demoChannelDeliveries,
+  demoChannelTargets,
+} from "./channel-target-fixtures";
+import {
   applyConversationEvent,
   createConversationTurn,
   normalizeConversationTurns,
@@ -28,7 +32,7 @@ const clone = (value) => JSON.parse(JSON.stringify(value));
 const uid = (prefix) =>
   `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`;
 const now = () => new Date().toISOString();
-const DEMO_DATA_REVISION = 16;
+const DEMO_DATA_REVISION = 20;
 
 const QUALITY_NAVIGATION_TOPICS = [
   [
@@ -222,6 +226,8 @@ function createSupplementalExpert(spec) {
       connected: spec.channelIds.includes(channel.id),
       proactive: false,
       files: false,
+      ...demoChannelTargets(spec.id, channel.id),
+      deliveries: demoChannelDeliveries(spec.id, channel.id),
     })),
     workspaceRoot: `/专家/${spec.name}`,
     files: [
@@ -247,7 +253,7 @@ function createSupplementalTemplate(spec) {
 }
 
 export function createSeed() {
-  return enrichProjectFixtures({
+  const seed = enrichProjectFixtures({
     demoDataRevision: DEMO_DATA_REVISION,
     knowledgeMethodConfigs: {},
     experts: [
@@ -402,6 +408,15 @@ export function createSeed() {
         workspaceRoot: "/专家/运营策划专家",
         files: [
           { id: "f_ops_im", name: "消息渠道", parentId: null, kind: "folder" },
+          {
+            id: "f_ops_report",
+            name: "运营简报.txt",
+            parentId: "f_ops_im",
+            kind: "file",
+            mime: "text/plain",
+            content: "运营简报演示文件。",
+            size: 27,
+          },
           {
             id: "f_ops_event",
             name: "自主任务",
@@ -564,6 +579,16 @@ export function createSeed() {
       },
     ],
   });
+  for (const expert of seed.experts) {
+    for (const channel of expert.channels || []) {
+      const samples = demoChannelTargets(expert.id, channel.id);
+      if (!Array.isArray(channel.people)) channel.people = samples.people;
+      if (!Array.isArray(channel.groups)) channel.groups = samples.groups;
+      if (!Array.isArray(channel.deliveries))
+        channel.deliveries = demoChannelDeliveries(expert.id, channel.id);
+    }
+  }
+  return seed;
 }
 
 export function upgradeExpertFixtures(saved) {
@@ -753,6 +778,65 @@ export function upgradeExpertFixtures(saved) {
     );
     if (demo && !saved.conversations.some((item) => item.id === demo.id))
       saved.conversations.push(clone(demo));
+  }
+  if (previousRevision < 17) {
+    for (const expert of saved.experts) {
+      for (const channel of expert.channels || []) {
+        const samples = demoChannelTargets(expert.id, channel.id);
+        if (!Array.isArray(channel.people)) channel.people = samples.people;
+        if (!Array.isArray(channel.groups)) channel.groups = samples.groups;
+        if (!channel.enabled) channel.proactive = false;
+      }
+    }
+  }
+  if (previousRevision < 18) {
+    for (const expert of saved.experts) {
+      for (const channel of expert.channels || []) {
+        if (!Array.isArray(channel.deliveries))
+          channel.deliveries = demoChannelDeliveries(expert.id, channel.id);
+        for (const kind of ["people", "groups"]) {
+          for (const item of channel[kind] || []) {
+            if (item.approved === undefined) item.approved = true;
+            if (item.purpose === undefined) item.purpose = "";
+            if (!item.source) item.source = "管理员添加";
+          }
+        }
+      }
+    }
+  }
+  if (previousRevision < 19) {
+    const ops = saved.experts.find((item) => item.id === "exp_ops");
+    const sample = seed.experts
+      .find((item) => item.id === "exp_ops")
+      ?.files.find((item) => item.id === "f_ops_report");
+    if (ops && sample) {
+      ops.files = Array.isArray(ops.files) ? ops.files : [];
+      if (!ops.files.some((item) => item.id === sample.id))
+        ops.files.push(clone(sample));
+    }
+  }
+  if (previousRevision < 20) {
+    const quality = saved.experts.find((item) => item.id === "exp_quality");
+    const wecom = quality?.channels?.find((item) => item.id === "wecom");
+    if (wecom) {
+      const examples = demoChannelTargets("exp_quality", "wecom");
+      for (const key of ["people", "groups"]) {
+        wecom[key] = Array.isArray(wecom[key]) ? wecom[key] : [];
+        const known = new Set(wecom[key].map((item) => item.id));
+        for (const item of examples[key]) {
+          if (
+            [
+              "wc-shift-lead",
+              "wc-maintenance",
+              "wc-inspector",
+              "wc-group-partial",
+            ].includes(item.id) &&
+            !known.has(item.id)
+          )
+            wecom[key].push(clone(item));
+        }
+      }
+    }
   }
   saved.demoDataRevision = DEMO_DATA_REVISION;
   return saved;

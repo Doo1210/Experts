@@ -1,3 +1,8 @@
+import {
+  demoChannelDeliveries,
+  demoChannelTargets,
+} from "./channel-target-fixtures";
+
 // 固定的项目演示场景。ID 不随刷新变化，便于对旧版浏览器数据做一次增量补齐。
 export const PROJECT_FIXTURE_VERSION = 1;
 const time = (day, hour, minute = 0) =>
@@ -94,6 +99,8 @@ const expert = (
     connected: activeChannelIds.includes(channelId),
     proactive: false,
     files: false,
+    ...demoChannelTargets(id, channelId),
+    deliveries: demoChannelDeliveries(id, channelId),
   })),
   workspaceRoot: `/专家/${name}`,
   files: [],
