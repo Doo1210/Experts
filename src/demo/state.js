@@ -1371,9 +1371,14 @@ export function sendDemoMessage(
   };
   conversation.messages.push(userMessage);
   const toolScene = findToolActivityScene(text);
-  const crowdedToolsDemo = !toolScene && text.includes("演示大量工具活动");
+  const largeActivityGroupDemo =
+    !toolScene && text.includes("演示活动组：大量活动");
+  const crowdedToolsDemo =
+    largeActivityGroupDemo || (!toolScene && text.includes("演示大量工具活动"));
+  const crowdedToolCount = largeActivityGroupDemo ? 32 : 18;
+  const crowdedToolIntervalMs = largeActivityGroupDemo ? 90 : 180;
   const crowdedTools = crowdedToolsDemo
-    ? Array.from({ length: 18 }, (_, index) => ({
+    ? Array.from({ length: crowdedToolCount }, (_, index) => ({
         toolId: uid("tool"),
         name:
           index % 3 === 0
@@ -1393,6 +1398,8 @@ export function sendDemoMessage(
   const compressionDemo = text.includes("演示上下文压缩");
   const reconnectDemo = text.includes("演示服务重连");
   const clarifyTimeoutDemo = text.includes("演示澄清超时");
+  const approvalTimeoutDemo = text.includes("演示审批超时");
+  const parallelApprovalDemo = text.includes("演示并行审批");
   const stageDemo = modelWaitDemo || compressionDemo || reconnectDemo;
   const recoveryDemo = text.includes("演示恢复中");
   const unknownDemo = text.includes("演示运行异常");
@@ -1406,6 +1413,7 @@ export function sendDemoMessage(
   const showDiff = text.includes("文件差异");
   const withTools =
     Boolean(toolScene) ||
+    crowdedToolsDemo ||
     isErrorDemo ||
     recoveryDemo ||
     unknownDemo ||
@@ -1599,7 +1607,11 @@ export function sendDemoMessage(
     : requestKind === "clarify"
       ? text.includes("多题")
         ? "为了继续处理，请补充时间范围和目标产线。"
-        : "为了继续处理，请先说明希望分析的时间范围和目标产线。"
+        : text.includes("单选澄清")
+          ? "请选择希望分析的时间范围。"
+          : text.includes("多选澄清")
+            ? "请选择需要核对的产线。"
+            : "为了继续处理，请先说明希望分析的时间范围和目标产线。"
       : requestKind === "approval"
         ? "此步骤需要确认是否允许继续执行演示操作。"
         : requestKind === "mcp_setup"
@@ -1613,7 +1625,9 @@ export function sendDemoMessage(
                 : activityKind === "reasoning"
                   ? "已整理输入范围与数据口径的演示思路，建议核对关键数据后再推进。"
                   : toolScene
-                    ? "这是一次本地工具活动演示，未执行真实工具。可展开活动组查看这次调用的参数、进度与结果。"
+                    ? toolScene.followup
+                      ? "已在同一回合演示写入新文件和修改已有文件；可展开活动组查看两次调用，并在下方查看对应产出。"
+                      : "这是一次本地工具活动演示，未执行真实工具。可展开活动组查看这次调用的参数、进度与结果。"
                     : isErrorDemo
                       ? "已保留当前可用的部分分析。失败的演示工具未产出最终结论，请核查资料后重试。"
                       : text.includes("Markdown 展示")
@@ -1650,6 +1664,97 @@ export function sendDemoMessage(
   };
   const folderToolId = uid("tool");
   const analysisToolId = uid("tool");
+  const followupToolId = toolScene?.followup ? uid("tool") : null;
+  const completeToolScene = (scene, toolId) => {
+    if (!scene || scene.skipComplete) return;
+    const target = scene.modifies
+      ? expertById(conversation.expertId)?.files.find(
+          (file) => file.id === scene.modifies.fileId && file.kind === "file",
+        )
+      : null;
+    const nextContent =
+      target && target.content === scene.modifies.content
+        ? scene.modifies.alternateContent || scene.modifies.content
+        : scene.modifies?.content;
+    const changed = target && target.content !== nextContent;
+    const beforeLines = changed ? String(target.content || "").split("\n") : [];
+    const afterLines = changed ? String(nextContent).split("\n") : [];
+    const diffLines = [];
+    for (
+      let index = 0;
+      index < Math.max(beforeLines.length, afterLines.length);
+      index++
+    ) {
+      if (beforeLines[index] === afterLines[index]) continue;
+      if (beforeLines[index] !== undefined)
+        diffLines.push(`-${beforeLines[index]}`);
+      if (afterLines[index] !== undefined)
+        diffLines.push(`+${afterLines[index]}`);
+    }
+    const inlineDiff = scene.modifies ? diffLines.join("\n") : scene.inlineDiff;
+    emit("tool.complete", {
+      toolId,
+      name: scene.name,
+      args: clone(scene.args),
+      ...(scene.modifies && !target
+        ? { status: "failed" }
+        : scene.status
+          ? { status: scene.status }
+          : {}),
+      result:
+        scene.modifies && !target
+          ? { message: "演示目标文件已不可用" }
+          : scene.result || { verified: true },
+      ...(inlineDiff ? { inlineDiff } : {}),
+    });
+    if (scene.risk)
+      emit("tool.output_risk", {
+        toolId,
+        name: scene.name,
+        ...clone(scene.risk),
+      });
+    const artifacts = [
+      ...(scene.artifact ? [scene.artifact] : []),
+      ...(scene.artifacts || []),
+    ];
+    for (const artifact of artifacts) {
+      const generated = addWorkspaceItem(conversation.expertId, {
+        name: artifact.name,
+        kind: "file",
+        content: artifact.content,
+      });
+      if (generated)
+        emit("result.add", {
+          resultId: uid("result"),
+          kind: "file",
+          label: "本轮生成文件",
+          fileId: generated.id,
+          name: generated.name,
+          path: artifact.path || generated.name,
+          operation: "created",
+          snapshotContent: artifact.content,
+          versionId: uid("version"),
+          sourceToolId: toolId,
+        });
+    }
+    if (changed) {
+      target.content = nextContent;
+      emit("result.add", {
+        resultId: uid("result"),
+        kind: "file",
+        label: "本轮修改文件",
+        fileId: target.id,
+        name: target.name,
+        path: scene.modifies.path || target.name,
+        operation: "modified",
+        snapshotContent: target.content,
+        versionId: uid("version"),
+        roundDiff: inlineDiff,
+        changeSummary: scene.modifies.changeSummary,
+        sourceToolId: toolId,
+      });
+    }
+  };
   const demoFile = expertById(conversation.expertId)?.files.find(
     (item) => item.kind === "file",
   );
@@ -1759,7 +1864,7 @@ export function sendDemoMessage(
     ticks++;
     if (crowdedToolsDemo)
       crowdedTools.slice(3).forEach((tool, index) => {
-        if (ticks === Math.ceil(((index + 1) * 180) / tickMs))
+        if (ticks === Math.ceil(((index + 1) * crowdedToolIntervalMs) / tickMs))
           emit("tool.start", {
             toolId: tool.toolId,
             name: tool.name,
@@ -1805,6 +1910,14 @@ export function sendDemoMessage(
           const { afterMs, ...payload } = progress;
           emit("tool.progress", { toolId: folderToolId, ...payload });
         }
+    if (toolScene?.followup && ticks === Math.ceil(3000 / tickMs)) {
+      completeToolScene(toolScene, folderToolId);
+      emit("tool.start", {
+        toolId: followupToolId,
+        name: toolScene.followup.name,
+        args: clone(toolScene.followup.args),
+      });
+    }
     if (stageDemo && ticks === Math.ceil(4000 / tickMs)) {
       if (modelWaitDemo) emit("thinking.delta", { text: "" });
       if (compressionDemo) emit("status.update", { kind: "compacted" });
@@ -1925,39 +2038,11 @@ export function sendDemoMessage(
               name: tool.name,
               result: { verified: true },
             });
-        else if (toolScene && !toolScene.skipComplete) {
-          emit("tool.complete", {
-            toolId: folderToolId,
-            name: toolScene.name,
-            args: clone(toolScene.args),
-            ...(toolScene.status ? { status: toolScene.status } : {}),
-            result: toolScene.result || { verified: true },
-            ...(toolScene.inlineDiff
-              ? { inlineDiff: toolScene.inlineDiff }
-              : {}),
-          });
-          if (toolScene.risk)
-            emit("tool.output_risk", {
-              toolId: folderToolId,
-              name: toolScene.name,
-              ...clone(toolScene.risk),
-            });
-          if (toolScene.artifact) {
-            const generated = addWorkspaceItem(conversation.expertId, {
-              name: toolScene.artifact.name,
-              kind: "file",
-              content: toolScene.artifact.content,
-            });
-            if (generated)
-              emit("result.add", {
-                resultId: uid("result"),
-                kind: "file",
-                label: "本轮生成文件",
-                fileId: generated.id,
-                sourceToolId: folderToolId,
-              });
-          }
-        } else if (!toolScene && !crowdedToolsDemo) {
+        else if (toolScene) {
+          if (toolScene.followup)
+            completeToolScene(toolScene.followup, followupToolId);
+          else completeToolScene(toolScene, folderToolId);
+        } else if (!crowdedToolsDemo) {
           if (
             isParallel &&
             turn.activities.find((item) => item.id === folderToolId)?.status ===
@@ -1994,6 +2079,7 @@ export function sendDemoMessage(
             requestKind === "clarify" && text.includes("已答")
               ? { time: "最近一周" }
               : undefined,
+          multiSelect: requestKind === "clarify" && text.includes("多选澄清"),
           choices:
             requestKind === "approval"
               ? [
@@ -2007,17 +2093,43 @@ export function sendDemoMessage(
                   })),
                   { value: "deny", label: "拒绝" },
                 ]
-              : requestKind === "mcp_setup"
-                ? [
-                    { value: "approved", label: "允许本次" },
-                    { value: "rejected", label: "拒绝" },
-                  ]
-                : [],
+              : requestKind === "clarify" && text.includes("单选澄清")
+                ? ["最近一周", "本月"]
+                : requestKind === "clarify" && text.includes("多选澄清")
+                  ? ["1 号产线", "2 号产线"]
+                  : requestKind === "mcp_setup"
+                    ? [
+                        { value: "approved", label: "允许本次" },
+                        { value: "rejected", label: "拒绝" },
+                      ]
+                    : [],
+          actionTitle: requestKind === "approval" ? "执行演示核对命令" : "",
+          actionDetail:
+            requestKind === "approval"
+              ? "此操作需要授权；允许后仅尝试执行，实际结果另行显示。"
+              : "",
+          safeCommand: requestKind === "approval" ? "echo 演示核对完成" : "",
           failAfterApproval:
             ["approval", "mcp_setup"].includes(requestKind) && isErrorDemo,
         });
+        if (parallelApprovalDemo && requestKind === "approval")
+          emit("request.open", {
+            requestId: uid("request"),
+            kind: "approval",
+            prompt: "另一项演示操作也需要授权。",
+            actionTitle: "读取演示核对资料",
+            actionDetail: "读取示例文件，允许后仅尝试执行。",
+            safeCommand: "cat 分析资料/良率样例.csv",
+            choices: [
+              { value: "once", label: "允许本次" },
+              { value: "deny", label: "拒绝" },
+            ],
+          });
         assistant.content = "";
-        if (clarifyTimeoutDemo && requestKind === "clarify") {
+        if (
+          (clarifyTimeoutDemo && requestKind === "clarify") ||
+          (approvalTimeoutDemo && requestKind === "approval")
+        ) {
           const timeoutTimer = setTimeout(() => {
             requestTimeoutTimers.delete(requestId);
             const request = turn.requests.find((item) => item.id === requestId);
@@ -2031,15 +2143,21 @@ export function sendDemoMessage(
               autoContinue: true,
               at: now(),
             });
-            assistant.content = "未收到补充信息，专家正依据现有资料继续分析。";
+            assistant.content =
+              requestKind === "approval"
+                ? "审批未在有效时间内得到回应，本次演示操作未执行。"
+                : "未收到补充信息，专家正依据现有资料继续分析。";
             persist();
             const continuation = setTimeout(() => {
               if (turn.status !== "running") return;
               emit("message.complete", {
                 status: "complete",
-                text: request.lateAnswer
-                  ? `已收到超时后的补充信息：“${request.lateAnswer}”。演示分析已根据新信息继续。`
-                  : "未收到补充信息，已依据现有资料完成演示分析，请核对结论的适用范围。",
+                text:
+                  requestKind === "approval"
+                    ? "本次操作未获授权，专家已依据现有资料完成其余演示分析。"
+                    : request.lateAnswer
+                      ? `已收到超时后的补充信息：“${request.lateAnswer}”。演示分析已根据新信息继续。`
+                      : "未收到补充信息，已依据现有资料完成演示分析，请核对结论的适用范围。",
                 at: now(),
               });
               activeTimers.delete(conversationId);
@@ -2099,26 +2217,32 @@ export function resolveDemoRequest(conversationId, requestId, response) {
   );
   if (!turn) return false;
   const request = turn.requests.find((item) => item.id === requestId);
-  const validResponse = ["approval", "mcp_setup"].includes(request.kind)
-    ? ["once", "session", "always", "deny", "approved", "rejected"].includes(
-        response,
-      ) &&
-      (!request.choices?.length ||
-        request.choices.some((choice) => choice.value === response))
-    : ["secret", "sudo"].includes(request.kind)
-      ? ["submitted", "rejected"].includes(response)
-      : request.questions?.length
-        ? request.questions.every((question) => {
-            const answer = response?.answers?.[question.qid];
-            return question.multiSelect
-              ? Array.isArray(answer) &&
-                  answer.length > 0 &&
-                  answer.every((item) => question.choices.includes(item))
-              : question.choices.length
-                ? question.choices.includes(answer)
-                : Boolean(String(answer || "").trim());
-          })
-        : Boolean(String(response || "").trim());
+  const skipped = request.kind === "clarify" && response?.skip === true;
+  const mergedAnswers = request.questions?.length
+    ? { ...request.answers, ...(response?.answers || {}) }
+    : null;
+  const validResponse = skipped
+    ? true
+    : ["approval", "mcp_setup"].includes(request.kind)
+      ? ["once", "session", "always", "deny", "approved", "rejected"].includes(
+          response,
+        ) &&
+        (!request.choices?.length ||
+          request.choices.some((choice) => choice.value === response))
+      : ["secret", "sudo"].includes(request.kind)
+        ? ["submitted", "rejected"].includes(response)
+        : request.questions?.length
+          ? request.questions.every((question) => {
+              const answer = mergedAnswers[question.qid];
+              return question.multiSelect
+                ? Array.isArray(answer) &&
+                    answer.length > 0 &&
+                    answer.every(
+                      (item) => typeof item === "string" && item.trim(),
+                    )
+                : typeof answer === "string" && Boolean(answer.trim());
+            })
+          : Boolean(String(response || "").trim());
   if (!validResponse) return false;
   const timeoutTimer = requestTimeoutTimers.get(requestId);
   if (timeoutTimer) clearTimeout(timeoutTimer);
@@ -2131,8 +2255,63 @@ export function resolveDemoRequest(conversationId, requestId, response) {
       turnId: turn.id,
       seq: turn.lastSeq + 1,
     });
-  event("request.resolve", { requestId, response, at: now() });
+  if (request.questions?.length)
+    for (const question of request.questions)
+      if (!Object.prototype.hasOwnProperty.call(request.answers, question.qid))
+        event("request.answer.accepted", {
+          requestId,
+          qid: question.qid,
+          answer: skipped ? "" : mergedAnswers[question.qid],
+        });
+  event("request.resolve", {
+    requestId,
+    response: request.questions?.length
+      ? { answers: request.answers }
+      : skipped
+        ? ""
+        : response,
+    skipped,
+    at: now(),
+  });
   conversation.updatedAt = now();
+  const waitingRequests = turn.requests.filter(
+    (item) => item.status === "waiting",
+  );
+  if (waitingRequests.length) {
+    turn.status = "waiting";
+    const assistant = conversation.messages.find(
+      (message) => message.id === turn.assistantMessageId,
+    );
+    if (assistant) assistant.status = "waiting";
+    conversation.status = "ready";
+    persist();
+    return true;
+  }
+  const approvals = turn.requests.filter((item) => item.kind === "approval");
+  if (approvals.length > 1) {
+    const allowed = approvals.filter((item) =>
+      ["once", "session", "always"].includes(item.response),
+    );
+    const toolIds = allowed.map((item) => {
+      const toolId = uid("tool");
+      event("tool.start", { toolId, title: item.actionTitle });
+      return toolId;
+    });
+    const timer = setTimeout(() => {
+      if (turn.status !== "running") return;
+      for (const toolId of toolIds) event("tool.complete", { toolId });
+      event("message.complete", {
+        status: "complete",
+        text: `两项审批已处理：允许 ${allowed.length} 项，拒绝 ${approvals.length - allowed.length} 项。已获准的演示操作完成，其余操作未执行。`,
+        at: now(),
+      });
+      activeTimers.delete(conversationId);
+      persist();
+    }, 2500);
+    activeTimers.set(conversationId, timer);
+    persist();
+    return true;
+  }
   if (request.kind === "approval" && ["rejected", "deny"].includes(response)) {
     event("message.interim", {
       text: "本次操作未获授权，继续整理现有资料。",
@@ -2175,7 +2354,9 @@ export function resolveDemoRequest(conversationId, requestId, response) {
             ? "已记录本次配置决定，示例 MCP 配置检查流程已结束。"
             : request.kind === "approval"
               ? "已记录你的批准。演示操作已继续，建议核对工作目录中的资料后再使用结果。"
-              : `已收到补充信息：“${request.response}”。演示分析已继续，请核对输入资料后再推进下一步。`;
+              : request.skipped
+                ? "已按你的选择跳过澄清，专家依据现有资料继续演示分析。"
+                : `已收到补充信息：“${request.response}”。演示分析已继续，请核对输入资料后再推进下一步。`;
       event("message.complete", {
         status: request.failAfterApproval ? "error" : "complete",
         text: answer,

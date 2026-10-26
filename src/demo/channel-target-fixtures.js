@@ -164,7 +164,31 @@ const candidates = {
           id: "ding_user_002",
           name: "运营负责人",
           source: "历史单聊 sender_staff_id",
-          lastInteractionAt: "10-10 15:20",
+          lastInteractionAt: "10-26 09:18",
+        },
+        {
+          id: "ding_user_quality_003",
+          name: "质量负责人",
+          source: "历史单聊 sender_staff_id",
+          lastInteractionAt: "10-25 16:42",
+        },
+        {
+          id: "ding_user_equipment_004",
+          name: "设备工程师",
+          source: "历史单聊 sender_staff_id",
+          lastInteractionAt: "10-24 13:05",
+        },
+        {
+          id: "ding_user_shift_005",
+          name: "值班主管",
+          source: "历史单聊 sender_staff_id",
+          lastInteractionAt: "10-23 11:30",
+        },
+        {
+          id: "ding_user_supply_006",
+          name: "物料协调员",
+          source: "历史单聊 sender_staff_id",
+          lastInteractionAt: "10-22 08:55",
         },
       ],
       group: [
@@ -172,7 +196,31 @@ const candidates = {
           id: "cid_demo_ops_002",
           name: "运营通知群",
           source: "历史群聊 conversation_id",
-          lastInteractionAt: "10-10 15:35",
+          lastInteractionAt: "10-26 09:36",
+        },
+        {
+          id: "cid_line_quality_003",
+          name: "质量分析群",
+          source: "历史群聊 conversation_id",
+          lastInteractionAt: "10-25 15:40",
+        },
+        {
+          id: "cid_maintenance_004",
+          name: "设备维护群",
+          source: "历史群聊 conversation_id",
+          lastInteractionAt: "10-24 10:12",
+        },
+        {
+          id: "cid_shift_005",
+          name: "值班协调群",
+          source: "历史群聊 conversation_id",
+          lastInteractionAt: "10-23 19:25",
+        },
+        {
+          id: "cid_supply_006",
+          name: "物料协同群",
+          source: "历史群聊 conversation_id",
+          lastInteractionAt: "10-22 14:08",
         },
       ],
     },
@@ -203,10 +251,56 @@ const candidates = {
   },
 };
 
+const samplePeople = [
+  "运营负责人",
+  "质量负责人",
+  "设备工程师",
+  "值班主管",
+  "物料协调员",
+];
+const sampleGroups = [
+  "运营通知群",
+  "质量分析群",
+  "设备维护群",
+  "值班协调群",
+  "物料协同群",
+];
+const sampleTimes = [
+  "10-26 09:18",
+  "10-25 16:42",
+  "10-24 13:05",
+  "10-23 11:30",
+  "10-22 08:55",
+];
+
 export function demoChannelCandidates(expertId, channelId, kind) {
-  return (candidates[expertId]?.[channelId]?.[kind] || []).map((item) => ({
-    ...item,
-  }));
+  const expertTag = String(expertId || "expert").replace(/^exp_/, "");
+  const configured = candidates[expertId]?.[channelId]?.[kind] || [];
+  const baseline =
+    channelId === "dingtalk"
+      ? candidates.exp_ops.dingtalk[kind].map((item) => ({
+          ...item,
+          id: `${expertTag}_${item.id}`,
+        }))
+      : ["wecom", "feishu"].includes(channelId)
+        ? (kind === "person" ? samplePeople : sampleGroups).map(
+            (name, index) => ({
+              id: `${channelId === "feishu" ? (kind === "person" ? "ou" : "oc") : "wc"}_${expertTag}_${kind}_${index + 1}`,
+              name,
+              source:
+                channelId === "wecom"
+                  ? "该机器人历史互动"
+                  : kind === "group"
+                    ? "机器人可见群"
+                    : "入站消息 open_id",
+              lastInteractionAt: sampleTimes[index],
+            }),
+          )
+        : [];
+  const known = new Set(configured.map((item) => item.id));
+  return [...configured, ...baseline.filter((item) => !known.has(item.id))]
+    .slice(0, 5)
+    .map((item) => ({ ...item }));
 }
 
 export function demoChannelDeliveries(expertId, channelId) {

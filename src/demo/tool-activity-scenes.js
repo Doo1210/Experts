@@ -15,12 +15,24 @@ export const TOOL_ACTIVITY_SCENES = [
     name: "write_file",
     args: { path: "报告.md", content: "# 演示报告\n质量数据仅用于原型展示。" },
     result: { verified: true },
+    artifact: {
+      name: "报告.md",
+      content: "# 演示报告\n质量数据仅用于原型展示。",
+    },
   },
   {
     trigger: "演示工具：修改文件",
     name: "patch",
-    args: { path: "报告.md", patch: "将旧值改为新值" },
-    inlineDiff: "-旧值\n+新值",
+    args: { path: "分析资料/良率样例.csv", patch: "调整演示良率" },
+    inlineDiff: "-2026-10-09,96.8%\n+2026-10-09,97.1%",
+    result: { verified: true },
+    modifies: {
+      fileId: "f_quality_csv",
+      path: "分析资料/良率样例.csv",
+      content: "日期,良率\n2026-10-08,97.2%\n2026-10-09,97.1%",
+      alternateContent: "日期,良率\n2026-10-08,97.2%\n2026-10-09,96.8%",
+      changeSummary: "调整 1 行良率数据",
+    },
   },
   {
     trigger: "演示工具：搜索文件",
@@ -76,6 +88,18 @@ export const TOOL_ACTIVITY_SCENES = [
     name: "terminal",
     args: { command: "echo 演示核对完成", cwd: "/workspace" },
     result: { exit_code: 0, stdout: "演示核对完成" },
+  },
+  {
+    trigger: "演示工具：长详情",
+    name: "terminal",
+    args: { command: "echo 演示长输出", cwd: "/workspace" },
+    result: {
+      exit_code: 0,
+      stdout: Array.from(
+        { length: 60 },
+        (_, index) => `第 ${index + 1} 行：演示命令输出，仅用于查看详情滚动。`,
+      ).join("\n"),
+    },
   },
   {
     trigger: "演示工具：运行代码",
@@ -230,6 +254,56 @@ export const TOOL_ACTIVITY_SCENES = [
     artifact: {
       name: "演示核对报告.md",
       content: "# 演示核对报告\n仅供原型展示。",
+    },
+  },
+  {
+    trigger: "演示产出：多个文件",
+    name: "write_file",
+    args: { path: "演示批量报告" },
+    result: { verified: true },
+    artifacts: Array.from({ length: 12 }, (_, index) => ({
+      name: `批次报告-${String(index + 1).padStart(2, "0")}.md`,
+      content: `# 批次报告 ${index + 1}\n本文件仅用于演示多产出文件的浏览。`,
+    })),
+  },
+  {
+    trigger: "演示产出：修改文件",
+    name: "patch",
+    args: { path: "分析资料/良率样例.csv", patch: "调整演示良率" },
+    inlineDiff: "-2026-10-09,96.8%\n+2026-10-09,97.1%",
+    result: { verified: true },
+    modifies: {
+      fileId: "f_quality_csv",
+      path: "分析资料/良率样例.csv",
+      content: "日期,良率\n2026-10-08,97.2%\n2026-10-09,97.1%",
+      alternateContent: "日期,良率\n2026-10-08,97.2%\n2026-10-09,96.8%",
+      changeSummary: "调整 1 行良率数据",
+    },
+  },
+  {
+    trigger: "演示产出：新建和修改文件",
+    name: "write_file",
+    args: {
+      path: "质量核对摘要.md",
+      content: "# 质量核对摘要\n已核对演示良率样例。",
+    },
+    result: { verified: true },
+    artifact: {
+      name: "质量核对摘要.md",
+      content: "# 质量核对摘要\n已核对演示良率样例。",
+    },
+    followup: {
+      name: "patch",
+      args: { path: "分析资料/良率样例.csv", patch: "调整演示良率" },
+      inlineDiff: "-2026-10-09,96.8%\n+2026-10-09,97.1%",
+      result: { verified: true },
+      modifies: {
+        fileId: "f_quality_csv",
+        path: "分析资料/良率样例.csv",
+        content: "日期,良率\n2026-10-08,97.2%\n2026-10-09,97.1%",
+        alternateContent: "日期,良率\n2026-10-08,97.2%\n2026-10-09,96.8%",
+        changeSummary: "调整 1 行良率数据",
+      },
     },
   },
 ];

@@ -58,17 +58,16 @@ function acceptedAnswers(request, value) {
     if (!Object.prototype.hasOwnProperty.call(submitted, question.qid))
       continue;
     const answer = submitted[question.qid];
-    if (question.multiSelect) {
+    if (question.multiSelect)
       answers[question.qid] = Array.isArray(answer)
         ? answer
+            .filter((item) => typeof item === "string")
             .map(safeNotice)
-            .filter((item) => question.choices.includes(item))
+            .filter(Boolean)
         : [];
-    } else if (question.choices.length) {
-      answers[question.qid] = question.choices.includes(answer) ? answer : "";
-    } else {
-      answers[question.qid] = safeNotice(answer);
-    }
+    else
+      answers[question.qid] =
+        typeof answer === "string" ? safeNotice(answer) : "";
   }
   return answers;
 }
@@ -901,6 +900,7 @@ export function applyConversationEvent(conversation, event) {
             safeNotice(event.prompt) ||
             (["secret", "sudo"].includes(event.kind) ? "请确认凭据操作" : ""),
           questions: normalizeRequestQuestions(event.questions),
+          multiSelect: Boolean(event.multiSelect),
           choices: Array.isArray(event.choices)
             ? event.choices.map((choice) => ({
                 value: String(choice.value || choice),
@@ -908,6 +908,9 @@ export function applyConversationEvent(conversation, event) {
               }))
             : [],
           failAfterApproval: Boolean(event.failAfterApproval),
+          actionTitle: safeNotice(event.actionTitle),
+          actionDetail: safeNotice(event.actionDetail),
+          safeCommand: safeNotice(event.safeCommand),
           openedSeq: event.seq,
           status: "waiting",
           response: null,
@@ -931,6 +934,7 @@ export function applyConversationEvent(conversation, event) {
       const request = turn.requests.find((item) => item.id === event.requestId);
       if (request && request.status === "waiting") {
         request.status = "resolved";
+        request.skipped = Boolean(event.skipped) && request.kind === "clarify";
         if (["secret", "sudo"].includes(request.kind))
           request.response =
             event.response === "submitted"
@@ -1032,14 +1036,51 @@ export function applyConversationEvent(conversation, event) {
                 : "pending",
             })),
           });
-        else if (event.fileId)
-          turn.results.push({
-            id: event.resultId,
-            kind: "file",
-            label: safeNotice(event.label) || "关联文件",
-            fileId: event.fileId,
-            sourceToolId: event.sourceToolId || null,
-          });
+        else if (event.fileId) {
+          const operation =
+            event.operation === "modified" ? "modified" : "created";
+          const existing = turn.results.find(
+            (item) => item.kind === "file" && item.fileId === event.fileId,
+          );
+          const hasSnapshot = typeof event.snapshotContent === "string";
+          const diff =
+            typeof event.roundDiff === "string"
+              ? toolOutputSections("patch", null, event.roundDiff)[0]?.text ||
+                ""
+              : "";
+          if (existing) {
+            existing.operation =
+              existing.operation === "created" && operation === "modified"
+                ? "created_modified"
+                : existing.operation;
+            if (hasSnapshot) existing.snapshotContent = event.snapshotContent;
+            if (diff) existing.roundDiff = diff;
+            if (event.versionId) existing.versionId = String(event.versionId);
+            if (event.name) existing.name = safeNotice(event.name);
+            if (event.path) existing.path = safeNotice(event.path);
+            if (event.changeSummary)
+              existing.changeSummary = safeNotice(event.changeSummary);
+            if (event.sourceToolId) existing.sourceToolId = event.sourceToolId;
+          } else
+            turn.results.push({
+              id: event.resultId,
+              kind: "file",
+              label: safeNotice(event.label) || "本轮文件",
+              fileId: event.fileId,
+              name: safeNotice(event.name),
+              path: safeNotice(event.path),
+              operation,
+              ...(hasSnapshot
+                ? { snapshotContent: event.snapshotContent }
+                : {}),
+              ...(event.versionId
+                ? { versionId: String(event.versionId) }
+                : {}),
+              ...(diff ? { roundDiff: diff } : {}),
+              changeSummary: safeNotice(event.changeSummary),
+              sourceToolId: event.sourceToolId || null,
+            });
+        }
       }
       break;
     case "warning.add":

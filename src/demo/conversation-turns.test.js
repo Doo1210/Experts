@@ -819,7 +819,7 @@ describe("本地回合事件", () => {
     expect(expired.turns[0].status).toBe("unknown");
     expect(expired.messages[1].status).toBe("stopped");
   });
-  it("多题澄清按 qid 保存已接收答案，凭据请求不保存提交值", () => {
+  it("多题澄清按 qid 保存选项外回答，凭据请求不保存提交值", () => {
     const session = makeConversation();
     const emit = (seq, type, payload) =>
       applyConversationEvent(session, {
@@ -851,9 +851,9 @@ describe("本地回合事件", () => {
     });
     expect(session.turns[0].requests[0].answers).toEqual({
       time: "最近一周",
-      line: ["1 号"],
+      line: ["1 号", "未知"],
     });
-    expect(session.turns[0].requests[0].response).toBe("最近一周；1 号");
+    expect(session.turns[0].requests[0].response).toBe("最近一周；1 号；未知");
 
     const secret = makeConversation();
     const base = { sessionId: secret.id, turnId: "turn1" };
@@ -971,6 +971,56 @@ describe("本地回合事件", () => {
       items,
     });
     expect(session.turns[0].results).toHaveLength(1);
+  });
+  it("同一文件的本轮新建与修改归并为一张版本卡", () => {
+    const session = makeConversation();
+    const emit = (seq, payload) =>
+      applyConversationEvent(session, {
+        sessionId: session.id,
+        turnId: "turn1",
+        seq,
+        type: "result.add",
+        ...payload,
+      });
+    emit(1, {
+      resultId: "created",
+      fileId: "file-1",
+      name: "报告.md",
+      operation: "created",
+      snapshotContent: "初版",
+      versionId: "v1",
+    });
+    emit(2, {
+      resultId: "modified",
+      fileId: "file-1",
+      name: "报告.md",
+      operation: "modified",
+      snapshotContent: "修订版",
+      versionId: "v2",
+      roundDiff: "-旧值\n+新值",
+      changeSummary: "调整结论",
+      sourceToolId: "patch-1",
+    });
+    expect(session.turns[0].results).toMatchObject([
+      {
+        id: "created",
+        fileId: "file-1",
+        operation: "created_modified",
+        snapshotContent: "修订版",
+        versionId: "v2",
+        roundDiff: "-旧值\n+新值",
+        changeSummary: "调整结论",
+        sourceToolId: "patch-1",
+      },
+    ]);
+    emit(3, {
+      resultId: "second-file",
+      fileId: "file-2",
+      name: "数据.csv",
+      operation: "modified",
+      snapshotContent: "日期,良率",
+    });
+    expect(session.turns[0].results).toHaveLength(2);
   });
   it("同源警告与终态错误合并到一条尾部提示，部分正文和失败状态各自保留", () => {
     const session = makeConversation();

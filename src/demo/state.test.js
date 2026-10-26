@@ -697,6 +697,42 @@ describe("演示状态", () => {
       vi.useRealTimers();
     }
   });
+  it("主动跳过澄清会记录用户决定并继续，不与超时混淆", async () => {
+    vi.useFakeTimers();
+    try {
+      const conversation = demo.createConversation("exp_quality", "跳过澄清");
+      demo.sendDemoMessage(conversation.id, "请澄清");
+      await vi.advanceTimersByTimeAsync(10000);
+      const request = conversation.turns[0].requests[0];
+      expect(
+        demo.resolveDemoRequest(conversation.id, request.id, { skip: true }),
+      ).toBe(true);
+      expect(request).toMatchObject({
+        status: "resolved",
+        skipped: true,
+        response: "",
+      });
+      expect(
+        demo.resolveDemoRequest(conversation.id, request.id, "迟到回答"),
+      ).toBe(false);
+      await vi.advanceTimersByTimeAsync(2000);
+      expect(conversation.turns[0].status).toBe("complete");
+      expect(conversation.messages[1].content).toContain("跳过澄清");
+
+      const partial = demo.createConversation("exp_quality", "跳过剩余问题");
+      demo.sendDemoMessage(partial.id, "已答多题澄清");
+      await vi.advanceTimersByTimeAsync(10000);
+      const batch = partial.turns[0].requests[0];
+      expect(batch.answers).toEqual({ time: "最近一周" });
+      expect(
+        demo.resolveDemoRequest(partial.id, batch.id, { skip: true }),
+      ).toBe(true);
+      expect(batch.answers).toEqual({ time: "最近一周", line: [] });
+      expect(batch.skipped).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
   it("澄清超时后继续，同回合补答与结束后补答各有明确归属", async () => {
     vi.useFakeTimers();
     try {
@@ -789,6 +825,101 @@ describe("演示状态", () => {
       vi.useRealTimers();
     }
   });
+  it("多个产出文件和修改文件都保留本轮版本", async () => {
+    vi.useFakeTimers();
+    try {
+      const many = demo.createConversation("exp_quality", "多个产出文件");
+      demo.sendDemoMessage(many.id, "演示产出：多个文件");
+      await vi.advanceTimersByTimeAsync(10000);
+      const generated = many.turns[0].results.filter(
+        (result) => result.kind === "file",
+      );
+      expect(generated).toHaveLength(12);
+      expect(generated.every((result) => result.operation === "created")).toBe(
+        true,
+      );
+      expect(
+        generated.every((result) =>
+          result.snapshotContent.includes("本文件仅用于演示"),
+        ),
+      ).toBe(true);
+
+      const source = demo
+        .expertById("exp_quality")
+        .files.find((file) => file.id === "f_quality_csv");
+      const before = source.content;
+      const changed = demo.createConversation("exp_quality", "修改文件产出");
+      demo.sendDemoMessage(changed.id, "演示产出：修改文件");
+      await vi.advanceTimersByTimeAsync(10000);
+      const result = changed.turns[0].results[0];
+      expect(source.content).not.toBe(before);
+      expect(result).toMatchObject({
+        fileId: "f_quality_csv",
+        operation: "modified",
+        snapshotContent: source.content,
+        changeSummary: "调整 1 行良率数据",
+      });
+      expect(result.roundDiff).toContain("+2026-10-09,97.1%");
+      source.content = "后续回合再次修改";
+      expect(result.snapshotContent).not.toBe(source.content);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+  it("写入、修改及混合工具场景按确认保存结果生成本轮产出", async () => {
+    vi.useFakeTimers();
+    try {
+      const written = demo.createConversation("exp_quality", "写入文件产出");
+      demo.sendDemoMessage(written.id, "演示工具：写入文件");
+      await vi.advanceTimersByTimeAsync(10000);
+      expect(written.turns[0].results).toMatchObject([
+        { kind: "file", name: "报告.md", operation: "created" },
+      ]);
+      expect(written.turns[0].results[0].sourceToolId).toBe(
+        written.turns[0].activities[0].id,
+      );
+
+      const modified = demo.createConversation("exp_quality", "修改文件产出");
+      demo.sendDemoMessage(modified.id, "演示工具：修改文件");
+      await vi.advanceTimersByTimeAsync(10000);
+      expect(modified.turns[0].results).toMatchObject([
+        {
+          kind: "file",
+          fileId: "f_quality_csv",
+          operation: "modified",
+        },
+      ]);
+      expect(modified.turns[0].results[0].roundDiff).toContain("+2026-10-09");
+
+      const mixed = demo.createConversation("exp_quality", "新建和修改文件");
+      demo.sendDemoMessage(mixed.id, "演示产出：新建和修改文件");
+      await vi.advanceTimersByTimeAsync(3500);
+      expect(mixed.turns[0].activities.map((item) => item.name)).toEqual([
+        "write_file",
+        "patch",
+      ]);
+      expect(mixed.turns[0].results).toMatchObject([
+        { name: "质量核对摘要.md", operation: "created" },
+      ]);
+      await vi.advanceTimersByTimeAsync(6500);
+      expect(mixed.turns[0].results).toMatchObject([
+        { name: "质量核对摘要.md", operation: "created" },
+        { fileId: "f_quality_csv", operation: "modified" },
+      ]);
+      expect(mixed.turns[0].results.map((item) => item.sourceToolId)).toEqual(
+        mixed.turns[0].activities.map((item) => item.id),
+      );
+      expect(mixed.turns[0].results.every((item) => item.versionId)).toBe(true);
+      expect(mixed.turns[0].results[1].snapshotContent).not.toBe(
+        modified.turns[0].results[0].snapshotContent,
+      );
+      expect(mixed.turns[0].results[1].roundDiff).toContain(
+        "+2026-10-09,96.8%",
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
   it("审批通过只启动后续活动，拒绝跳过本次操作后继续收口", async () => {
     vi.useFakeTimers();
     try {
@@ -861,6 +992,38 @@ describe("演示状态", () => {
         ),
       ).toBe(true);
       expect(scoped.turns[0].requests[0].response).toBe("always");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+  it("并行审批逐项结算，超时不生成用户拒绝决定", async () => {
+    vi.useFakeTimers();
+    try {
+      const parallel = demo.createConversation("exp_quality", "两项审批");
+      demo.sendDemoMessage(parallel.id, "演示并行审批");
+      await vi.advanceTimersByTimeAsync(10000);
+      const [first, second] = parallel.turns[0].requests;
+      expect([first.status, second.status]).toEqual(["waiting", "waiting"]);
+      expect(demo.resolveDemoRequest(parallel.id, first.id, "once")).toBe(true);
+      expect(parallel.turns[0].status).toBe("waiting");
+      expect(second.status).toBe("waiting");
+      expect(demo.resolveDemoRequest(parallel.id, second.id, "deny")).toBe(
+        true,
+      );
+      await vi.advanceTimersByTimeAsync(3000);
+      expect(parallel.turns[0].status).toBe("complete");
+      expect(parallel.turns[0].activities).toHaveLength(1);
+
+      const timeout = demo.createConversation("exp_quality", "审批超时");
+      demo.sendDemoMessage(timeout.id, "演示审批超时");
+      await vi.advanceTimersByTimeAsync(25000);
+      const request = timeout.turns[0].requests[0];
+      expect(request.status).toBe("expired");
+      expect(request.response).toBeNull();
+      expect(timeout.turns[0].activities).toHaveLength(0);
+      expect(demo.resolveDemoRequest(timeout.id, request.id, "once")).toBe(
+        false,
+      );
     } finally {
       vi.useRealTimers();
     }
@@ -955,6 +1118,34 @@ describe("演示状态", () => {
         { source: "读取网页", level: "high" },
       ]);
       expect(risky.messages[1].error).toBe("");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+  it("大量活动组与长详情分别提供可滚动的演示内容", async () => {
+    vi.useFakeTimers();
+    try {
+      const many = demo.createConversation("exp_quality", "活动组滚动");
+      demo.sendDemoMessage(many.id, "演示活动组：大量活动");
+      expect(many.turns[0].activities).toHaveLength(3);
+      await vi.advanceTimersByTimeAsync(4000);
+      expect(many.turns[0].activities).toHaveLength(32);
+      expect(
+        conversationProcessBlocks(many.turns[0]).filter(
+          (block) => block.type === "group",
+        ),
+      ).toHaveLength(1);
+      await vi.advanceTimersByTimeAsync(6000);
+      expect(
+        many.turns[0].activities.every((item) => item.status === "complete"),
+      ).toBe(true);
+
+      const long = demo.createConversation("exp_quality", "详情滚动");
+      demo.sendDemoMessage(long.id, "演示工具：长详情");
+      await vi.advanceTimersByTimeAsync(10000);
+      const output = long.turns[0].activities[0].outputSections[0];
+      expect(output.kind).toBe("code");
+      expect(output.text.split("\n")).toHaveLength(60);
     } finally {
       vi.useRealTimers();
     }
