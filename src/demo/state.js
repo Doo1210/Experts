@@ -26,6 +26,7 @@ import {
   enrichProjectFixtures,
   PROJECT_EXPERT_FIXTURES,
 } from "./project-fixtures";
+import { findToolActivityScene } from "./tool-activity-scenes";
 
 export const STORAGE_KEY = "digital-employee-demo-v3";
 const clone = (value) => JSON.parse(JSON.stringify(value));
@@ -1245,6 +1246,7 @@ export async function resetDemo() {
 
 const activeTimers = new Map();
 const backgroundTimers = new Map();
+const requestTimeoutTimers = new Map();
 export function stopDemoStream(id) {
   const timer = activeTimers.get(id);
   if (timer) clearInterval(timer);
@@ -1279,6 +1281,7 @@ export function sendDemoMessage(
   const conversation = conversationById(conversationId);
   if (!conversation) return;
   const originalText = String(text || "").trim();
+  if (!originalText) return;
   const expertFiles = expertById(conversation.expertId)?.files || [];
   const fileRefs = Array.isArray(attachments)
     ? attachments
@@ -1356,10 +1359,7 @@ export function sendDemoMessage(
       seenReferences.add(key);
       return true;
     });
-  if (!originalText && !fileRefs.length && !sourceRefs.length) return;
-  text =
-    originalText ||
-    [...fileRefs, ...sourceRefs].map((item) => item.name).join("、");
+  text = originalText;
   stopDemoStream(conversationId);
   const userMessage = {
     id: uid("msg"),
@@ -1370,39 +1370,90 @@ export function sendDemoMessage(
     createdAt: now(),
   };
   conversation.messages.push(userMessage);
-  const isErrorDemo = text.includes("错误") || text.includes("失败");
+  const toolScene = findToolActivityScene(text);
+  const crowdedToolsDemo = !toolScene && text.includes("演示大量工具活动");
+  const crowdedTools = crowdedToolsDemo
+    ? Array.from({ length: 18 }, (_, index) => ({
+        toolId: uid("tool"),
+        name:
+          index % 3 === 0
+            ? "read_file"
+            : index % 3 === 1
+              ? "search_files"
+              : "web_search",
+        args:
+          index % 3 === 0
+            ? { path: `分析资料/批次-${index + 1}.csv` }
+            : index % 3 === 1
+              ? { pattern: `异常批次-${index + 1}`, path: "分析资料" }
+              : { query: `质量标准 ${index + 1}` },
+      }))
+    : [];
+  const modelWaitDemo = text.includes("演示模型等待");
+  const compressionDemo = text.includes("演示上下文压缩");
+  const reconnectDemo = text.includes("演示服务重连");
+  const clarifyTimeoutDemo = text.includes("演示澄清超时");
+  const stageDemo = modelWaitDemo || compressionDemo || reconnectDemo;
+  const recoveryDemo = text.includes("演示恢复中");
+  const unknownDemo = text.includes("演示运行异常");
+  const subagentFailureDemo = text.includes("演示子代理失败");
+  const isErrorDemo =
+    !toolScene &&
+    (text.includes("错误") || text.includes("失败")) &&
+    !subagentFailureDemo;
   const showProgress = text.includes("进度");
   const showToolDetail = text.includes("工具详情");
   const showDiff = text.includes("文件差异");
   const withTools =
-    isErrorDemo || /资料|工作目录|文件|工具|并行过程|过程|进度/.test(text);
-  const withInterim = /中途|过程/.test(text);
-  const isParallel = /并行工具|并行过程/.test(text);
-  const activityKind = text.includes("子代理")
-    ? "subagent"
-    : text.includes("并行模型")
-      ? "moa"
-      : text.includes("思考")
-        ? "reasoning"
-        : null;
+    Boolean(toolScene) ||
+    isErrorDemo ||
+    recoveryDemo ||
+    unknownDemo ||
+    /资料|工作目录|文件|工具|并行过程|过程|进度/.test(text);
+  const withInterim = !toolScene && /中途|过程/.test(text);
+  const isParallel = !toolScene && /并行工具|并行过程/.test(text);
+  const activityKind = toolScene
+    ? null
+    : text.includes("子代理")
+      ? "subagent"
+      : text.includes("并行模型")
+        ? "moa"
+        : text.includes("思考")
+          ? "reasoning"
+          : null;
   const backgroundDelegation =
     activityKind === "subagent" && text.includes("后台");
-  const requestKind = text.includes("凭据演示")
-    ? "secret"
-    : text.includes("管理员密码演示")
-      ? "sudo"
-      : text.includes("MCP 设置确认")
-        ? "mcp_setup"
-        : text.includes("审批")
-          ? "approval"
-          : text.includes("澄清")
-            ? "clarify"
-            : null;
+  const parallelSubagents =
+    activityKind === "subagent" && text.includes("并行子代理");
+  const requestKind = toolScene
+    ? null
+    : text.includes("凭据演示")
+      ? "secret"
+      : text.includes("管理员密码演示")
+        ? "sudo"
+        : text.includes("MCP 设置确认")
+          ? "mcp_setup"
+          : text.includes("审批")
+            ? "approval"
+            : text.includes("澄清")
+              ? "clarify"
+              : null;
+  const approvalScopes = text.includes("仅允许本次")
+    ? ["once"]
+    : text.includes("仅允许本会话与始终")
+      ? ["session", "always"]
+      : text.includes("仅允许本会话")
+        ? ["session"]
+        : text.includes("仅始终允许")
+          ? ["always"]
+          : ["once", "session", "always"];
   const scriptedScene = Boolean(
+    toolScene ||
     withTools ||
     withInterim ||
     activityKind ||
     requestKind ||
+    stageDemo ||
     /等待|待办|目标|循环|心跳|排队任务|账户通知|Markdown 展示/.test(text),
   );
   if (text.includes("清除账户通知"))
@@ -1419,7 +1470,7 @@ export function sendDemoMessage(
       text: "演示额度提醒（非真实账户信息）",
       level: "warning",
     });
-  if (text.includes("待办")) {
+  if (!toolScene && text.includes("待办")) {
     const existing = conversation.sessionPresentation.todos;
     const todos = existing.length
       ? existing.map((item, index) => ({
@@ -1477,7 +1528,7 @@ export function sendDemoMessage(
       todos,
     });
   }
-  if (text.includes("排队任务")) {
+  if (!toolScene && text.includes("排队任务")) {
     applySessionPresentationEvent(conversation, {
       type: "queue.updated",
       sessionId: conversationId,
@@ -1503,7 +1554,7 @@ export function sendDemoMessage(
           ],
     });
   }
-  if (/目标|循环|心跳/.test(text)) {
+  if (!toolScene && /目标|循环|心跳/.test(text)) {
     const control = { ...conversation.sessionPresentation.control };
     if (text.includes("目标"))
       control.goal = {
@@ -1543,8 +1594,9 @@ export function sendDemoMessage(
       control,
     });
   }
-  const answer =
-    requestKind === "clarify"
+  const answer = unknownDemo
+    ? "已开始核对演示资料。连接中断后，暂时无法确认本轮处理结果。"
+    : requestKind === "clarify"
       ? text.includes("多题")
         ? "为了继续处理，请补充时间范围和目标产线。"
         : "为了继续处理，请先说明希望分析的时间范围和目标产线。"
@@ -1554,15 +1606,23 @@ export function sendDemoMessage(
           ? "演示 MCP 服务配置请求：请确认是否允许尝试设置示例服务。"
           : requestKind === "secret" || requestKind === "sudo"
             ? "这是凭据操作的安全展示演示，请勿输入真实密码或密钥。"
-            : isErrorDemo
-              ? "已保留当前可用的部分分析。失败的演示工具未产出最终结论，请核查资料后重试。"
-              : text.includes("Markdown 展示")
-                ? "## 质量分析摘要\n\n| 日期 | 良率 |\n| --- | --- |\n| 10 月 8 日 | 97.2% |\n| 10 月 9 日 | 96.8% |\n\n" +
-                  `![质量分析专家](${import.meta.env.BASE_URL}avatars/quality-man.svg)\n\n` +
-                  "建议先核对 **检验口径**，再查看示例命令：\n\n```text\ncompare-quality --from 2026-10-08 --to 2026-10-09\n```\n\n演示说明见 [公开示例](https://example.com/quality/report)。"
-                : showDiff
-                  ? "这是固定的文件差异演示，未修改真实文件。可在上方活动详情中查看差异内容。"
-                  : `我已收到你的任务：“${text.trim()}”。\n\n${withTools ? "已演示读取工作目录与整理资料。" : "这是一条无需工具的演示回复。"}\n\n建议核对关键数据，再根据结果推进下一步。`;
+            : subagentFailureDemo
+              ? "子代理未完成本项资料核对，现有信息不足以确认该部分结论；建议补齐资料后重试。"
+              : parallelSubagents
+                ? "已演示两个子代理分别核对夜班数据与设备日志；请依据真实资料复核两项结果。"
+                : activityKind === "reasoning"
+                  ? "已整理输入范围与数据口径的演示思路，建议核对关键数据后再推进。"
+                  : toolScene
+                    ? "这是一次本地工具活动演示，未执行真实工具。可展开活动组查看这次调用的参数、进度与结果。"
+                    : isErrorDemo
+                      ? "已保留当前可用的部分分析。失败的演示工具未产出最终结论，请核查资料后重试。"
+                      : text.includes("Markdown 展示")
+                        ? "## 质量分析摘要\n\n| 日期 | 良率 |\n| --- | --- |\n| 10 月 8 日 | 97.2% |\n| 10 月 9 日 | 96.8% |\n\n" +
+                          `![质量分析专家](${import.meta.env.BASE_URL}avatars/quality-man.svg)\n\n` +
+                          "建议先核对 **检验口径**，再查看示例命令：\n\n```text\ncompare-quality --from 2026-10-08 --to 2026-10-09\n```\n\n演示说明见 [公开示例](https://example.com/quality/report)。"
+                        : showDiff
+                          ? "这是固定的文件差异演示，未修改真实文件。可在上方活动详情中查看差异内容。"
+                          : `我已收到你的任务：“${text.trim()}”。\n\n${withTools ? "已演示读取工作目录与整理资料。" : "这是一条无需工具的演示回复。"}\n\n建议核对关键数据，再根据结果推进下一步。`;
   const assistant = {
     id: uid("msg"),
     turnId: uid("turn"),
@@ -1578,14 +1638,16 @@ export function sendDemoMessage(
   const turn = createConversationTurn(userMessage, assistant);
   conversation.turns.push(turn);
   let seq = 0;
-  const emit = (type, payload = {}) =>
-    applyConversationEvent(conversation, {
+  const emit = (type, payload = {}) => {
+    seq = Math.max(seq, turn.lastSeq) + 1;
+    return applyConversationEvent(conversation, {
       type,
       ...payload,
       sessionId: conversationId,
       turnId: turn.id,
-      seq: ++seq,
+      seq,
     });
+  };
   const folderToolId = uid("tool");
   const analysisToolId = uid("tool");
   const demoFile = expertById(conversation.expertId)?.files.find(
@@ -1593,19 +1655,31 @@ export function sendDemoMessage(
   );
   const extraActivityId =
     activityKind && activityKind !== "reasoning" ? uid("activity") : null;
+  const secondSubagentId = parallelSubagents ? uid("activity") : null;
+  const subagents =
+    activityKind === "subagent"
+      ? [
+          {
+            id: extraActivityId,
+            goal: parallelSubagents ? "核对夜班数据" : "核对资料范围",
+          },
+          ...(secondSubagentId
+            ? [{ id: secondSubagentId, goal: "检查设备异常" }]
+            : []),
+        ]
+      : [];
+  if (modelWaitDemo) emit("thinking.delta", { text: "正在等待模型响应" });
+  if (compressionDemo) emit("status.update", { kind: "compacting" });
+  if (reconnectDemo)
+    emit("status.update", { kind: "lifecycle", phase: "reconnecting" });
   if (activityKind === "reasoning") {
-    emit("reasoning.delta", { text: "可见分析摘要：先核对输入范围，" });
-    emit("reasoning.delta", { text: "再组织答复。" });
+    emit("reasoning.delta", { text: "可见分析摘要：先核对输入范围" });
   } else if (activityKind === "subagent") {
-    emit("subagent.spawn_requested", {
-      subagentId: extraActivityId,
-      goal: "核对资料范围",
-    });
-    emit("subagent.start", { subagentId: extraActivityId });
-    emit("subagent.progress", {
-      subagentId: extraActivityId,
-      text: "正在核对演示资料",
-    });
+    for (const subagent of subagents)
+      emit("subagent.spawn_requested", {
+        subagentId: subagent.id,
+        goal: subagent.goal,
+      });
   } else if (activityKind === "moa") {
     emit("moa.progress", { refsDone: 1, refsTotal: 2 });
     emit("moa.reference", {
@@ -1615,45 +1689,65 @@ export function sendDemoMessage(
     });
   }
   if (withTools) {
-    emit(
-      "tool.start",
-      showProgress
-        ? {
-            toolId: folderToolId,
-            name: "web_extract",
-            args: {
-              urls: [
-                "https://example.com/demo/a",
-                "https://example.com/demo/b",
-              ],
-            },
-          }
-        : showToolDetail
+    if (crowdedToolsDemo)
+      for (const tool of crowdedTools.slice(0, 3))
+        emit("tool.start", {
+          toolId: tool.toolId,
+          name: tool.name,
+          args: clone(tool.args),
+        });
+    else if (toolScene && !toolScene.skipStart)
+      emit("tool.start", {
+        toolId: folderToolId,
+        name: toolScene.name,
+        args: clone(toolScene.args),
+      });
+    else if (!toolScene && !crowdedToolsDemo)
+      emit(
+        "tool.start",
+        showProgress
           ? {
               toolId: folderToolId,
-              name: "terminal",
-              args: { command: "echo 演示核对完成", cwd: "/workspace" },
+              name: "web_extract",
+              args: {
+                urls: [
+                  "https://example.com/demo/a",
+                  "https://example.com/demo/b",
+                ],
+              },
             }
-          : showDiff
-            ? { toolId: folderToolId, name: "patch", args: { path: "报告.md" } }
-            : demoFile
+          : showToolDetail
+            ? {
+                toolId: folderToolId,
+                name: "terminal",
+                args: { command: "echo 演示核对完成", cwd: "/workspace" },
+              }
+            : showDiff
               ? {
                   toolId: folderToolId,
-                  name: "read_file",
-                  args: { path: demoFile.name },
+                  name: "patch",
+                  args: { path: "报告.md" },
                 }
-              : { toolId: folderToolId, title: "读取工作目录" },
-    );
-    if (isParallel)
+              : demoFile
+                ? {
+                    toolId: folderToolId,
+                    name: "read_file",
+                    args: { path: demoFile.name },
+                  }
+                : { toolId: folderToolId, title: "读取工作目录" },
+      );
+    if (isParallel && !toolScene && !crowdedToolsDemo)
       emit("tool.start", { toolId: analysisToolId, title: "分析资料" });
-  } else if (text.includes("等待")) {
+  } else if (text.includes("等待") && !stageDemo) {
     emit("thinking.delta", { text: "正在等待演示回复" });
   }
   conversation.status = "running";
   conversation.updatedAt = now();
   persist();
   const tickMs = scriptedScene ? 140 : 70;
-  const minimumTicks = scriptedScene ? Math.ceil(6000 / tickMs) : 0;
+  const minimumTicks = scriptedScene
+    ? Math.ceil((recoveryDemo ? 9000 : 6000) / tickMs)
+    : 0;
   const answerChunkSize = scriptedScene
     ? Math.max(1, Math.round(answer.length / 36))
     : 4;
@@ -1663,6 +1757,79 @@ export function sendDemoMessage(
   const interimText = "已确认分析范围，继续整理资料。";
   const timer = setInterval(() => {
     ticks++;
+    if (crowdedToolsDemo)
+      crowdedTools.slice(3).forEach((tool, index) => {
+        if (ticks === Math.ceil(((index + 1) * 180) / tickMs))
+          emit("tool.start", {
+            toolId: tool.toolId,
+            name: tool.name,
+            args: clone(tool.args),
+          });
+      });
+    if (activityKind === "reasoning") {
+      if (ticks === Math.ceil(1400 / tickMs))
+        emit("reasoning.delta", { text: "，再检查数据口径" });
+      if (ticks === Math.ceil(2800 / tickMs))
+        emit("reasoning.delta", { text: "，最后整理可执行建议。" });
+    }
+    if (activityKind === "subagent") {
+      if (ticks === Math.ceil(1200 / tickMs))
+        emit("subagent.start", { subagentId: extraActivityId });
+      if (secondSubagentId && ticks === Math.ceil(1800 / tickMs))
+        emit("subagent.start", { subagentId: secondSubagentId });
+      if (ticks === Math.ceil(2400 / tickMs))
+        emit("subagent.progress", {
+          subagentId: extraActivityId,
+          text: "正在读取质量记录",
+        });
+      if (secondSubagentId && ticks === Math.ceil(3100 / tickMs))
+        emit("subagent.progress", {
+          subagentId: secondSubagentId,
+          text: "正在核对设备日志",
+        });
+      if (!secondSubagentId && ticks === Math.ceil(4200 / tickMs))
+        emit("subagent.progress", {
+          subagentId: extraActivityId,
+          text: "正在整理核对结论",
+        });
+      if (secondSubagentId && ticks === Math.ceil(4500 / tickMs))
+        emit("subagent.complete", {
+          subagentId: secondSubagentId,
+          status: "completed",
+          summary: "已完成设备日志核对。",
+        });
+    }
+    if (toolScene)
+      for (const progress of toolScene.progress || [])
+        if (ticks === Math.ceil(progress.afterMs / tickMs)) {
+          const { afterMs, ...payload } = progress;
+          emit("tool.progress", { toolId: folderToolId, ...payload });
+        }
+    if (stageDemo && ticks === Math.ceil(4000 / tickMs)) {
+      if (modelWaitDemo) emit("thinking.delta", { text: "" });
+      if (compressionDemo) emit("status.update", { kind: "compacted" });
+      if (reconnectDemo)
+        emit("status.update", { kind: "lifecycle", phase: "reconnected" });
+    }
+    if ((recoveryDemo || unknownDemo) && ticks === Math.ceil(1000 / tickMs))
+      emit("error", { terminal: true });
+    if (recoveryDemo && ticks === Math.ceil(6000 / tickMs))
+      emit("session.info", { running: true });
+    if (unknownDemo && ticks === Math.ceil(6000 / tickMs)) {
+      emit("session.info", { running: false });
+      activeTimers.delete(conversationId);
+      clearInterval(timer);
+      persist();
+      return;
+    }
+    if (stageDemo && ticks < Math.ceil(3000 / tickMs)) {
+      persist();
+      return;
+    }
+    if (activityKind === "reasoning" && ticks < Math.ceil(3500 / tickMs)) {
+      persist();
+      return;
+    }
     const currentText = phase === "interim" ? interimText : answer;
     const chunkSize =
       phase === "interim" && scriptedScene ? 2 : answerChunkSize;
@@ -1676,6 +1843,8 @@ export function sendDemoMessage(
       phase = "answer";
       offset = 0;
     } else if (
+      !toolScene &&
+      !crowdedToolsDemo &&
       showProgress &&
       phase === "answer" &&
       offset >= Math.floor(answer.length / 4) &&
@@ -1689,6 +1858,8 @@ export function sendDemoMessage(
       });
     }
     if (
+      !toolScene &&
+      !crowdedToolsDemo &&
       withTools &&
       !isParallel &&
       phase === "answer" &&
@@ -1709,6 +1880,8 @@ export function sendDemoMessage(
       emit("tool.start", { toolId: analysisToolId, title: "分析任务" });
     }
     if (
+      !toolScene &&
+      !crowdedToolsDemo &&
       isParallel &&
       phase === "answer" &&
       offset >= Math.floor(answer.length / 2) &&
@@ -1728,8 +1901,12 @@ export function sendDemoMessage(
       if (activityKind === "subagent" && !backgroundDelegation)
         emit("subagent.complete", {
           subagentId: extraActivityId,
-          status: "completed",
-          summary: "已核对演示资料范围。",
+          status: subagentFailureDemo ? "failed" : "completed",
+          summary: subagentFailureDemo
+            ? "资料不足，未能完成本项核对。"
+            : parallelSubagents
+              ? "已完成夜班数据核对。"
+              : "已核对演示资料范围。",
         });
       else if (activityKind === "moa") {
         emit("moa.reference", {
@@ -1741,17 +1918,59 @@ export function sendDemoMessage(
         emit("activity.complete", { activityId: `moa_${turn.id}` });
       }
       if (withTools) {
-        if (
-          isParallel &&
-          turn.activities.find((item) => item.id === folderToolId)?.status ===
-            "running"
-        )
-          emit("tool.complete", { toolId: folderToolId });
-        emit("tool.complete", { toolId: analysisToolId, error: isErrorDemo });
+        if (crowdedToolsDemo)
+          for (const tool of crowdedTools)
+            emit("tool.complete", {
+              toolId: tool.toolId,
+              name: tool.name,
+              result: { verified: true },
+            });
+        else if (toolScene && !toolScene.skipComplete) {
+          emit("tool.complete", {
+            toolId: folderToolId,
+            name: toolScene.name,
+            args: clone(toolScene.args),
+            ...(toolScene.status ? { status: toolScene.status } : {}),
+            result: toolScene.result || { verified: true },
+            ...(toolScene.inlineDiff
+              ? { inlineDiff: toolScene.inlineDiff }
+              : {}),
+          });
+          if (toolScene.risk)
+            emit("tool.output_risk", {
+              toolId: folderToolId,
+              name: toolScene.name,
+              ...clone(toolScene.risk),
+            });
+          if (toolScene.artifact) {
+            const generated = addWorkspaceItem(conversation.expertId, {
+              name: toolScene.artifact.name,
+              kind: "file",
+              content: toolScene.artifact.content,
+            });
+            if (generated)
+              emit("result.add", {
+                resultId: uid("result"),
+                kind: "file",
+                label: "本轮生成文件",
+                fileId: generated.id,
+                sourceToolId: folderToolId,
+              });
+          }
+        } else if (!toolScene && !crowdedToolsDemo) {
+          if (
+            isParallel &&
+            turn.activities.find((item) => item.id === folderToolId)?.status ===
+              "running"
+          )
+            emit("tool.complete", { toolId: folderToolId });
+          emit("tool.complete", { toolId: analysisToolId, error: isErrorDemo });
+        }
       }
       if (requestKind) {
+        const requestId = uid("request");
         emit("request.open", {
-          requestId: uid("request"),
+          requestId,
           kind: requestKind,
           prompt: answer,
           questions:
@@ -1775,16 +1994,61 @@ export function sendDemoMessage(
             requestKind === "clarify" && text.includes("已答")
               ? { time: "最近一周" }
               : undefined,
-          choices: ["approval", "mcp_setup"].includes(requestKind)
-            ? [
-                { value: "approved", label: "允许本次" },
-                { value: "rejected", label: "拒绝" },
-              ]
-            : [],
+          choices:
+            requestKind === "approval"
+              ? [
+                  ...approvalScopes.map((value) => ({
+                    value,
+                    label: {
+                      once: "允许本次",
+                      session: "允许本会话",
+                      always: "始终允许",
+                    }[value],
+                  })),
+                  { value: "deny", label: "拒绝" },
+                ]
+              : requestKind === "mcp_setup"
+                ? [
+                    { value: "approved", label: "允许本次" },
+                    { value: "rejected", label: "拒绝" },
+                  ]
+                : [],
           failAfterApproval:
             ["approval", "mcp_setup"].includes(requestKind) && isErrorDemo,
         });
         assistant.content = "";
+        if (clarifyTimeoutDemo && requestKind === "clarify") {
+          const timeoutTimer = setTimeout(() => {
+            requestTimeoutTimers.delete(requestId);
+            const request = turn.requests.find((item) => item.id === requestId);
+            if (
+              conversationById(conversationId) !== conversation ||
+              request?.status !== "waiting"
+            )
+              return;
+            emit("request.expire", {
+              requestId,
+              autoContinue: true,
+              at: now(),
+            });
+            assistant.content = "未收到补充信息，专家正依据现有资料继续分析。";
+            persist();
+            const continuation = setTimeout(() => {
+              if (turn.status !== "running") return;
+              emit("message.complete", {
+                status: "complete",
+                text: request.lateAnswer
+                  ? `已收到超时后的补充信息：“${request.lateAnswer}”。演示分析已根据新信息继续。`
+                  : "未收到补充信息，已依据现有资料完成演示分析，请核对结论的适用范围。",
+                at: now(),
+              });
+              activeTimers.delete(conversationId);
+              persist();
+            }, 9000);
+            activeTimers.set(conversationId, continuation);
+          }, 7000);
+          requestTimeoutTimers.set(requestId, timeoutTimer);
+        }
       } else {
         if (
           !isErrorDemo &&
@@ -1797,17 +2061,6 @@ export function sendDemoMessage(
             label: "本轮演示清单",
             items: conversation.sessionPresentation.todos,
           });
-        if (!isErrorDemo && text.includes("引用资料")) {
-          const file = expertById(conversation.expertId)?.files.find(
-            (item) => item.kind === "file" && item.content != null,
-          );
-          if (file)
-            emit("result.add", {
-              resultId: uid("result"),
-              label: "关联文件",
-              fileId: file.id,
-            });
-        }
         emit("message.complete", {
           status: isErrorDemo ? "error" : "complete",
           error: isErrorDemo
@@ -1847,7 +2100,9 @@ export function resolveDemoRequest(conversationId, requestId, response) {
   if (!turn) return false;
   const request = turn.requests.find((item) => item.id === requestId);
   const validResponse = ["approval", "mcp_setup"].includes(request.kind)
-    ? ["approved", "rejected"].includes(response) &&
+    ? ["once", "session", "always", "deny", "approved", "rejected"].includes(
+        response,
+      ) &&
       (!request.choices?.length ||
         request.choices.some((choice) => choice.value === response))
     : ["secret", "sudo"].includes(request.kind)
@@ -1865,6 +2120,9 @@ export function resolveDemoRequest(conversationId, requestId, response) {
           })
         : Boolean(String(response || "").trim());
   if (!validResponse) return false;
+  const timeoutTimer = requestTimeoutTimers.get(requestId);
+  if (timeoutTimer) clearTimeout(timeoutTimer);
+  requestTimeoutTimers.delete(requestId);
   const event = (type, payload = {}) =>
     applyConversationEvent(conversation, {
       type,
@@ -1875,7 +2133,22 @@ export function resolveDemoRequest(conversationId, requestId, response) {
     });
   event("request.resolve", { requestId, response, at: now() });
   conversation.updatedAt = now();
-  if (response !== "rejected") {
+  if (request.kind === "approval" && ["rejected", "deny"].includes(response)) {
+    event("message.interim", {
+      text: "本次操作未获授权，继续整理现有资料。",
+    });
+    const timer = setTimeout(() => {
+      if (turn.status !== "running") return;
+      event("message.complete", {
+        status: "complete",
+        text: "已记录你的拒绝。本次演示操作未执行；已根据现有资料完成其余分析。",
+        at: now(),
+      });
+      activeTimers.delete(conversationId);
+      persist();
+    }, 2500);
+    activeTimers.set(conversationId, timer);
+  } else if (!["rejected", "deny"].includes(response)) {
     const followupToolId = ["approval", "mcp_setup"].includes(request.kind)
       ? uid("tool")
       : null;
@@ -1918,6 +2191,47 @@ export function resolveDemoRequest(conversationId, requestId, response) {
   }
   persist();
   return true;
+}
+
+export function submitDemoLateClarification(conversationId, requestId, answer) {
+  const conversation = conversationById(conversationId);
+  const text = String(answer || "").trim();
+  const turn = conversation?.turns?.find((item) =>
+    item.requests?.some((request) => request.id === requestId),
+  );
+  const request = turn?.requests.find((item) => item.id === requestId);
+  if (
+    !text ||
+    request?.kind !== "clarify" ||
+    request.status !== "expired" ||
+    request.lateAnswer
+  )
+    return null;
+  if (["running", "recovering"].includes(turn.status)) {
+    const accepted = applyConversationEvent(conversation, {
+      type: "request.late_answer",
+      sessionId: conversationId,
+      turnId: turn.id,
+      requestId,
+      text,
+      mode: "current",
+      seq: turn.lastSeq + 1,
+    });
+    if (!accepted) return null;
+    conversation.updatedAt = now();
+    persist();
+    return "current";
+  }
+  if (conversation.status !== "ready") return null;
+  request.lateAnswer = text;
+  request.lateAnswerMode = "next";
+  sendDemoMessage(conversationId, `超时补答：${text}`);
+  const userMessage = [...conversation.messages]
+    .reverse()
+    .find((message) => message.role === "user");
+  if (userMessage) userMessage.replyToRequestId = requestId;
+  persist();
+  return "next";
 }
 
 export function triggerEvent(id) {

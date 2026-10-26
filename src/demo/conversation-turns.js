@@ -1,9 +1,9 @@
 import {
   toolAction,
   toolArgumentSummary,
-  toolFailed,
+  toolOutcome,
   toolInputText,
-  toolOutputText,
+  toolOutputSections,
   toolProgressText,
 } from "./conversation-tools";
 
@@ -11,7 +11,6 @@ const terminalStatuses = new Set(["complete", "interrupted", "error"]);
 const errorFallback = /^Error:\s*/i;
 const lifecycleText = {
   waiting_model: "正在等待回复",
-  preparing_context: "正在准备上下文",
 };
 
 function safeNotice(value) {
@@ -99,6 +98,53 @@ function closeReasoningSegment(turn) {
   turn.reasoningActivityId = null;
 }
 
+const stageFinalText = {
+  model_wait: "模型等待已结束",
+  compression: "上下文压缩结果未确认",
+  reconnect: "服务重连结果未确认",
+};
+
+function updateStage(turn, kind, text, seq, state = "running") {
+  const current = [...(turn.stages || [])]
+    .reverse()
+    .find((item) => item.kind === kind && item.state === "running");
+  if (current) {
+    current.text = text;
+    current.state = state;
+    return current;
+  }
+  const stage = { id: `stage_${turn.id}_${seq}`, kind, seq, text, state };
+  turn.stages.push(stage);
+  return stage;
+}
+
+function finishStage(turn, kind, text, state = "complete") {
+  const current = [...(turn.stages || [])]
+    .reverse()
+    .find((item) => item.kind === kind && item.state === "running");
+  if (!current) return;
+  current.text = text;
+  current.state = state;
+}
+
+function finishActiveStages(turn, confirmed = false) {
+  for (const stage of turn.stages || []) {
+    if (stage.state !== "running") continue;
+    stage.text =
+      confirmed && stage.kind !== "compression"
+        ? stageFinalText[stage.kind] || "阶段已结束"
+        : stageFinalText[stage.kind] || "阶段结果未确认";
+    stage.state =
+      confirmed && stage.kind !== "compression" ? "complete" : "unknown";
+  }
+}
+
+function modelWaitKind(text) {
+  if (/重连|reconnect/i.test(text)) return "reconnect";
+  if (/本地模型|local.model/i.test(text)) return "model_wait";
+  return /等待|waiting|no output/i.test(text) ? "model_wait" : null;
+}
+
 export function turnStatusForMessage(message) {
   if (message.status === "streaming") return "running";
   if (message.status === "stopped") return "interrupted";
@@ -123,6 +169,8 @@ export function createConversationTurn(userMessage, assistantMessage) {
     status,
     lastSeq: 0,
     interims: [],
+    stages: [],
+    corrections: [],
     temporary: null,
     groups: [],
     activeGroupId: null,
@@ -153,6 +201,7 @@ export function createConversationTurn(userMessage, assistantMessage) {
           ]
         : [],
     results: [],
+    risks: [],
   };
 }
 
@@ -198,6 +247,18 @@ export function normalizeConversationTurns(conversation) {
     changed = true;
   }
   for (const turn of conversation.turns) {
+    if (!Array.isArray(turn.stages)) {
+      turn.stages = [];
+      changed = true;
+    }
+    if (!Array.isArray(turn.corrections)) {
+      turn.corrections = [];
+      changed = true;
+    }
+    if (!Array.isArray(turn.risks)) {
+      turn.risks = [];
+      changed = true;
+    }
     if (
       !Array.isArray(turn.groups) ||
       (!turn.groups.length && turn.activities?.length)
@@ -244,6 +305,30 @@ export function normalizeConversationTurns(conversation) {
       }
     }
     for (const activity of turn.activities || []) {
+      if (activity.kind === "tool") {
+        if (!Array.isArray(activity.outputSections)) {
+          activity.outputSections = [];
+          changed = true;
+        }
+        for (const key of [
+          "args",
+          "result",
+          "context",
+          "argsText",
+          "resultText",
+        ]) {
+          if (Object.prototype.hasOwnProperty.call(activity, key)) {
+            delete activity[key];
+            changed = true;
+          }
+        }
+        for (const key of ["startedSeq", "lastProgressSeq", "endedSeq"]) {
+          if (activity[key] === undefined) {
+            activity[key] = null;
+            changed = true;
+          }
+        }
+      }
       if (
         activity.status !== "running" &&
         /正在/.test(activity.progressText || "")
@@ -251,7 +336,10 @@ export function normalizeConversationTurns(conversation) {
         activity.progressText = "";
         changed = true;
       }
-      if (terminalStatuses.has(turn.status) && activity.status === "running") {
+      if (
+        terminalStatuses.has(turn.status) &&
+        ["running", "requested"].includes(activity.status)
+      ) {
         activity.status = "unknown";
         activity.progressText = "";
         changed = true;
@@ -260,12 +348,16 @@ export function normalizeConversationTurns(conversation) {
     if (!["running", "recovering"].includes(turn.status)) continue;
     turn.status = "unknown";
     turn.temporary = null;
+    finishActiveStages(turn);
     const assistant = conversation.messages.find(
       (message) => message.id === turn.assistantMessageId,
     );
     if (assistant) assistant.status = "stopped";
     for (const activity of turn.activities)
-      if (activity.status === "running") activity.status = "unknown";
+      if (["running", "requested"].includes(activity.status)) {
+        activity.status = "unknown";
+        activity.progressText = "";
+      }
     changed = true;
   }
   return changed;
@@ -280,7 +372,19 @@ export function applyConversationEvent(conversation, event) {
     (message) => message.id === turn.assistantMessageId,
   );
   if (!assistant) return false;
-  if (terminalStatuses.has(turn.status) && event.type !== "subagent.complete")
+  const lateToolCompletion =
+    event.type === "tool.complete" &&
+    turn.activities.some(
+      (activity) =>
+        activity.kind === "tool" &&
+        activity.id === event.toolId &&
+        activity.status === "unknown",
+    );
+  if (
+    terminalStatuses.has(turn.status) &&
+    event.type !== "subagent.complete" &&
+    !lateToolCompletion
+  )
     return false;
   if (
     ![
@@ -301,6 +405,7 @@ export function applyConversationEvent(conversation, event) {
       "request.resolve",
       "request.answer.accepted",
       "request.expire",
+      "request.late_answer",
       "result.add",
       "warning.add",
       "status.update",
@@ -352,6 +457,8 @@ export function applyConversationEvent(conversation, event) {
       if (event.text) {
         closeReasoningSegment(turn);
         turn.activeGroupId = null;
+        finishStage(turn, "model_wait", "模型等待已结束");
+        finishStage(turn, "reconnect", "服务连接已恢复");
       }
       turn.temporary = null;
       break;
@@ -371,8 +478,20 @@ export function applyConversationEvent(conversation, event) {
     }
     case "thinking.delta": {
       const waitingText = safeNotice(event.text);
+      const kind = modelWaitKind(waitingText);
+      if (kind)
+        updateStage(
+          turn,
+          kind,
+          kind === "reconnect" ? "正在重新连接服务" : "正在等待模型响应",
+          event.seq,
+        );
       if (waitingText && !/^[.·…\s]+$/.test(waitingText))
         turn.temporary = waitingText;
+      else if (!waitingText) {
+        finishStage(turn, "model_wait", "模型等待已结束");
+        turn.temporary = null;
+      }
       break;
     }
     case "reasoning.delta": {
@@ -403,11 +522,19 @@ export function applyConversationEvent(conversation, event) {
       break;
     }
     case "status.update":
-      if (event.kind === "compacting") turn.temporary = "正在整理较早对话";
-      else if (event.kind === "compacted") turn.temporary = null;
-      else if (event.kind === "lifecycle")
+      if (event.kind === "compacting") {
+        updateStage(turn, "compression", "正在压缩上下文", event.seq);
+        turn.temporary = "正在整理较早对话";
+      } else if (event.kind === "compacted") {
+        finishStage(turn, "compression", "上下文压缩完成");
+        turn.temporary = null;
+      } else if (event.kind === "lifecycle") {
+        if (event.phase === "reconnecting")
+          updateStage(turn, "reconnect", "正在重新连接服务", event.seq);
+        else if (event.phase === "reconnected")
+          finishStage(turn, "reconnect", "服务连接已恢复");
         turn.temporary = lifecycleText[event.phase] || turn.temporary;
-      else if (event.kind === "warn") {
+      } else if (event.kind === "warn") {
         const notice = safeNotice(event.text);
         if (notice) appendNotice(assistant, notice);
       }
@@ -427,11 +554,20 @@ export function applyConversationEvent(conversation, event) {
       ) {
         turn.status = "unknown";
         turn.temporary = null;
+        finishActiveStages(turn);
         assistant.status = "stopped";
         conversation.status = "ready";
+        turn.activeGroupId = null;
+        closeReasoningSegment(turn);
+        for (const activity of turn.activities)
+          if (["running", "requested"].includes(activity.status)) {
+            activity.status = "unknown";
+            activity.progressText = "";
+          }
       } else if (event.running === true && turn.status === "recovering") {
         turn.status = "running";
         turn.temporary = null;
+        finishStage(turn, "reconnect", "服务连接已恢复");
         conversation.status = "running";
       }
       break;
@@ -565,13 +701,18 @@ export function applyConversationEvent(conversation, event) {
           progressText: "",
           inputDetail: isTool ? toolInputText(event.name, event.args) : "",
           outputDetail: "",
+          outputSections: [],
           outputKind: "text",
           status: "running",
+          ...(isTool
+            ? { startedSeq: event.seq, lastProgressSeq: null, endedSeq: null }
+            : {}),
         };
         turn.activities.push(activity);
         addToActivityGroup(turn, activity, event.seq);
       }
       turn.temporary = null;
+      finishStage(turn, "model_wait", "模型等待已结束");
       break;
     }
     case "activity.progress":
@@ -581,7 +722,10 @@ export function applyConversationEvent(conversation, event) {
       if (activity && activity.status === "running") {
         if (event.type === "tool.progress") {
           const progress = toolProgressText(event);
-          if (progress) activity.progressText = progress;
+          if (progress) {
+            activity.progressText = progress;
+            activity.lastProgressSeq = event.seq;
+          }
         }
         if (event.detail) activity.detail = event.detail;
       }
@@ -612,8 +756,12 @@ export function applyConversationEvent(conversation, event) {
           progressText: "",
           inputDetail: toolInputText(event.name, event.args),
           outputDetail: "",
+          outputSections: [],
           outputKind: "text",
           status: "unknown",
+          startedSeq: null,
+          lastProgressSeq: null,
+          endedSeq: event.seq,
         };
         turn.activities.push(activity);
         addToActivityGroup(turn, activity, event.seq);
@@ -621,9 +769,7 @@ export function applyConversationEvent(conversation, event) {
       if (activity) {
         activity.status =
           event.type === "tool.complete"
-            ? toolFailed({ ...event, name: event.name || activity.name })
-              ? "error"
-              : "complete"
+            ? toolOutcome({ ...event, name: event.name || activity.name })
             : event.error
               ? "error"
               : "complete";
@@ -634,17 +780,28 @@ export function applyConversationEvent(conversation, event) {
         )
           activity.progressText = "";
         if (event.type === "tool.complete") {
-          if (!/已完成|全部完成/.test(activity.progressText || ""))
+          activity.endedSeq = event.seq;
+          if (
+            activity.status !== "complete" ||
+            !/已完成|全部完成/.test(activity.progressText || "")
+          )
             activity.progressText = "";
-          activity.outputDetail = toolOutputText(
+          activity.outputSections = toolOutputSections(
+            event.name || activity.name,
             event.result,
             event.inlineDiff,
+            activity.status,
           );
+          activity.outputDetail = "";
           activity.outputKind =
             typeof event.inlineDiff === "string" && event.inlineDiff.trim()
               ? "diff"
               : "text";
-          if (event.error && !activity.outputDetail)
+          if (
+            event.error &&
+            !activity.outputDetail &&
+            !activity.outputSections.length
+          )
             activity.outputDetail =
               typeof event.error === "string"
                 ? safeNotice(event.error)
@@ -653,9 +810,34 @@ export function applyConversationEvent(conversation, event) {
       }
       break;
     }
-    case "tool.output_risk":
-      if (event.userVisible) appendNotice(assistant, event.text);
+    case "tool.output_risk": {
+      const level = String(event.risk || "").toLowerCase();
+      if (level === "low" || (!level && !event.userVisible)) break;
+      const activity = turn.activities.find((item) => item.id === event.toolId);
+      const findings = Array.isArray(event.findings)
+        ? event.findings.map(safeNotice).filter(Boolean).slice(0, 2)
+        : [];
+      const detail = findings.join("；") || safeNotice(event.text);
+      const risk = {
+        id: event.toolId
+          ? `tool_risk_${event.toolId}`
+          : `tool_risk_${event.seq}`,
+        toolId: event.toolId || null,
+        source: activity?.title || toolAction(event.name),
+        level: ["medium", "high", "critical"].includes(level)
+          ? level
+          : "warning",
+        text:
+          detail ||
+          (event.redacted
+            ? "部分输出已隐藏，请核对后使用。"
+            : "工具输出需要核对后使用。"),
+      };
+      const prior = turn.risks.findIndex((item) => item.id === risk.id);
+      if (prior >= 0) turn.risks.splice(prior, 1, risk);
+      else turn.risks.push(risk);
       break;
+    }
     case "message.complete": {
       const status = terminalStatuses.has(event.status)
         ? event.status
@@ -690,6 +872,7 @@ export function applyConversationEvent(conversation, event) {
         event.warning,
       );
       turn.status = status;
+      finishActiveStages(turn, status === "complete");
       turn.endedAt = event.at || new Date().toISOString();
       const elapsed =
         new Date(turn.endedAt).getTime() - new Date(turn.startedAt).getTime();
@@ -699,7 +882,10 @@ export function applyConversationEvent(conversation, event) {
       turn.activeGroupId = null;
       closeReasoningSegment(turn);
       for (const activity of turn.activities)
-        if (activity.status === "running") activity.status = "unknown";
+        if (["running", "requested"].includes(activity.status)) {
+          activity.status = "unknown";
+          activity.progressText = "";
+        }
       conversation.status = "ready";
       break;
     }
@@ -735,6 +921,7 @@ export function applyConversationEvent(conversation, event) {
           acceptedAnswers(request, { answers: event.answers }) || {};
       }
       turn.status = "waiting";
+      finishStage(turn, "model_wait", "模型等待已结束");
       turn.activeGroupId = null;
       closeReasoningSegment(turn);
       assistant.status = "waiting";
@@ -759,7 +946,10 @@ export function applyConversationEvent(conversation, event) {
             .filter(Boolean)
             .join("；");
         } else request.response = safeNotice(event.response);
-        if (event.response === "rejected") {
+        if (
+          ["rejected", "deny"].includes(event.response) &&
+          request.kind !== "approval"
+        ) {
           turn.status = "interrupted";
           assistant.status = "stopped";
           turn.endedAt = event.at || new Date().toISOString();
@@ -791,11 +981,28 @@ export function applyConversationEvent(conversation, event) {
     case "request.expire": {
       const request = turn.requests.find((item) => item.id === event.requestId);
       request.status = "expired";
+      request.expiredAt = event.at || new Date().toISOString();
       if (!turn.requests.some((item) => item.status === "waiting")) {
-        turn.status = "unknown";
-        assistant.status = "stopped";
-        conversation.status = "ready";
+        turn.status = event.autoContinue ? "running" : "unknown";
+        assistant.status = event.autoContinue ? "streaming" : "stopped";
+        conversation.status = event.autoContinue ? "running" : "ready";
       }
+      break;
+    }
+    case "request.late_answer": {
+      const request = turn.requests.find((item) => item.id === event.requestId);
+      if (!request || request.status !== "expired" || request.lateAnswer) break;
+      const text = safeNotice(event.text);
+      if (!text) break;
+      request.lateAnswer = text;
+      request.lateAnswerMode = event.mode || "current";
+      if (request.lateAnswerMode === "current")
+        turn.corrections.push({
+          id: `correction_${event.seq}`,
+          requestId: request.id,
+          seq: event.seq,
+          text,
+        });
       break;
     }
     case "result.add":
@@ -831,6 +1038,7 @@ export function applyConversationEvent(conversation, event) {
             kind: "file",
             label: safeNotice(event.label) || "关联文件",
             fileId: event.fileId,
+            sourceToolId: event.sourceToolId || null,
           });
       }
       break;
@@ -876,13 +1084,30 @@ export function conversationProcessBlocks(turn) {
       seq: interim.seq ?? Number.MAX_SAFE_INTEGER,
       text: interim.text,
     })),
-    ...(hasUnsequencedRequest
-      ? []
-      : requests.map((request) => ({
-          type: "requestBoundary",
-          id: request.id,
-          seq: request.openedSeq,
-        }))),
+    ...(turn.stages || [])
+      // Older demo tasks may still contain the retired routine context stage.
+      .filter((stage) => stage.kind !== "context")
+      .map((stage) => ({
+        type: "stage",
+        id: stage.id,
+        seq: stage.seq,
+        text: stage.text,
+        state: stage.state,
+      })),
+    ...(turn.corrections || []).map((correction) => ({
+      type: "correction",
+      id: correction.id,
+      seq: correction.seq,
+      text: correction.text,
+      requestId: correction.requestId,
+    })),
+    ...requests.map((request, index) => ({
+      type: request.status === "waiting" ? "requestBoundary" : "request",
+      id: request.id,
+      seq:
+        request.openedSeq ?? Number.MAX_SAFE_INTEGER - requests.length + index,
+      request,
+    })),
   ].sort((a, b) => a.seq - b.seq);
   const visible = [];
   let canJoinPreviousGroup = !hasUnsequencedRequest;

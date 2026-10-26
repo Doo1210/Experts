@@ -50,11 +50,20 @@ function short(value, limit = 80) {
 }
 
 function safePath(value) {
-  const path = short(value, 150).replace(/\\/g, "/");
+  const path = short(redactSensitive(value, 150, false), 150).replace(
+    /\\/g,
+    "/",
+  );
   if (!path) return "";
   return /^[a-z]:\//i.test(path) || path.startsWith("/")
     ? path.split("/").filter(Boolean).at(-1) || ""
     : path.replace(/^\.\//, "");
+}
+
+function safeSource(value) {
+  const source = String(value || "");
+  if (source.startsWith("data:")) return "";
+  return /^https?:\/\//i.test(source) ? safeUrl(source) : safePath(source);
 }
 
 function safeUrl(value) {
@@ -104,17 +113,18 @@ export function toolArgumentSummary(name, args) {
   if (["read_file", "write_file", "patch"].includes(name)) {
     const path = safePath(args.path);
     const line =
-      name === "read_file" && Number.isInteger(args.offset) && args.offset >= 0
-        ? `:${args.offset + 1}`
+      name === "read_file" && Number.isInteger(args.offset) && args.offset > 1
+        ? `:${args.offset}`
         : "";
     return path ? path + line : "";
   }
   if (name === "search_files") {
-    const pattern = short(args.pattern);
+    const pattern = redact(args.pattern);
     const path = safePath(args.path);
     return [pattern, path].filter(Boolean).join(" · ");
   }
-  if (["web_search", "x_search"].includes(name)) return short(args.query);
+  if (["web_search", "x_search", "session_search"].includes(name))
+    return redact(args.query);
   if (name === "web_extract") {
     const urls = Array.isArray(args.urls)
       ? args.urls
@@ -133,6 +143,19 @@ export function toolArgumentSummary(name, args) {
       redact(code.find((line) => line.trim()) || "") || `${code.length} 行代码`
     );
   }
+  if (name === "process_manage")
+    return [short(args.action, 24), short(args.session_id, 20)]
+      .filter(Boolean)
+      .join(" · ");
+  if (name === "vision_analyze") return safeSource(args.image_url);
+  if (name === "video_analyze") return safeSource(args.video_url);
+  if (name === "browser_navigate") return safeUrl(args.url);
+  if (name === "computer_use" && args.action === "capture") return "截取屏幕";
+  if (name === "desktop_preview" && args.action === "查看当前窗口")
+    return "查看当前窗口";
+  if (name === "setup_mcp") return short(args.server, 60);
+  if (["skill_view", "skill_manage"].includes(name))
+    return short(args.name, 60);
   return "";
 }
 
@@ -140,13 +163,51 @@ export function toolProgressText(event) {
   if (typeof event.preview === "string" && event.preview.trim())
     return redact(event.preview);
   const { current, total, unit } = event;
-  if (Number.isFinite(current) && Number.isFinite(total) && total > 0)
+  if (
+    Number.isFinite(current) &&
+    Number.isFinite(total) &&
+    current >= 0 &&
+    total > 0 &&
+    current <= total
+  )
     return `已处理 ${current}/${total}${unit ? ` ${short(unit, 12)}` : ""}`;
   return "";
 }
 
 export function toolInputText(name, args) {
   if (!args || typeof args !== "object") return "";
+  if (name === "read_file")
+    return [
+      Number.isInteger(args.offset) && args.offset > 1
+        ? `起始行：${args.offset}`
+        : "",
+      Number.isInteger(args.limit) && args.limit > 0
+        ? `最多读取：${args.limit} 行`
+        : "",
+    ]
+      .filter(Boolean)
+      .join("\n");
+  if (name === "write_file") return "";
+  if (
+    [
+      "patch",
+      "search_files",
+      "web_search",
+      "x_search",
+      "session_search",
+    ].includes(name)
+  )
+    return "";
+  if (name === "web_extract") {
+    const urls = Array.isArray(args.urls) ? args.urls : [];
+    return urls.length > 1
+      ? urls
+          .map(safeUrl)
+          .filter(Boolean)
+          .map((url) => `网页：${url}`)
+          .join("\n")
+      : "";
+  }
   if (name === "terminal" && typeof args.command === "string") {
     const command = redactSensitive(args.command);
     const cwd = safePath(args.cwd);
@@ -154,30 +215,89 @@ export function toolInputText(name, args) {
   }
   if (name === "execute_code" && typeof args.code === "string")
     return redactSensitive(args.code);
+  if (name === "process_manage") return "";
   if (
-    (name.startsWith("browser_") || name === "computer_use") &&
-    typeof args.action === "string"
+    name === "browser_navigate" ||
+    name === "computer_use" ||
+    name === "desktop_preview"
   )
-    return redactSensitive(args.action);
+    return "";
+  if (["vision_analyze", "video_analyze"].includes(name)) {
+    return redact(args.question) ? `分析问题：${redact(args.question)}` : "";
+  }
+  if (["image_generate", "video_generate"].includes(name))
+    return [
+      redactSensitive(args.prompt, 200, false) &&
+        `生成要求：${redactSensitive(args.prompt, 200, false)}`,
+      args.aspect_ratio && `画幅：${short(args.aspect_ratio, 24)}`,
+      Number.isInteger(args.duration) ? `时长：${args.duration} 秒` : "",
+    ]
+      .filter(Boolean)
+      .join("\n");
+  if (name === "text_to_speech")
+    return Number.isFinite(args.speed) && args.speed !== 1
+      ? `语速：${args.speed}`
+      : "";
+  if (name === "skill_view" || name === "todo_list") return "";
+  if (name === "setup_mcp")
+    return args.action === "enable"
+      ? "配置动作：启用"
+      : args.action === "disable"
+        ? "配置动作：停用"
+        : "";
   return "";
 }
 
-export function toolFailed(event) {
-  return Boolean(
-    event.error ||
-    ["error", "failed"].includes(event.status) ||
-    (event.result &&
-      typeof event.result === "object" &&
-      (event.result.error ||
-        (event.name === "terminal" &&
-          Number.isInteger(event.result.exit_code) &&
-          event.result.exit_code !== 0))),
-  );
+function toolResultValue(result) {
+  if (typeof result !== "string" || !result.trim().startsWith("{"))
+    return result;
+  try {
+    return JSON.parse(result);
+  } catch {
+    return result;
+  }
 }
 
-export function toolOutputText(result, inlineDiff) {
+export function toolOutcome(event) {
+  const status = String(event.status || "").toLowerCase();
+  if (["denied", "rejected", "blocked"].includes(status)) return "rejected";
+  if (["cancelled", "canceled", "interrupted"].includes(status))
+    return "interrupted";
+  if (["error", "failed", "timeout"].includes(status)) return "error";
+
+  const result = toolResultValue(event.result);
+  if (
+    event.error ||
+    (result &&
+      typeof result === "object" &&
+      (result.success === false ||
+        result.ok === false ||
+        Boolean(result.error) ||
+        (event.name === "terminal" &&
+          Number.isInteger(result.exit_code) &&
+          result.exit_code !== 0))) ||
+    (typeof result === "string" && /^Error\b/i.test(result.trim()))
+  )
+    return "error";
+  if (
+    ["write_file", "patch"].includes(event.name) &&
+    result &&
+    typeof result === "object" &&
+    result.verified === false
+  )
+    return "unknown";
+  if (status === "unknown") return "unknown";
+  return "complete";
+}
+
+export function toolFailed(event) {
+  return toolOutcome(event) === "error";
+}
+
+export function toolOutputText(result, inlineDiff, outcome = "complete") {
   if (typeof inlineDiff === "string" && inlineDiff.trim())
     return redactSensitive(inlineDiff);
+  result = toolResultValue(result);
   if (typeof result === "string") {
     const text = result.trim();
     return text.startsWith("{") || text.startsWith("[")
@@ -185,6 +305,12 @@ export function toolOutputText(result, inlineDiff) {
       : redactSensitive(text);
   }
   if (!result || typeof result !== "object") return "";
+  if (outcome === "error") {
+    for (const key of ["error", "stderr", "message"]) {
+      if (typeof result[key] === "string" && result[key].trim())
+        return redactSensitive(result[key].trim());
+    }
+  }
   if (Array.isArray(result.results)) {
     const lines = result.results
       .slice(0, 10)
@@ -201,4 +327,143 @@ export function toolOutputText(result, inlineDiff) {
       return redactSensitive(result[key].trim());
   }
   return "";
+}
+
+export function toolOutputSections(
+  name,
+  result,
+  inlineDiff,
+  outcome = "complete",
+) {
+  if (typeof inlineDiff === "string" && inlineDiff.trim())
+    return [{ kind: "diff", text: redactSensitive(inlineDiff) }];
+  const value = toolResultValue(result);
+  if (["error", "rejected", "interrupted", "unknown"].includes(outcome)) {
+    const reason =
+      value && typeof value === "object"
+        ? value.error || value.message
+        : typeof value === "string" && /^Error\b/i.test(value.trim())
+          ? value
+          : "";
+    if (typeof reason === "string" && reason.trim())
+      return [{ kind: "text", text: redactSensitive(reason.trim(), 300) }];
+  }
+  if (
+    ["terminal", "execute_code"].includes(name) &&
+    value &&
+    typeof value === "object"
+  ) {
+    const sections = [];
+    const outputFields =
+      outcome === "error"
+        ? [
+            ["stderr", "错误输出"],
+            ["stdout", "标准输出"],
+          ]
+        : [
+            ["stdout", "标准输出"],
+            ["stderr", "错误输出"],
+          ];
+    for (const [key, label] of outputFields)
+      if (typeof value[key] === "string" && value[key].trim())
+        sections.push({
+          kind: "code",
+          label,
+          text: redactSensitive(value[key].trim()),
+        });
+    if (
+      name === "terminal" &&
+      Number.isInteger(value.exit_code) &&
+      value.exit_code !== 0
+    )
+      sections.push({ kind: "text", text: `退出码：${value.exit_code}` });
+    if (sections.length) return sections;
+  }
+  if (name === "search_files" && value && typeof value === "object") {
+    const matches = Array.isArray(value.matches)
+      ? value.matches
+      : Array.isArray(value.results)
+        ? value.results
+        : [];
+    const items = matches
+      .slice(0, 10)
+      .map((item) => {
+        const path =
+          typeof item === "string"
+            ? item
+            : item && typeof item === "object"
+              ? item.path || item.name
+              : "";
+        return { title: safePath(path), source: "" };
+      })
+      .filter((item) => item.title);
+    if (items.length) return [{ kind: "list", items }];
+  }
+  const searchResults =
+    value && typeof value === "object"
+      ? Array.isArray(value.results)
+        ? value.results
+        : Array.isArray(value.data?.web)
+          ? value.data.web
+          : null
+      : null;
+  if (
+    ["web_search", "x_search", "session_search"].includes(name) &&
+    searchResults
+  ) {
+    const items = searchResults
+      .slice(0, 10)
+      .map((item) =>
+        item && typeof item === "object"
+          ? {
+              title: redact(item.title || item.name || item.description),
+              source: safeUrl(item.url),
+            }
+          : { title: "", source: "" },
+      )
+      .filter((item) => item.title || item.source);
+    if (items.length) return [{ kind: "list", items }];
+  }
+  if (name === "process_manage" && value && typeof value === "object") {
+    const processStatus = String(value.process_status || "").toLowerCase();
+    const label = {
+      running: "运行中",
+      completed: "已结束",
+      failed: "运行失败",
+      cancelled: "已取消",
+    }[processStatus];
+    if (label) return [{ kind: "text", text: `后台进程：${label}` }];
+  }
+  const summaryAllowed = [
+    "read_file",
+    "search_files",
+    "session_search",
+    "web_search",
+    "x_search",
+    "web_extract",
+    "process_manage",
+    "vision_analyze",
+    "video_analyze",
+  ].includes(name);
+  const summary =
+    summaryAllowed && value && typeof value === "object" ? value.summary : "";
+  if (typeof summary === "string" && summary.trim())
+    return [{ kind: "text", text: redactSensitive(summary.trim(), 300) }];
+  if (
+    ["terminal", "execute_code"].includes(name) &&
+    typeof value === "string"
+  ) {
+    const text = toolOutputText(value, "", outcome);
+    if (text) return [{ kind: "code", text }];
+  }
+  return [];
+}
+
+export function hasToolDetail(activity) {
+  return Boolean(
+    activity.inputDetail ||
+    activity.detail ||
+    activity.outputDetail ||
+    activity.outputSections?.length,
+  );
 }

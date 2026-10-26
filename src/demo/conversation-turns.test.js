@@ -349,10 +349,17 @@ describe("本地回合事件", () => {
     expect(session.turns[0].activities[0]).toMatchObject({
       status: "error",
       inputDetail: "run --token [已隐藏]\n工作目录：reports",
-      outputDetail: "运行失败",
+      outputDetail: "",
+      outputSections: [
+        { kind: "code", label: "错误输出", text: "运行失败" },
+        { kind: "text", text: "退出码：1" },
+      ],
     });
     expect(session.turns[0].status).toBe("running");
-    expect(session.messages[1].error).toBe("输出包含待核对内容");
+    expect(session.messages[1].error || "").toBe("");
+    expect(session.turns[0].risks).toMatchObject([
+      { toolId: "cmd1", source: "执行命令", text: "输出包含待核对内容" },
+    ]);
   });
   it("助手文字与人工请求分开相邻活动组，组内活动仍按稳定 ID 更新", () => {
     const session = makeConversation();
@@ -441,9 +448,33 @@ describe("本地回合事件", () => {
     requestEvent(4, "tool.start", { toolId: "after", title: "分析任务" });
     expect(
       conversationProcessBlocks(withRequest.turns[0]).map((block) =>
-        block.activities.map((activity) => activity.id),
+        block.type === "group"
+          ? block.activities.map((activity) => activity.id)
+          : block.type,
       ),
-    ).toEqual([["before"], ["after"]]);
+    ).toEqual([["before"], "request", ["after"]]);
+  });
+
+  it("大量连续活动仍归入一个按开始顺序排列的活动组", () => {
+    const session = makeConversation();
+    for (let index = 0; index < 18; index++) {
+      const toolId = `tool-${index}`;
+      for (const [offset, type] of ["tool.start", "tool.complete"].entries())
+        applyConversationEvent(session, {
+          sessionId: session.id,
+          turnId: "turn1",
+          seq: index * 2 + offset + 1,
+          type,
+          toolId,
+          title: `活动 ${index + 1}`,
+        });
+    }
+    const blocks = conversationProcessBlocks(session.turns[0]);
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0].type).toBe("group");
+    expect(blocks[0].activities.map((activity) => activity.id)).toEqual(
+      Array.from({ length: 18 }, (_, index) => `tool-${index}`),
+    );
   });
 
   it("只有确认信息的工具结果不建空详情，漏收 start 时按 ID 补建一次", () => {
@@ -475,6 +506,107 @@ describe("本地回合事件", () => {
       },
     ]);
   });
+  it("工具终态分别更新原活动；回合完成不替缺失工具终态判成功", () => {
+    const session = makeConversation();
+    const emit = (seq, type, payload = {}) =>
+      applyConversationEvent(session, {
+        sessionId: session.id,
+        turnId: "turn1",
+        seq,
+        type,
+        ...payload,
+      });
+    emit(1, "tool.start", {
+      toolId: "failed",
+      name: "web_search",
+      args: { query: "良率" },
+    });
+    emit(2, "tool.complete", {
+      toolId: "failed",
+      name: "web_search",
+      result: { success: false, error: "检索服务不可用" },
+    });
+    emit(3, "tool.start", {
+      toolId: "denied",
+      name: "terminal",
+      args: { command: "echo demo" },
+    });
+    emit(4, "tool.complete", {
+      toolId: "denied",
+      name: "terminal",
+      status: "denied",
+    });
+    emit(5, "tool.start", {
+      toolId: "pending",
+      name: "read_file",
+      args: { path: "a.csv" },
+    });
+    emit(6, "tool.progress", { toolId: "pending", preview: "已读取 2/5 行" });
+    emit(7, "message.complete", {
+      status: "complete",
+      text: "已根据可用资料作答",
+    });
+    expect(
+      session.turns[0].activities.map((activity) => activity.status),
+    ).toEqual(["error", "rejected", "unknown"]);
+    expect(
+      session.turns[0].activities.map((activity) => activity.endedSeq),
+    ).toEqual([2, 4, null]);
+    expect(session.turns[0].activities[2].progressText).toBe("");
+    expect(session.turns[0].status).toBe("complete");
+    emit(8, "tool.complete", {
+      toolId: "pending",
+      name: "read_file",
+      result: { summary: "已读取 5 行" },
+    });
+    expect(session.turns[0].activities[2]).toMatchObject({
+      status: "complete",
+      endedSeq: 8,
+      outputSections: [{ kind: "text", text: "已读取 5 行" }],
+    });
+    expect(session.turns[0].status).toBe("complete");
+    expect(session.messages[1].content).toBe("已根据可用资料作答");
+  });
+  it("历史只保存脱敏活动字段和事件身份，重开后不补造进度", () => {
+    const session = makeConversation();
+    const emit = (seq, type, payload = {}) =>
+      applyConversationEvent(session, {
+        sessionId: session.id,
+        turnId: "turn1",
+        seq,
+        type,
+        ...payload,
+      });
+    emit(1, "tool.start", {
+      toolId: "read1",
+      name: "read_file",
+      args: { path: "C:/private/巡检.csv", token: "raw-secret-value" },
+    });
+    emit(2, "tool.progress", { toolId: "read1", preview: "已读取 2/5 行" });
+    emit(3, "tool.complete", {
+      toolId: "read1",
+      name: "read_file",
+      result: { text: "已读取" },
+    });
+    emit(4, "message.complete", { status: "complete", text: "分析完毕" });
+    const restored = JSON.parse(JSON.stringify(session));
+    normalizeConversationTurns(restored);
+    expect(normalizeConversationTurns(restored)).toBe(false);
+    expect(restored.turns[0].activities[0]).toMatchObject({
+      id: "read1",
+      name: "read_file",
+      startedSeq: 1,
+      lastProgressSeq: 2,
+      endedSeq: 3,
+      status: "complete",
+      argumentSummary: "巡检.csv",
+    });
+    expect(JSON.stringify(restored.turns[0].activities)).not.toContain(
+      "raw-secret-value",
+    );
+    expect(restored.turns[0].activities[0]).not.toHaveProperty("args");
+    expect(restored.turns[0].activities[0]).not.toHaveProperty("result");
+  });
   it("真实文件差异留在原工具的展开详情，终态标题不复制结果", () => {
     const session = makeConversation();
     const base = { sessionId: session.id, turnId: "turn1" };
@@ -497,12 +629,12 @@ describe("本地回合事件", () => {
       title: "修改文件",
       argumentSummary: "报告.md",
       outputKind: "diff",
-      outputDetail: "-旧值\n+新值",
+      outputSections: [{ kind: "diff", text: "-旧值\n+新值" }],
       status: "complete",
     });
     expect(session.messages[1].content).toBe("");
   });
-  it("阶段通知只更新临时行或安全警告，不结算活动与回合", () => {
+  it("有意义的阶段通知保留独立行，重复进度不堆叠", () => {
     const session = makeConversation();
     const emit = (seq, type, payload) =>
       applyConversationEvent(session, {
@@ -514,19 +646,40 @@ describe("本地回合事件", () => {
       });
     emit(1, "status.update", { kind: "compacting", text: "原始内部状态" });
     expect(session.turns[0].temporary).toBe("正在整理较早对话");
-    emit(2, "status.update", { kind: "compacted" });
+    emit(2, "status.update", { kind: "compacting", text: "重复压缩心跳" });
+    expect(session.turns[0].stages).toHaveLength(1);
+    emit(3, "status.update", { kind: "compacted" });
     expect(session.turns[0].temporary).toBeNull();
-    emit(3, "status.update", { kind: "process", text: "后台任务已有新输出" });
-    emit(4, "status.update", { kind: "goal", text: "任务完成" });
+    expect(session.turns[0].stages[0]).toMatchObject({
+      text: "上下文压缩完成",
+      state: "complete",
+    });
+    emit(4, "status.update", { kind: "process", text: "后台任务已有新输出" });
+    emit(5, "status.update", { kind: "goal", text: "任务完成" });
     expect(session.turns[0].activities).toHaveLength(0);
     expect(session.turns[0].status).toBe("running");
-    emit(5, "thinking.delta", { text: "…" });
+    emit(6, "thinking.delta", { text: "…" });
     expect(session.turns[0].temporary).toBeNull();
-    emit(6, "status.update", {
+    emit(7, "status.update", {
       kind: "warn",
       text: "资料可能过期\n堆栈不展示",
     });
     expect(session.messages[1].error).toBe("资料可能过期");
+    expect(conversationProcessBlocks(session.turns[0])).toMatchObject([
+      { type: "stage", text: "上下文压缩完成" },
+    ]);
+    emit(8, "status.update", {
+      kind: "lifecycle",
+      phase: "preparing_context",
+    });
+    expect(session.turns[0].stages).toHaveLength(1);
+    emit(9, "thinking.delta", { text: "正在等待模型响应" });
+    expect(session.turns[0].stages).toHaveLength(2);
+    emit(10, "message.delta", { text: "已收到响应" });
+    expect(session.turns[0].stages[1]).toMatchObject({
+      text: "模型等待已结束",
+      state: "complete",
+    });
   });
   it("两项子代理按身份结算，晚到子任务结果不改写已完成的父答复", () => {
     const session = makeConversation();
