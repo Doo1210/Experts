@@ -733,6 +733,28 @@ describe("演示状态", () => {
       vi.useRealTimers();
     }
   });
+  it("单题多选澄清将预置项和自定义回答一并记录", async () => {
+    vi.useFakeTimers();
+    try {
+      const conversation = demo.createConversation("exp_quality", "多选澄清");
+      demo.sendDemoMessage(conversation.id, "请多选澄清");
+      await vi.advanceTimersByTimeAsync(10000);
+      const request = conversation.turns[0].requests[0];
+      expect(request.multiSelect).toBe(true);
+      expect(demo.resolveDemoRequest(conversation.id, request.id, [])).toBe(
+        false,
+      );
+      expect(
+        demo.resolveDemoRequest(conversation.id, request.id, [
+          "1 号产线",
+          "3 号产线",
+        ]),
+      ).toBe(true);
+      expect(request.response).toBe("1 号产线、3 号产线");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
   it("澄清超时后继续，同回合补答与结束后补答各有明确归属", async () => {
     vi.useFakeTimers();
     try {
@@ -957,7 +979,7 @@ describe("演示状态", () => {
       expect(rejected.turns[0].interims[0].text).toContain("继续整理");
       await vi.advanceTimersByTimeAsync(3000);
       expect(rejected.turns[0].status).toBe("complete");
-      expect(rejected.messages[1].content).toContain("本次演示操作未执行");
+      expect(rejected.messages[1].content).toContain("该操作未执行");
     } finally {
       vi.useRealTimers();
     }
@@ -1358,7 +1380,7 @@ describe("演示状态", () => {
       await vi.advanceTimersByTimeAsync(2000);
       expect(decision.response).toBe("once");
       expect(approval.turns[0].status).toBe("error");
-      expect(approval.messages[1].error).toContain("后续演示操作失败");
+      expect(approval.messages[1].error).toContain("后续操作失败");
     } finally {
       vi.useRealTimers();
     }

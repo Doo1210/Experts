@@ -949,7 +949,12 @@ export function applyConversationEvent(conversation, event) {
             .flat()
             .filter(Boolean)
             .join("；");
-        } else request.response = safeNotice(event.response);
+        } else if (request.kind === "clarify" && Array.isArray(event.response))
+          request.response = event.response
+            .map(safeNotice)
+            .filter(Boolean)
+            .join("、");
+        else request.response = safeNotice(event.response);
         if (
           ["rejected", "deny"].includes(event.response) &&
           request.kind !== "approval"

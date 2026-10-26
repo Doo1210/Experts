@@ -1613,7 +1613,7 @@ export function sendDemoMessage(
             ? "请选择需要核对的产线。"
             : "为了继续处理，请先说明希望分析的时间范围和目标产线。"
       : requestKind === "approval"
-        ? "此步骤需要确认是否允许继续执行演示操作。"
+        ? "请确认是否允许执行当前操作。"
         : requestKind === "mcp_setup"
           ? "演示 MCP 服务配置请求：请确认是否允许尝试设置示例服务。"
           : requestKind === "secret" || requestKind === "sudo"
@@ -2103,12 +2103,12 @@ export function sendDemoMessage(
                         { value: "rejected", label: "拒绝" },
                       ]
                     : [],
-          actionTitle: requestKind === "approval" ? "执行演示核对命令" : "",
+          actionTitle: requestKind === "approval" ? "执行核对命令" : "",
           actionDetail:
             requestKind === "approval"
-              ? "此操作需要授权；允许后仅尝试执行，实际结果另行显示。"
+              ? "该命令需要授权，结果将单独呈现。"
               : "",
-          safeCommand: requestKind === "approval" ? "echo 演示核对完成" : "",
+          safeCommand: requestKind === "approval" ? "echo 核对完成" : "",
           failAfterApproval:
             ["approval", "mcp_setup"].includes(requestKind) && isErrorDemo,
         });
@@ -2116,9 +2116,9 @@ export function sendDemoMessage(
           emit("request.open", {
             requestId: uid("request"),
             kind: "approval",
-            prompt: "另一项演示操作也需要授权。",
-            actionTitle: "读取演示核对资料",
-            actionDetail: "读取示例文件，允许后仅尝试执行。",
+            prompt: "另一项操作也需要授权。",
+            actionTitle: "读取核对资料",
+            actionDetail: "该文件需要读取授权。",
             safeCommand: "cat 分析资料/良率样例.csv",
             choices: [
               { value: "once", label: "允许本次" },
@@ -2145,7 +2145,7 @@ export function sendDemoMessage(
             });
             assistant.content =
               requestKind === "approval"
-                ? "审批未在有效时间内得到回应，本次演示操作未执行。"
+                ? "审批未在有效时间内得到回应，该操作未执行。"
                 : "未收到补充信息，专家正依据现有资料继续分析。";
             persist();
             const continuation = setTimeout(() => {
@@ -2154,7 +2154,7 @@ export function sendDemoMessage(
                 status: "complete",
                 text:
                   requestKind === "approval"
-                    ? "本次操作未获授权，专家已依据现有资料完成其余演示分析。"
+                    ? "该操作未获授权，已依据现有资料完成其余分析。"
                     : request.lateAnswer
                       ? `已收到超时后的补充信息：“${request.lateAnswer}”。演示分析已根据新信息继续。`
                       : "未收到补充信息，已依据现有资料完成演示分析，请核对结论的适用范围。",
@@ -2242,7 +2242,13 @@ export function resolveDemoRequest(conversationId, requestId, response) {
                     )
                 : typeof answer === "string" && Boolean(answer.trim());
             })
-          : Boolean(String(response || "").trim());
+          : request.kind === "clarify" && request.multiSelect
+            ? Array.isArray(response) &&
+              response.length > 0 &&
+              response.every(
+                (item) => typeof item === "string" && Boolean(item.trim()),
+              )
+            : Boolean(String(response || "").trim());
   if (!validResponse) return false;
   const timeoutTimer = requestTimeoutTimers.get(requestId);
   if (timeoutTimer) clearTimeout(timeoutTimer);
@@ -2302,7 +2308,7 @@ export function resolveDemoRequest(conversationId, requestId, response) {
       for (const toolId of toolIds) event("tool.complete", { toolId });
       event("message.complete", {
         status: "complete",
-        text: `两项审批已处理：允许 ${allowed.length} 项，拒绝 ${approvals.length - allowed.length} 项。已获准的演示操作完成，其余操作未执行。`,
+        text: `两项审批已处理：允许 ${allowed.length} 项，拒绝 ${approvals.length - allowed.length} 项。已获准的操作完成，其余操作未执行。`,
         at: now(),
       });
       activeTimers.delete(conversationId);
@@ -2320,7 +2326,7 @@ export function resolveDemoRequest(conversationId, requestId, response) {
       if (turn.status !== "running") return;
       event("message.complete", {
         status: "complete",
-        text: "已记录你的拒绝。本次演示操作未执行；已根据现有资料完成其余分析。",
+        text: "已记录你的拒绝。该操作未执行；已根据现有资料完成其余分析。",
         at: now(),
       });
       activeTimers.delete(conversationId);
@@ -2337,23 +2343,23 @@ export function resolveDemoRequest(conversationId, requestId, response) {
         title:
           request.kind === "mcp_setup"
             ? "检查示例 MCP 配置"
-            : "执行已批准的演示操作",
+            : request.actionTitle || "执行已批准的操作",
       });
     const timer = setTimeout(() => {
       if (turn.status !== "running") return;
       if (followupToolId)
         event("tool.complete", {
           toolId: followupToolId,
-          error: request.failAfterApproval ? "后续演示操作失败" : false,
+          error: request.failAfterApproval ? "后续操作失败" : false,
         });
       const answer = request.failAfterApproval
-        ? "已记录本次授权；后续演示操作未完成。"
+        ? "已记录本次授权；后续操作未完成。"
         : ["secret", "sudo"].includes(request.kind)
           ? "凭据流程的安全展示已结束，未收集或保存真实凭据。"
           : request.kind === "mcp_setup"
             ? "已记录本次配置决定，示例 MCP 配置检查流程已结束。"
             : request.kind === "approval"
-              ? "已记录你的批准。演示操作已继续，建议核对工作目录中的资料后再使用结果。"
+              ? "已记录你的批准。相关流程已继续，请核对后续结果。"
               : request.skipped
                 ? "已按你的选择跳过澄清，专家依据现有资料继续演示分析。"
                 : `已收到补充信息：“${request.response}”。演示分析已继续，请核对输入资料后再推进下一步。`;
@@ -2361,7 +2367,7 @@ export function resolveDemoRequest(conversationId, requestId, response) {
         status: request.failAfterApproval ? "error" : "complete",
         text: answer,
         error: request.failAfterApproval
-          ? "后续演示操作失败，请核查演示数据。"
+          ? "后续操作失败，请核查相关资料。"
           : "",
         at: now(),
       });

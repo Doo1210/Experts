@@ -466,7 +466,7 @@
                             "
                             class="pc-human-answer"
                           >
-                            已接收：{{
+                            {{
                               acceptedAnswerLabel(block.request, question.qid)
                             }}
                           </strong>
@@ -477,7 +477,7 @@
                             (block.request.questions || []).length
                           "
                           class="pc-human-answer"
-                          >跳过澄清</strong
+                          >跳过</strong
                         >
                         <strong
                           v-if="
@@ -888,18 +888,16 @@
             </el-popover>
           </div>
         </div>
-        <div
-          v-if="activeInteraction"
-          class="pc-hitl-pin"
-          :class="{
-            attention: ['approval', 'mcp_setup'].includes(
-              activeInteraction.kind,
-            ),
-          }"
-        >
+        <div v-if="activeInteraction" class="pc-hitl-pin">
           <div class="pc-hitl-card">
             <div class="pc-hitl-header">
-              <span class="pc-hitl-icon"
+              <span
+                class="pc-hitl-icon"
+                :class="{
+                  'is-approval': ['approval', 'mcp_setup'].includes(
+                    activeInteraction.kind,
+                  ),
+                }"
                 ><i
                   :class="
                     ['approval', 'mcp_setup'].includes(activeInteraction.kind)
@@ -945,7 +943,16 @@
             <div class="pc-hitl-body">
               <template v-if="activeInteraction.kind === 'clarify'">
                 <div v-if="currentClarifyQuestion" class="pc-hitl-question">
-                  <p>{{ currentClarifyQuestion.question }}</p>
+                  <div class="pc-hitl-question-heading">
+                    <p>{{ currentClarifyQuestion.question }}</p>
+                    <span
+                      v-if="currentClarifyQuestion.choices.length"
+                      class="pc-hitl-question-type"
+                      >{{
+                        currentClarifyQuestion.multiSelect ? "多选" : "单选"
+                      }}</span
+                    >
+                  </div>
                   <el-checkbox-group
                     v-if="currentClarifyQuestion.multiSelect"
                     :value="clarifyQuestionValue(currentClarifyQuestion)"
@@ -962,11 +969,39 @@
                       :key="choice"
                       :label="choice"
                     />
-                    <el-checkbox
-                      v-if="currentClarifyQuestion.choices.length"
-                      label="__other__"
-                      >其他</el-checkbox
+                    <div
+                      v-if="
+                        currentClarifyQuestion.choices.length &&
+                        !hasAcceptedClarifyAnswer(currentClarifyQuestion.qid)
+                      "
+                      class="pc-hitl-custom-row"
+                      :class="{
+                        'is-selected': clarifyOtherSelected(
+                          currentClarifyQuestion,
+                        ),
+                      }"
                     >
+                      <el-checkbox label="__other__" aria-label="自定义回答"
+                        >自定义回答</el-checkbox
+                      >
+                      <el-input
+                        class="pc-hitl-custom-answer"
+                        :value="
+                          clarifyOtherAnswers[currentClarifyQuestion.qid] || ''
+                        "
+                        :disabled="clarifySubmitting"
+                        placeholder="输入自定义回答"
+                        @focus="
+                          selectClarifyCustomAnswer(currentClarifyQuestion.qid)
+                        "
+                        @input="
+                          setClarifyCustomAnswer(
+                            currentClarifyQuestion.qid,
+                            $event,
+                          )
+                        "
+                      />
+                    </div>
                   </el-checkbox-group>
                   <el-radio-group
                     v-else-if="currentClarifyQuestion.choices.length"
@@ -984,25 +1019,44 @@
                       :key="choice"
                       :label="choice"
                     />
-                    <el-radio label="__other__">其他</el-radio>
+                    <div
+                      v-if="
+                        !hasAcceptedClarifyAnswer(currentClarifyQuestion.qid)
+                      "
+                      class="pc-hitl-custom-row"
+                      :class="{
+                        'is-selected': clarifyOtherSelected(
+                          currentClarifyQuestion,
+                        ),
+                      }"
+                    >
+                      <el-radio label="__other__" aria-label="自定义回答"
+                        >自定义回答</el-radio
+                      >
+                      <el-input
+                        class="pc-hitl-custom-answer"
+                        :value="
+                          clarifyOtherAnswers[currentClarifyQuestion.qid] || ''
+                        "
+                        :disabled="clarifySubmitting"
+                        placeholder="输入自定义回答"
+                        @focus="
+                          selectClarifyCustomAnswer(currentClarifyQuestion.qid)
+                        "
+                        @input="
+                          setClarifyCustomAnswer(
+                            currentClarifyQuestion.qid,
+                            $event,
+                          )
+                        "
+                      />
+                    </div>
                   </el-radio-group>
                   <el-input
-                    v-if="clarifyOtherSelected(currentClarifyQuestion)"
-                    :value="
-                      clarifyOtherAnswers[currentClarifyQuestion.qid] || ''
-                    "
-                    :disabled="clarifySubmitting"
-                    placeholder="请输入其他回答"
-                    @input="
-                      $set(
-                        clarifyOtherAnswers,
-                        currentClarifyQuestion.qid,
-                        $event,
-                      )
-                    "
-                  />
-                  <el-input
-                    v-else-if="!currentClarifyQuestion.choices.length"
+                    v-if="!currentClarifyQuestion.choices.length"
+                    class="pc-hitl-free-text"
+                    type="textarea"
+                    :autosize="{ minRows: 1, maxRows: 4 }"
                     :value="clarifyQuestionValue(currentClarifyQuestion)"
                     :disabled="
                       clarifySubmitting ||
@@ -1044,7 +1098,7 @@
                         hasAcceptedClarifyAnswer(question.qid),
                       )
                         ? "跳过剩余问题"
-                        : "跳过澄清"
+                        : "跳过"
                     }}</button
                   ><button
                     v-if="clarifyQuestionIndex > 0"
@@ -1105,8 +1159,17 @@
                 </div>
                 <div
                   v-else-if="activeInteraction.kind === 'approval'"
-                  class="pc-hitl-actions"
+                  class="pc-hitl-actions is-approval"
                 >
+                  <div
+                    v-if="selectedApprovalChoice"
+                    class="pc-approval-scope-note"
+                    :title="selectedApprovalHint"
+                    aria-live="polite"
+                  >
+                    <i class="el-icon-info" aria-hidden="true" />
+                    <span>{{ selectedApprovalHint }}</span>
+                  </div>
                   <button
                     v-if="approvalDenyChoice"
                     type="button"
@@ -2468,6 +2531,32 @@ import {
   todoProgress,
 } from "../conversation-session-state";
 import ConversationMarkdown from "../components/ConversationMarkdown.vue";
+function approvalDisplayRequest(request) {
+  if (request?.kind !== "approval") return request;
+  const legacyTitle = {
+    执行演示核对命令: "执行核对命令",
+    读取演示核对资料: "读取核对资料",
+  };
+  return {
+    ...request,
+    prompt:
+      request.prompt === "此步骤需要确认是否允许继续执行演示操作。"
+        ? "请确认是否允许执行当前操作。"
+        : request.prompt,
+    actionTitle: legacyTitle[request.actionTitle] || request.actionTitle,
+    actionDetail:
+      request.actionDetail ===
+      "此操作需要授权；允许后仅尝试执行，实际结果另行显示。"
+        ? "该命令需要授权，结果将单独呈现。"
+        : request.actionDetail === "读取示例文件，允许后仅尝试执行。"
+          ? "该文件需要读取授权。"
+          : request.actionDetail,
+    safeCommand:
+      request.safeCommand === "echo 演示核对完成"
+        ? "echo 核对完成"
+        : request.safeCommand,
+  };
+}
 function emptyConversation() {
   return {
     id: null,
@@ -2772,10 +2861,11 @@ export default {
           (item) => item.id === this.selectedRequestId,
         ) || this.pendingInteractions[0];
       if (!request) return null;
+      const display = approvalDisplayRequest(request);
       return {
-        ...request,
-        content: request.prompt,
-        choices: request.choices || [],
+        ...display,
+        content: display.prompt,
+        choices: display.choices || [],
       };
     },
     pendingInteractionIndex() {
@@ -2855,6 +2945,16 @@ export default {
         if (selected) return selected;
       }
       return choices[0] || null;
+    },
+    selectedApprovalHint() {
+      return (
+        {
+          once: "仅授权当前操作，后续同类操作仍需确认。",
+          approved: "仅授权当前操作，后续同类操作仍需确认。",
+          session: "本会话内匹配的操作无需再次确认。",
+          always: "后续会话中匹配的操作将持续允许，提交前需再次确认。",
+        }[this.selectedApprovalChoice?.value] || ""
+      );
     },
     canSubmitClarification() {
       const request = this.activeInteraction;
@@ -3495,12 +3595,14 @@ export default {
     },
     requestPromptLabel(request) {
       if (request.kind !== "approval") return request.prompt;
-      return [request.actionTitle || request.prompt, request.safeCommand]
+      const display = approvalDisplayRequest(request);
+      return [display.actionTitle || display.prompt, display.safeCommand]
         .filter(Boolean)
         .join(" · ");
     },
     requestResponseLabel(request) {
-      if (request.kind === "clarify" && request.skipped) return "跳过澄清";
+      if (request.kind === "clarify" && request.skipped) return "跳过";
+      if (request.kind === "clarify") return request.response;
       if (request.kind === "approval")
         return (
           {
@@ -3519,7 +3621,35 @@ export default {
     },
     setClarifyAnswer(qid, value) {
       if (this.clarifySubmitting || this.hasAcceptedClarifyAnswer(qid)) return;
+      const question = this.clarifyQuestions.find((item) => item.qid === qid);
+      if (question?.multiSelect) {
+        const wasCustomSelected =
+          Array.isArray(this.clarifyAnswers[qid]) &&
+          this.clarifyAnswers[qid].includes("__other__");
+        if (wasCustomSelected && !value.includes("__other__"))
+          this.$set(this.clarifyOtherAnswers, qid, "");
+      } else if (question?.choices.length && value !== "__other__")
+        this.$set(this.clarifyOtherAnswers, qid, "");
       this.$set(this.clarifyAnswers, qid, value);
+    },
+    selectClarifyCustomAnswer(qid) {
+      if (this.clarifySubmitting || this.hasAcceptedClarifyAnswer(qid)) return;
+      const question = this.clarifyQuestions.find((item) => item.qid === qid);
+      if (!question?.choices.length) return;
+      if (question.multiSelect) {
+        const selected = Array.isArray(this.clarifyAnswers[qid])
+          ? this.clarifyAnswers[qid]
+          : [];
+        if (!selected.includes("__other__"))
+          this.$set(this.clarifyAnswers, qid, [...selected, "__other__"]);
+      } else this.$set(this.clarifyAnswers, qid, "__other__");
+    },
+    setClarifyCustomAnswer(qid, text) {
+      if (this.clarifySubmitting || this.hasAcceptedClarifyAnswer(qid)) return;
+      const question = this.clarifyQuestions.find((item) => item.qid === qid);
+      if (!question?.choices.length) return;
+      this.$set(this.clarifyOtherAnswers, qid, text);
+      if (text.trim()) this.selectClarifyCustomAnswer(qid);
     },
     hasAcceptedClarifyAnswer(qid) {
       return Object.prototype.hasOwnProperty.call(
