@@ -6146,6 +6146,96 @@ button {
 .channel-detail-body label .el-input {
   margin-top: 7px;
 }
+.channel-qr-dialog.el-dialog {
+  width: min(580px, calc(100vw - 28px)) !important;
+  margin-top: 8vh !important;
+}
+.channel-qr-dialog .el-dialog__header {
+  padding: 20px 24px 18px;
+}
+.channel-qr-dialog .el-dialog__title {
+  font-size: 18px;
+  font-weight: 600;
+}
+.channel-qr-dialog .el-dialog__headerbtn {
+  top: 23px;
+  right: 24px;
+}
+.channel-qr-dialog .el-dialog__body {
+  padding: 26px 28px 28px;
+}
+.channel-qr-body {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 26px;
+}
+.channel-qr-image {
+  width: min(236px, 34vh);
+  padding: 10px;
+  border: 1px solid #dce6f2;
+  border-radius: 12px;
+  background: #f7faff;
+}
+.channel-qr-image img {
+  display: block;
+  width: 100%;
+  aspect-ratio: 1;
+  image-rendering: pixelated;
+}
+.channel-qr-guide {
+  min-width: 0;
+  text-align: left;
+}
+.channel-qr-guide h3 {
+  margin: 0;
+  color: #26374e;
+  font-size: 18px;
+  font-weight: 650;
+  line-height: 1.4;
+}
+.channel-qr-guide p {
+  margin: 12px 0 20px;
+  color: #738299;
+  font-size: 13px;
+  line-height: 1.7;
+}
+.channel-qr-guide a {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: #3b83ed;
+  font-size: 13px;
+  font-weight: 600;
+  text-decoration: none;
+}
+.channel-qr-guide a:hover,
+.channel-qr-guide a:focus-visible {
+  color: #1f67d0;
+  text-decoration: underline;
+}
+@media (max-width: 560px) {
+  .channel-qr-dialog.el-dialog {
+    margin-top: 4vh !important;
+  }
+  .channel-qr-dialog .el-dialog__body {
+    padding: 20px 20px 24px;
+  }
+  .channel-qr-body {
+    grid-template-columns: 1fr;
+    justify-items: center;
+    gap: 18px;
+  }
+  .channel-qr-image {
+    width: min(236px, 32vh, 100%);
+  }
+  .channel-qr-guide {
+    text-align: center;
+  }
+  .channel-qr-guide p {
+    margin: 8px 0 12px;
+  }
+}
 .channel-check-dialog.el-dialog {
   width: min(560px, calc(100vw - 28px)) !important;
   margin-top: 7vh !important;

@@ -92,9 +92,9 @@
         </div>
         <div class="channel-config-actions">
           <el-button
-            v-if="channel.id !== 'dingtalk'"
+            v-if="channel.id === 'wecom'"
             size="mini"
-            @click="$message.info('请按扫码配置指引完成机器人授权')"
+            @click="qrVisible = true"
             >扫码配置</el-button
           ><el-button type="primary" size="mini" @click="saveConnection">{{
             channel.enabled ? "保存并连接" : "保存配置"
@@ -261,6 +261,26 @@
         }}
       </div>
     </div>
+    <el-dialog
+      :visible.sync="qrVisible"
+      title="扫码配置企业微信 AI Bot"
+      width="720px"
+      custom-class="manage-dialog channel-qr-dialog"
+      :close-on-click-modal="false"
+    >
+      <div class="channel-qr-body">
+        <div class="channel-qr-image">
+          <img :src="wecomConfigQr" alt="企业微信扫码配置二维码" />
+        </div>
+        <div class="channel-qr-guide">
+          <h3>使用企业微信扫一扫</h3>
+          <p>扫描二维码后，按手机端提示完成授权。</p>
+          <a :href="wecomConfigQr" target="_blank" rel="noopener noreferrer"
+            >在新窗口打开二维码 <i class="el-icon-top-right" aria-hidden="true"
+          /></a>
+        </div>
+      </div>
+    </el-dialog>
     <el-dialog
       :visible.sync="targetVisible"
       width="620px"
@@ -713,6 +733,7 @@
 import Vue from "vue";
 import { persist } from "../state";
 import { demoChannelCandidates } from "../channel-target-fixtures";
+import wecomConfigQr from "../assets/wecom-config-qr.svg";
 
 export default {
   name: "ExpertChannelTab",
@@ -726,6 +747,8 @@ export default {
       botIdDraft: "",
       botSecretDraft: "",
       robotCodeDraft: "",
+      qrVisible: false,
+      wecomConfigQr,
       targetVisible: false,
       targetKind: "person",
       targetMode: "candidate",
@@ -868,6 +891,7 @@ export default {
       this.targetConfirmed = false;
     },
     activeId() {
+      this.qrVisible = false;
       this.targetVisible = false;
       this.detailVisible = false;
       this.testVisible = false;
@@ -875,6 +899,7 @@ export default {
       this.loadDraft();
     },
     "expert.id"() {
+      this.qrVisible = false;
       this.targetVisible = false;
       this.detailVisible = false;
       this.testVisible = false;
