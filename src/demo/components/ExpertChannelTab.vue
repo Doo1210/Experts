@@ -78,15 +78,7 @@
             ><el-input
               v-model.trim="robotCodeDraft"
               placeholder="留空则使用 Client ID" /></label
-          ><label
-            ><span
-              >Home 会话或群 ID
-              <small>仅用于默认结果投递，不自动加入主动沟通名单</small></span
-            ><el-input
-              v-model.trim="homeDraft"
-              placeholder="填写默认投递的会话或群 ID"
-          /></label>
-          <label v-if="channel.id !== 'wecom'" class="channel-mention-field"
+          ><label v-if="channel.id !== 'wecom'" class="channel-mention-field"
             ><span>群聊需 @ <small>群里有人 @ 专家时才响应</small></span
             ><el-select
               :value="channel.requireMention !== false"
@@ -239,8 +231,7 @@
           }}关闭主动沟通后不能发送；图片和文件还受文件开关控制。
         </p>
         <p class="channel-proactive-note">
-          例如：“把工作空间里的质检报告发到产线协作群”。专家会先确认文件，再查已批准目标；跨平台同名群会询问平台。回复当前消息会话无需主动沟通；Home
-          投递目标不会自动加入名单。
+          例如：“把工作空间里的质检报告发到产线协作群”。专家会先确认文件，再查已批准目标；跨平台同名群会询问平台。回复当前消息会话无需主动沟通。
         </p>
       </section>
       <section class="channel-file-card">
@@ -735,7 +726,6 @@ export default {
       botIdDraft: "",
       botSecretDraft: "",
       robotCodeDraft: "",
-      homeDraft: "",
       targetVisible: false,
       targetKind: "person",
       targetMode: "candidate",
@@ -914,7 +904,6 @@ export default {
       this.botIdDraft = "";
       this.botSecretDraft = "";
       this.robotCodeDraft = this.channel?.robotCode || "";
-      this.homeDraft = this.channel?.homeId || "";
     },
     saveConnection() {
       if (
@@ -930,7 +919,6 @@ export default {
         Vue.set(this.channel, "botSecretConfigured", true);
       if (this.channel.id === "dingtalk")
         Vue.set(this.channel, "robotCode", this.robotCodeDraft);
-      Vue.set(this.channel, "homeId", this.homeDraft);
       Vue.set(this.channel, "connected", Boolean(this.channel.enabled));
       persist();
       this.botSecretDraft = "";
