@@ -14,7 +14,7 @@ const demo = await import("./state.js");
 const { TOOL_ACTIVITY_SCENES } = await import("./tool-activity-scenes.js");
 const { deleteFile } = await import("./file-db.js");
 const { enrichProjectFixtures } = await import("./project-fixtures.js");
-const { conversationProcessBlocks } = await import("./conversation-turns.js");
+const { conversationProcessBlocks, turnResultsVisible } = await import("./conversation-turns.js");
 const { hasToolDetail } = await import("./conversation-tools.js");
 
 beforeEach(async () => {
@@ -464,6 +464,34 @@ describe("演示状态", () => {
     ]);
     expect(conversation.messages[1].status).toBe("stopped");
   });
+  it("普通文字和拼接的触发词不误开审批或工具场景", async () => {
+    vi.useFakeTimers();
+    try {
+      const ordinary = demo.createConversation("exp_quality", "讨论审批流程");
+      demo.sendDemoMessage(ordinary.id, "请分析审批、澄清和文件进度");
+      expect(ordinary.turns[0].requests).toHaveLength(0);
+      expect(ordinary.turns[0].activities).toHaveLength(0);
+
+      const mixed = demo.createConversation("exp_quality", "拼接触发词");
+      demo.sendDemoMessage(
+        mixed.id,
+        "演示工具：搜索文件内容 演示工具：读取网页",
+      );
+      expect(mixed.turns[0].activities).toHaveLength(0);
+
+      const exact = demo.createConversation("exp_quality", "明确工具演示");
+      demo.sendDemoMessage(exact.id, "演示工具：读取网页");
+      expect(exact.turns[0].activities[0].name).toBe("web_extract");
+
+      await vi.advanceTimersByTimeAsync(10000);
+      expect(ordinary.turns[0].status).toBe("complete");
+      expect(ordinary.messages[1].content).toContain(
+        "请分析审批、澄清和文件进度",
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
   it("删除文件夹时同时移除其子项", () => {
     const removed = demo.removeWorkspaceItems("exp_quality", [
       "f_quality_docs",
@@ -639,34 +667,40 @@ describe("演示状态", () => {
       vi.useRealTimers();
     }
   });
-  it("恢复演示可继续完成，未知终态不会被后续计时改写", async () => {
+  it("恢复演示可继续完成，运行异常按整轮失败收口", async () => {
     vi.useFakeTimers();
     try {
       const recovered = demo.createConversation("exp_quality", "恢复状态演示");
       demo.sendDemoMessage(recovered.id, "演示恢复中");
       await vi.advanceTimersByTimeAsync(1200);
       expect(recovered.turns[0].status).toBe("recovering");
+      expect(recovered.turns[0].temporary).toBeNull();
       await vi.advanceTimersByTimeAsync(5200);
       expect(recovered.turns[0].status).toBe("running");
       await vi.advanceTimersByTimeAsync(3500);
       expect(recovered.turns[0].status).toBe("complete");
       expect(recovered.turns[0].durationMs).toBeGreaterThanOrEqual(9000);
 
-      const unknown = demo.createConversation("exp_quality", "未知终态演示");
-      demo.sendDemoMessage(unknown.id, "演示运行异常");
-      await vi.advanceTimersByTimeAsync(1200);
-      expect(unknown.turns[0].status).toBe("recovering");
-      await vi.advanceTimersByTimeAsync(5200);
-      expect(unknown.turns[0].status).toBe("unknown");
-      expect(unknown.turns[0].durationMs).toBeNull();
-      expect(unknown.messages[1].content).toContain("无法确认");
-      expect(
-        unknown.turns[0].activities.every((item) => item.status !== "running"),
-      ).toBe(true);
-      const partial = unknown.messages[1].content;
+      const failed = demo.createConversation("exp_quality", "运行异常演示");
+      demo.sendDemoMessage(failed.id, "演示运行异常");
+      await vi.advanceTimersByTimeAsync(3200);
+      expect(failed.turns[0].status).toBe("recovering");
+      await vi.advanceTimersByTimeAsync(3200);
+      expect(failed.turns[0].status).toBe("error");
+      expect(failed.turns[0].durationMs).toBeGreaterThanOrEqual(6000);
+      expect(failed.turns[0].activities).toEqual([]);
+      expect(failed.turns[0].interims).toHaveLength(1);
+      expect(conversationProcessBlocks(failed.turns[0])).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ type: "interim" }),
+        ]),
+      );
+      expect(failed.messages[1].content).toContain("完整结论尚未生成");
+      expect(failed.messages[1].error).toContain("本轮处理未完成");
+      const partial = failed.messages[1].content;
       await vi.advanceTimersByTimeAsync(10000);
-      expect(unknown.turns[0].status).toBe("unknown");
-      expect(unknown.messages[1].content).toBe(partial);
+      expect(failed.turns[0].status).toBe("error");
+      expect(failed.messages[1].content).toBe(partial);
     } finally {
       vi.useRealTimers();
     }
@@ -718,17 +752,6 @@ describe("演示状态", () => {
       await vi.advanceTimersByTimeAsync(2000);
       expect(conversation.turns[0].status).toBe("complete");
       expect(conversation.messages[1].content).toContain("跳过澄清");
-
-      const partial = demo.createConversation("exp_quality", "跳过剩余问题");
-      demo.sendDemoMessage(partial.id, "已答多题澄清");
-      await vi.advanceTimersByTimeAsync(10000);
-      const batch = partial.turns[0].requests[0];
-      expect(batch.answers).toEqual({ time: "最近一周" });
-      expect(
-        demo.resolveDemoRequest(partial.id, batch.id, { skip: true }),
-      ).toBe(true);
-      expect(batch.answers).toEqual({ time: "最近一周", line: [] });
-      expect(batch.skipped).toBe(true);
     } finally {
       vi.useRealTimers();
     }
@@ -763,7 +786,7 @@ describe("演示状态", () => {
         "超时后当前回合补答",
       );
       demo.sendDemoMessage(current.id, "演示澄清超时");
-      await vi.advanceTimersByTimeAsync(14000);
+      await vi.advanceTimersByTimeAsync(18000);
       const firstTurn = current.turns[0];
       const firstRequest = firstTurn.requests[0];
       expect(firstRequest.status).toBe("expired");
@@ -787,7 +810,7 @@ describe("演示状态", () => {
         "超时后下一回合补答",
       );
       demo.sendDemoMessage(later.id, "演示澄清超时");
-      await vi.advanceTimersByTimeAsync(24000);
+      await vi.advanceTimersByTimeAsync(28000);
       const oldRequest = later.turns[0].requests[0];
       expect(oldRequest.status).toBe("expired");
       expect(later.turns[0].status).toBe("complete");
@@ -816,6 +839,22 @@ describe("演示状态", () => {
       await vi.advanceTimersByTimeAsync(12000);
       expect(timelyRequest.status).toBe("resolved");
       expect(answered.turns[0].status).toBe("complete");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+  it("切换任务不取消等待中的澄清请求及其演示超时", async () => {
+    vi.useFakeTimers();
+    try {
+      const conversation = demo.createConversation("exp_quality", "切换中的澄清");
+      demo.sendDemoMessage(conversation.id, "演示澄清超时");
+      await vi.advanceTimersByTimeAsync(10000);
+      const request = conversation.turns[0].requests[0];
+      expect(request.status).toBe("waiting");
+      demo.stopDemoStream(conversation.id);
+      expect(request.status).toBe("waiting");
+      await vi.advanceTimersByTimeAsync(10000);
+      expect(request.status).toBe("expired");
     } finally {
       vi.useRealTimers();
     }
@@ -857,6 +896,11 @@ describe("演示状态", () => {
         (result) => result.kind === "file",
       );
       expect(generated).toHaveLength(12);
+      expect(many.turns[0].activities).toHaveLength(12);
+      expect(many.turns[0].activities.every((item) => item.name === "write_file")).toBe(true);
+      expect(generated.map((result) => result.sourceToolId)).toEqual(
+        many.turns[0].activities.map((activity) => activity.id),
+      );
       expect(generated.every((result) => result.operation === "created")).toBe(
         true,
       );
@@ -942,6 +986,46 @@ describe("演示状态", () => {
       vi.useRealTimers();
     }
   });
+  it("修改文件演示使用当前专家的工作空间文件", async () => {
+    vi.useFakeTimers();
+    try {
+      for (const trigger of [
+        "演示工具：修改文件",
+        "文件差异",
+        "演示产出：新建和修改文件",
+      ]) {
+        const conversation = demo.createConversation("exp_ops", trigger);
+        demo.sendDemoMessage(conversation.id, trigger);
+        await vi.advanceTimersByTimeAsync(10000);
+        const activity = conversation.turns[0].activities.find(
+          (item) => item.name === "patch",
+        );
+        expect(activity).toMatchObject({
+          status: "complete",
+          argumentSummary: "消息渠道/运营简报.txt",
+        });
+        expect(activity.outputSections[0].kind).toBe("diff");
+        expect(conversation.turns[0].results).toContainEqual(
+          expect.objectContaining({
+            fileId: "f_ops_report",
+            operation: "modified",
+            sourceToolId: activity.id,
+          }),
+        );
+      }
+      const ops = demo.expertById("exp_ops");
+      ops.files = ops.files.filter((item) => item.kind !== "file");
+      const noFile = demo.createConversation("exp_ops", "无可修改文件");
+      demo.sendDemoMessage(noFile.id, "演示工具：修改文件");
+      await vi.advanceTimersByTimeAsync(10000);
+      expect(noFile.turns[0].activities[0].status).toBe("error");
+      expect(noFile.turns[0].activities[0].outputSections[0].text).toContain(
+        "当前工作空间没有可修改的演示文本文件",
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
   it("审批通过只启动后续活动，拒绝跳过本次操作后继续收口", async () => {
     vi.useFakeTimers();
     try {
@@ -960,9 +1044,17 @@ describe("演示状态", () => {
       );
       expect(approved.turns[0].status).toBe("running");
       expect(approved.turns[0].activities[0].status).toBe("running");
+      expect(approved.turns[0].activities[0]).toMatchObject({
+        name: "terminal",
+        title: "执行命令",
+      });
+      expect(approved.turns[0].activities[0].inputDetail).toContain(
+        "python scripts/analyze_yield.py --input 分析资料/良率样例.csv",
+      );
       await vi.advanceTimersByTimeAsync(2000);
       expect(approved.turns[0].status).toBe("complete");
       expect(approved.turns[0].activities[0].status).toBe("complete");
+      expect(hasToolDetail(approved.turns[0].activities[0])).toBe(true);
 
       const rejected = demo.createConversation("exp_quality", "审批拒绝");
       demo.sendDemoMessage(rejected.id, "请审批");
@@ -1038,7 +1130,7 @@ describe("演示状态", () => {
 
       const timeout = demo.createConversation("exp_quality", "审批超时");
       demo.sendDemoMessage(timeout.id, "演示审批超时");
-      await vi.advanceTimersByTimeAsync(25000);
+      await vi.advanceTimersByTimeAsync(28000);
       const request = timeout.turns[0].requests[0];
       expect(request.status).toBe("expired");
       expect(request.response).toBeNull();
@@ -1063,19 +1155,21 @@ describe("演示状态", () => {
       expect(activities.map((item) => item.title)).toEqual([
         "子代理",
         "读取文件",
-        "分析任务",
       ]);
       expect(activities.every((item) => item.status === "complete")).toBe(true);
-      expect(activities[1].argumentSummary).toBe("良率样例.csv");
+      expect(activities[1].argumentSummary).toBe("分析资料/良率样例.csv");
     } finally {
       vi.useRealTimers();
     }
   });
-  it("按类别的工具触发词各建立一项对应活动", () => {
+  it("工具触发词建立对应活动，批量产出按文件分别调用", () => {
     expect(
       new Set(TOOL_ACTIVITY_SCENES.map((scene) => scene.trigger)).size,
     ).toBe(TOOL_ACTIVITY_SCENES.length);
     for (const scene of TOOL_ACTIVITY_SCENES) {
+      const source = scene.baseTrigger
+        ? TOOL_ACTIVITY_SCENES.find((item) => item.trigger === scene.baseTrigger)
+        : scene;
       const conversation = demo.createConversation(
         "exp_quality",
         scene.trigger,
@@ -1083,9 +1177,17 @@ describe("演示状态", () => {
       demo.sendDemoMessage(conversation.id, scene.trigger);
       if (scene.skipStart)
         expect(conversation.turns[0].activities).toHaveLength(0);
+      else if (scene.artifacts?.length)
+        expect(conversation.turns[0].activities).toMatchObject(
+          Array.from({ length: 3 }, () => ({
+            kind: "tool",
+            name: source.name,
+            status: "running",
+          })),
+        );
       else
         expect(conversation.turns[0].activities).toMatchObject([
-          { kind: "tool", name: scene.name, status: "running" },
+          { kind: "tool", name: source.name, status: "running" },
         ]);
       demo.stopDemoStream(conversation.id);
     }
@@ -1106,6 +1208,50 @@ describe("演示状态", () => {
         expect(conversation.turns[0].activities).toHaveLength(1);
         expect(conversation.turns[0].activities[0].status).toBe(status);
         expect(conversation.turns[0].status).toBe("complete");
+        expect(conversation.messages[1].error).toBe("");
+      }
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+  it("终态与产出复合场景沿用基础工具的活动呈现", async () => {
+    vi.useFakeTimers();
+    try {
+      for (const [trigger, baseTrigger, expectedStatus] of [
+        ["演示工具：失败结果", "演示工具：搜索网页", "error"],
+        ["演示工具：策略阻断", "演示工具：执行命令", "rejected"],
+        ["演示工具：中断执行", "演示工具：执行命令", "interrupted"],
+        ["演示工具：缺少结束事件", "演示工具：读取文件", "unknown"],
+        ["演示工具：仅收到完成事件", "演示工具：写入文件", "complete"],
+        ["演示工具：生成结果文件", "演示工具：写入文件", "complete"],
+        ["演示产出：多个文件", "演示工具：写入文件", "complete"],
+        ["演示产出：修改文件", "演示工具：修改文件", "complete"],
+      ]) {
+        const base = demo.createConversation("exp_quality", baseTrigger);
+        const combined = demo.createConversation("exp_quality", trigger);
+        demo.sendDemoMessage(base.id, baseTrigger);
+        demo.sendDemoMessage(combined.id, trigger);
+        const baseActivity = base.turns[0].activities[0];
+        const combinedActivity = combined.turns[0].activities[0];
+        if (trigger === "演示工具：仅收到完成事件")
+          expect(combinedActivity).toBeUndefined();
+        else {
+          expect(combinedActivity.name).toBe(baseActivity.name);
+          expect(combinedActivity.title).toBe(baseActivity.title);
+          if (!["演示工具：失败结果", "演示产出：多个文件", "演示工具：生成结果文件"].includes(trigger))
+            expect(combinedActivity.argumentSummary).toBe(baseActivity.argumentSummary);
+          if (["演示工具：策略阻断", "演示工具：中断执行"].includes(trigger))
+            expect(combinedActivity.inputDetail).toBe(baseActivity.inputDetail);
+        }
+        await vi.advanceTimersByTimeAsync(10000);
+        const completed = combined.turns[0].activities[0];
+        expect(completed.name).toBe(baseActivity.name);
+        expect(completed.title).toBe(baseActivity.title);
+        expect(completed.status).toBe(expectedStatus);
+        if (expectedStatus === "complete" && trigger !== "演示工具：仅收到完成事件")
+          expect(completed.outputSections.map((section) => section.kind)).toEqual(
+            baseActivity.outputSections.map((section) => section.kind),
+          );
       }
     } finally {
       vi.useRealTimers();
@@ -1116,19 +1262,37 @@ describe("演示状态", () => {
     try {
       const crowded = demo.createConversation("exp_quality", "大量活动");
       demo.sendDemoMessage(crowded.id, "演示大量工具活动");
-      expect(crowded.turns[0].activities).toHaveLength(3);
+      expect(crowded.turns[0].activities).toHaveLength(4);
       expect(crowded.turns[0].groups).toHaveLength(1);
-      await vi.advanceTimersByTimeAsync(4000);
-      expect(crowded.turns[0].activities).toHaveLength(18);
+      await vi.advanceTimersByTimeAsync(6000);
+      expect(crowded.turns[0].activities).toHaveLength(19);
+      expect(crowded.turns[0].interims).toHaveLength(3);
       expect(
         conversationProcessBlocks(crowded.turns[0]).filter(
           (block) => block.type === "group",
         ),
-      ).toHaveLength(1);
+      ).toHaveLength(4);
       await vi.advanceTimersByTimeAsync(6000);
       expect(
         crowded.turns[0].activities.every((item) => item.status === "complete"),
       ).toBe(true);
+      expect(crowded.turns[0].activities[0].kind).toBe("reasoning");
+      expect(
+        crowded.turns[0].activities.slice(1, 4).map((item) => item.outputSections[0]?.kind),
+      ).toEqual(["read", "list", "web"]);
+      const toolNames = new Set(
+        crowded.turns[0].activities.map((item) => item.name),
+      );
+      for (const name of [
+        "read_file", "search_files", "web_search", "terminal",
+        "execute_code", "web_extract", "write_file", "patch",
+        "skills_list", "skill_view", "process_manage",
+        "mcp__tickets__search",
+      ])
+        expect(toolNames.has(name)).toBe(true);
+      expect(crowded.turns[0].results.map((item) => item.operation)).toEqual(
+        expect.arrayContaining(["created", "modified"]),
+      );
 
       const risky = demo.createConversation("exp_quality", "输出风险");
       demo.sendDemoMessage(risky.id, "演示工具：输出风险");
@@ -1144,19 +1308,67 @@ describe("演示状态", () => {
       vi.useRealTimers();
     }
   });
+  it("演示过程交替呈现阶段、活动、文件操作和最终产出", async () => {
+    vi.useFakeTimers();
+    try {
+      const conversation = demo.createConversation("exp_quality", "常见处理过程");
+      demo.sendDemoMessage(conversation.id, "演示过程");
+      await vi.advanceTimersByTimeAsync(2200);
+      expect(conversation.turns[0].stages).toMatchObject([
+        { kind: "model_wait", state: "running" },
+      ]);
+      await vi.advanceTimersByTimeAsync(3100);
+      expect(conversation.turns[0].stages).toMatchObject([
+        { kind: "model_wait", state: "complete" },
+        { kind: "compression", state: "running" },
+      ]);
+      await vi.advanceTimersByTimeAsync(1400);
+      expect(conversation.turns[0].stages[1]).toMatchObject({
+        kind: "compression",
+        state: "complete",
+      });
+      await vi.advanceTimersByTimeAsync(3100);
+      expect(conversation.turns[0].results.map((item) => item.operation)).toEqual([
+        "created", "modified",
+      ]);
+      expect(turnResultsVisible(conversation.turns[0])).toBe(false);
+      await vi.advanceTimersByTimeAsync(2200);
+      const turn = conversation.turns[0];
+      expect(turn.status).toBe("complete");
+      expect(turnResultsVisible(turn)).toBe(true);
+      expect(turn.activities.map((item) => item.name)).toEqual([
+        "read_file",
+        "search_files",
+        "terminal",
+        "execute_code",
+        "write_file",
+        "patch",
+      ]);
+      expect(turn.activities.every((item) => item.status === "complete")).toBe(true);
+      expect(conversationProcessBlocks(turn).map((block) => block.type)).toEqual([
+        "group", "interim", "stage", "group", "interim", "stage",
+        "group", "interim", "group",
+      ]);
+      expect(conversation.messages[1].content).toContain("本轮文件操作结果");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
   it("大量活动组与长详情分别提供可滚动的演示内容", async () => {
     vi.useFakeTimers();
     try {
       const many = demo.createConversation("exp_quality", "活动组滚动");
       demo.sendDemoMessage(many.id, "演示活动组：大量活动");
-      expect(many.turns[0].activities).toHaveLength(3);
-      await vi.advanceTimersByTimeAsync(4000);
-      expect(many.turns[0].activities).toHaveLength(32);
+      expect(many.turns[0].activities).toHaveLength(4);
+      await vi.advanceTimersByTimeAsync(6000);
+      expect(many.turns[0].activities).toHaveLength(33);
+      expect(many.turns[0].interims).toHaveLength(3);
       expect(
         conversationProcessBlocks(many.turns[0]).filter(
           (block) => block.type === "group",
         ),
-      ).toHaveLength(1);
+      ).toHaveLength(4);
+      expect(many.turns[0].groups[0].activityIds.length).toBeGreaterThan(12);
       await vi.advanceTimersByTimeAsync(6000);
       expect(
         many.turns[0].activities.every((item) => item.status === "complete"),
@@ -1181,10 +1393,10 @@ describe("演示状态", () => {
         "演示工具：操作电脑",
         "演示工具：操作桌面界面",
         "演示工具：生成语音",
+        "演示工具：列出技能",
         "演示工具：查看技能",
         "演示工具：管理待办",
         "演示工具：平台连接",
-        "演示工具：外部 MCP",
         "演示工具：生成结果文件",
       ]) {
         const conversation = demo.createConversation("exp_quality", trigger);
@@ -1208,6 +1420,81 @@ describe("演示状态", () => {
       vi.useRealTimers();
     }
   });
+  it("技能活动无详情，待办结果更新会话状态，未知 MCP 不伪造进度", async () => {
+    vi.useFakeTimers();
+    try {
+      const skill = demo.createConversation("exp_quality", "查看技能");
+      demo.sendDemoMessage(skill.id, "演示工具：查看技能");
+      await vi.advanceTimersByTimeAsync(10000);
+      expect(skill.turns[0].activities[0].outputSections).toEqual([]);
+
+      const listed = demo.createConversation("exp_quality", "列出技能");
+      demo.sendDemoMessage(listed.id, "演示工具：列出技能");
+      expect(listed.turns[0].activities[0].title).toBe("查看可用技能");
+      await vi.advanceTimersByTimeAsync(10000);
+      expect(listed.turns[0].activities[0].outputSections).toEqual([]);
+
+      const todo = demo.createConversation("exp_quality", "管理待办");
+      demo.sendDemoMessage(todo.id, "演示工具：管理待办");
+      expect(todo.turns[0].activities[0].title).toBe("更新执行计划");
+      expect(todo.sessionPresentation.todos).toEqual([]);
+      await vi.advanceTimersByTimeAsync(10000);
+      expect(todo.turns[0].status).toBe("complete");
+      expect(todo.turns[0].activities[0].outputSections).toEqual([]);
+      expect(todo.sessionPresentation.todoRevision).toBe(1);
+      expect(todo.sessionPresentation.todos.map((item) => item.status)).toEqual([
+        "in_progress",
+        "pending",
+      ]);
+
+      const external = demo.createConversation("exp_quality", "外部工具");
+      demo.sendDemoMessage(external.id, "演示工具：外部 MCP");
+      expect(external.turns[0].activities[0].title).toBe(
+        "调用外部工具 · mcp__tickets__search",
+      );
+      expect(external.turns[0].activities[0].inputDetail).toContain(
+        '"query": "产线停机"',
+      );
+      await vi.advanceTimersByTimeAsync(3000);
+      expect(external.turns[0].activities[0].progressText).toBe("");
+      await vi.advanceTimersByTimeAsync(7000);
+      expect(external.turns[0].activities[0].outputSections[0]).toMatchObject({
+        kind: "code",
+        label: "返回结果",
+      });
+      expect(external.turns[0].activities[0].outputSections[0].text).toContain(
+        "INC-1024",
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+  it("记忆演示只展示安全操作摘要，关闭记忆的专家不产生工具活动", async () => {
+    vi.useFakeTimers();
+    try {
+      const enabled = demo.createConversation("exp_quality", "更新记忆");
+      demo.sendDemoMessage(enabled.id, "演示工具：更新记忆");
+      const activity = enabled.turns[0].activities[0];
+      expect(activity).toMatchObject({
+        name: "memory",
+        title: "更新记忆",
+        argumentSummary: "",
+        inputDetail: "",
+      });
+      await vi.advanceTimersByTimeAsync(10000);
+      expect(activity.status).toBe("complete");
+      expect(hasToolDetail(activity)).toBe(false);
+      expect(enabled.turns[0].results).toEqual([]);
+
+      const disabled = demo.createConversation("exp_ops", "记忆已关闭");
+      demo.sendDemoMessage(disabled.id, "演示工具：更新记忆");
+      expect(disabled.turns[0].activities).toEqual([]);
+      await vi.advanceTimersByTimeAsync(10000);
+      expect(disabled.messages[1].content).toContain("未启用记忆");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
   it("专项工具演示保留对象并原位更新进展", async () => {
     vi.useFakeTimers();
     try {
@@ -1215,24 +1502,253 @@ describe("演示状态", () => {
       demo.sendDemoMessage(file.id, "演示工具：读取文件");
       const activity = file.turns[0].activities[0];
       expect(activity.argumentSummary).toBe("分析资料/良率样例.csv");
-      expect(activity.inputDetail).toBe("最多读取：500 行");
+      expect(activity.inputDetail).toBe("");
       await vi.advanceTimersByTimeAsync(2000);
-      expect(activity.progressText).toBe("已读取 120/500 行");
+      expect(activity.progressText).toBe("");
       await vi.advanceTimersByTimeAsync(9000);
       expect(file.turns[0].activities).toHaveLength(1);
       expect(activity.status).toBe("complete");
-      expect(activity.outputSections[0].text).toContain("500 行");
+      expect(activity.outputSections[0]).toMatchObject({
+        kind: "read",
+        range: "第 1–3 行，共 3 行",
+        preview: "日期,良率",
+        partial: false,
+      });
+
+      const partial = demo.createConversation("exp_quality", "部分读取");
+      demo.sendDemoMessage(partial.id, "演示工具：部分读取文件");
+      await vi.advanceTimersByTimeAsync(10000);
+      expect(partial.turns[0].activities[0].outputSections[0]).toMatchObject({
+        kind: "read",
+        range: "第 1–2 行，共 3 行",
+        partial: true,
+      });
 
       const external = demo.createConversation("exp_quality", "未知 MCP");
       demo.sendDemoMessage(external.id, "演示工具：外部 MCP");
       expect(external.turns[0].activities[0]).toMatchObject({
-        name: "mcp__files__list",
+        name: "mcp__tickets__search",
         argumentSummary: "",
-        inputDetail: "",
       });
+      expect(external.turns[0].activities[0].inputDetail).toContain(
+        '"query": "产线停机"',
+      );
       await vi.advanceTimersByTimeAsync(3000);
-      expect(external.turns[0].activities[0].progressText).toBe("正在读取目录");
+      expect(external.turns[0].activities[0].progressText).toBe("");
       demo.stopDemoStream(external.id);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("命令、代码和后台进程演示保留动作、参数及真实字段形态", async () => {
+    vi.useFakeTimers();
+    try {
+      for (const [trigger, title, resultKind] of [
+        ["演示工具：执行命令", "执行命令", "code"],
+        ["演示工具：启动后台命令", "启动后台命令", "text"],
+        ["演示工具：运行代码", "运行代码", "code"],
+        ["演示工具：后台进程", "查询后台进程", "text"],
+        ["演示工具：等待后台进程", "等待后台进程", "text"],
+      ]) {
+        const conversation = demo.createConversation("exp_quality", trigger);
+        demo.sendDemoMessage(conversation.id, trigger);
+        const activity = conversation.turns[0].activities[0];
+        expect(activity.title).toBe(title);
+        if (title === "查询后台进程")
+          expect(activity.inputDetail).toBe("");
+        else
+          expect(activity.inputDetail).toBeTruthy();
+        await vi.advanceTimersByTimeAsync(10000);
+        expect(activity.status).toBe("complete");
+        expect(activity.outputSections[0].kind).toBe(resultKind);
+      }
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("核对命令和计算代码的返回与当前工作空间样例一致", async () => {
+    vi.useFakeTimers();
+    try {
+      const sample = demo.expertById("exp_quality").files.find(
+        (item) => item.id === "f_quality_csv",
+      );
+      sample.content = "日期,良率\n2026-10-08,97.2%\n2026-10-09,97.1%";
+      const command = demo.createConversation("exp_quality", "命令核对");
+      demo.sendDemoMessage(command.id, "演示工具：执行命令");
+      const commandActivity = command.turns[0].activities[0];
+      expect(commandActivity.inputDetail).toContain(
+        "rg -n -F -- '2026-10-09' '分析资料/良率样例.csv'",
+      );
+      await vi.advanceTimersByTimeAsync(10000);
+      expect(commandActivity.outputSections[0].text).toBe(
+        "3:2026-10-09,97.1%",
+      );
+
+      const code = demo.createConversation("exp_quality", "代码核对");
+      demo.sendDemoMessage(code.id, "演示工具：运行代码");
+      const codeActivity = code.turns[0].activities[0];
+      expect(codeActivity.inputDetail).toContain("rates = [97.2, 97.1]");
+      await vi.advanceTimersByTimeAsync(10000);
+      expect(codeActivity.outputSections[0].text).toBe(
+        "样本：2 天，平均良率：97.15%\n最低良率：97.10%",
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("后台进程演示的近期输出与当前专家文件一致", async () => {
+    vi.useFakeTimers();
+    try {
+      const conversation = demo.createConversation("exp_ops", "运营资料核对");
+      demo.sendDemoMessage(conversation.id, "演示工具：后台进程");
+      const activity = conversation.turns[0].activities[0];
+      expect(activity.inputDetail).toBe("");
+      expect(activity.argumentSummary).toBe("");
+      await vi.advanceTimersByTimeAsync(10000);
+      expect(activity.outputSections).toEqual([
+        { kind: "text", text: "进程状态：运行中" },
+        { kind: "text", text: "近期输出：开始核对 运营简报.txt" },
+      ]);
+
+      const waiting = demo.createConversation("exp_ops", "等待运营资料核对");
+      demo.sendDemoMessage(waiting.id, "演示工具：等待后台进程");
+      const waitActivity = waiting.turns[0].activities[0];
+      expect(waitActivity.inputDetail).toBe("等待上限：5 秒");
+      expect(waitActivity.argumentSummary).toBe("");
+      await vi.advanceTimersByTimeAsync(10000);
+      expect(waitActivity.outputSections).toEqual([
+        { kind: "text", text: "本次等待结束，后台进程仍在运行" },
+        { kind: "text", text: "进程输出：开始核对 运营简报.txt" },
+      ]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("文件内容、文件名和历史会话搜索使用各自的活动详情", async () => {
+    vi.useFakeTimers();
+    try {
+      for (const [trigger, title, pattern, firstTitle, firstSource] of [
+        ["演示工具：搜索文件内容", "搜索文件内容", "良率", "分析资料/良率样例.csv:1", "日期,良率"],
+        ["演示工具：搜索文件", "搜索文件", "*.csv", "分析资料/良率样例.csv", ""],
+        ["演示工具：搜索历史对话", "搜索历史对话", "良率", "分析本周良率波动", "2026-10-10 09:15:00 · 帮我分析本周良率变化"],
+      ]) {
+        const conversation = demo.createConversation("exp_quality", trigger);
+        demo.sendDemoMessage(conversation.id, trigger);
+        const activity = conversation.turns[0].activities[0];
+        expect(activity.title).toBe(title);
+        expect(activity.argumentSummary).toBe(pattern);
+        await vi.advanceTimersByTimeAsync(10000);
+        expect(activity.outputSections[0].items[0]).toMatchObject({
+          title: firstTitle,
+          source: firstSource,
+        });
+        if (activity.name === "search_files")
+          expect(activity.inputDetail).toBe("搜索范围：分析资料");
+        else
+          expect(activity.outputSections[0].items[0].sessionId).toBe(
+            "conv_quality_1",
+          );
+      }
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("普通触发与专项触发共用相同工具的进度及详情结构", async () => {
+    vi.useFakeTimers();
+    try {
+      for (const [generic, specific, name] of [
+        ["演示过程", "演示工具：读取文件", "read_file"],
+        ["查看进度", "演示工具：读取网页", "web_extract"],
+        ["工具详情", "演示工具：执行命令", "terminal"],
+        ["文件差异", "演示工具：修改文件", "patch"],
+      ]) {
+        const genericTurn = demo.createConversation("exp_quality", generic);
+        const specificTurn = demo.createConversation("exp_quality", specific);
+        demo.sendDemoMessage(genericTurn.id, generic);
+        demo.sendDemoMessage(specificTurn.id, specific);
+        const first = genericTurn.turns[0].activities[0];
+        const second = specificTurn.turns[0].activities[0];
+        expect(first.name).toBe(name);
+        expect(second.name).toBe(name);
+        if (name === "read_file") {
+          expect(first.argumentSummary).toBe(second.argumentSummary);
+          expect(first.inputDetail).toBe(second.inputDetail);
+        }
+        await vi.advanceTimersByTimeAsync(4000);
+        expect(Boolean(first.progressText)).toBe(Boolean(second.progressText));
+        if (name === "read_file")
+          expect(first.progressText).toBe(second.progressText);
+        await vi.advanceTimersByTimeAsync(8000);
+        expect(first.status).toBe("complete");
+        expect(second.status).toBe("complete");
+        expect(hasToolDetail(first)).toBe(true);
+        expect(first.outputSections.map((section) => section.kind)).toEqual(
+          second.outputSections.map((section) => section.kind),
+        );
+      }
+
+      const ops = demo.createConversation("exp_ops", "演示过程");
+      demo.sendDemoMessage(ops.id, "演示过程");
+      const activity = ops.turns[0].activities[0];
+      expect(activity.inputDetail).toBe("");
+      await vi.advanceTimersByTimeAsync(4000);
+      expect(activity.progressText).toBe("");
+      await vi.advanceTimersByTimeAsync(8000);
+      expect(activity.outputSections[0]).toMatchObject({
+        kind: "read",
+        range: "第 1 行，共 1 行",
+        preview: "运营简报演示文件。",
+      });
+
+      const parallel = demo.createConversation("exp_quality", "并行工具");
+      demo.sendDemoMessage(parallel.id, "并行工具");
+      expect(parallel.turns[0].activities.map((item) => item.name)).toEqual([
+        "read_file",
+        "search_files",
+      ]);
+      await vi.advanceTimersByTimeAsync(4000);
+      expect(parallel.turns[0].activities[0].progressText).toBe("");
+      expect(parallel.turns[0].activities[1].progressText).toBeTruthy();
+      await vi.advanceTimersByTimeAsync(8000);
+      expect(parallel.turns[0].activities.every(hasToolDetail)).toBe(true);
+
+      const process = demo.createConversation("exp_quality", "并行过程");
+      demo.sendDemoMessage(process.id, "并行过程");
+      await vi.advanceTimersByTimeAsync(12000);
+      expect(process.turns[0].activities.map((item) => item.name)).toEqual([
+        "read_file",
+        "search_files",
+      ]);
+      expect(process.turns[0].interims).toHaveLength(1);
+      expect(process.turns[0].activities.map((item) => item.outputSections)).toEqual(
+        parallel.turns[0].activities.map((item) => item.outputSections),
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+  it("普通等待文字不触发阶段，明确演示的模型等待不生成思考活动", async () => {
+    vi.useFakeTimers();
+    try {
+      const ordinary = demo.createConversation("exp_quality", "普通等待指令");
+      demo.sendDemoMessage(ordinary.id, "请等待");
+      expect(ordinary.turns[0].stages).toEqual([]);
+      expect(ordinary.turns[0].activities).toEqual([]);
+
+      const waiting = demo.createConversation("exp_quality", "模型等待演示");
+      demo.sendDemoMessage(waiting.id, "演示模型等待");
+      expect(waiting.turns[0].stages).toMatchObject([
+        { kind: "model_wait", state: "running" },
+      ]);
+      expect(waiting.turns[0].activities).toEqual([]);
+      await vi.advanceTimersByTimeAsync(5000);
+      expect(waiting.turns[0].stages[0].state).toBe("complete");
+      expect(waiting.turns[0].activities).toEqual([]);
     } finally {
       vi.useRealTimers();
     }
@@ -1342,7 +1858,7 @@ describe("演示状态", () => {
       vi.useRealTimers();
     }
   });
-  it("多题澄清只接受完整有效答案，审批通过后失败与授权决定分开记录", async () => {
+  it("多题澄清只接受完整有效答案，审批文案中的失败不触发整轮失败", async () => {
     vi.useFakeTimers();
     try {
       const multi = demo.createConversation("exp_quality", "多题澄清");
@@ -1370,8 +1886,15 @@ describe("演示状态", () => {
       expect(request.answers).toEqual({ time: "最近一周", line: ["1 号产线"] });
       expect(multi.turns[0].status).toBe("complete");
 
-      const approval = demo.createConversation("exp_quality", "审批失败");
-      demo.sendDemoMessage(approval.id, "请审批后演示失败");
+      const ordinary = demo.createConversation("exp_quality", "审批分析");
+      demo.sendDemoMessage(ordinary.id, "请审批，分析失败原因");
+      await vi.advanceTimersByTimeAsync(10000);
+      expect(ordinary.turns[0].requests).toHaveLength(0);
+      expect(ordinary.turns[0].status).toBe("complete");
+      expect(ordinary.messages[1].error).toBe("");
+
+      const approval = demo.createConversation("exp_quality", "明确审批演示");
+      demo.sendDemoMessage(approval.id, "请审批");
       await vi.advanceTimersByTimeAsync(10000);
       const decision = approval.turns[0].requests[0];
       expect(demo.resolveDemoRequest(approval.id, decision.id, "once")).toBe(
@@ -1379,8 +1902,9 @@ describe("演示状态", () => {
       );
       await vi.advanceTimersByTimeAsync(2000);
       expect(decision.response).toBe("once");
-      expect(approval.turns[0].status).toBe("error");
-      expect(approval.messages[1].error).toContain("后续操作失败");
+      expect(approval.turns[0].status).toBe("complete");
+      expect(approval.messages[1].error).toBe("");
+      expect(approval.turns[0].activities.at(-1).status).toBe("complete");
     } finally {
       vi.useRealTimers();
     }

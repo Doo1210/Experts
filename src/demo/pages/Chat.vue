@@ -213,7 +213,7 @@
                                   step.title
                                 }}</span>
                                 <span
-                                  v-if="step.argumentSummary"
+                                  v-if="step.argumentSummary && !isRoutineProcessCheck(step)"
                                   class="pc-process-step-target"
                                   >{{ step.argumentSummary }}</span
                                 >
@@ -243,6 +243,7 @@
                                 expandedActivityIds.includes(step.id)
                               "
                               class="pc-process-detail"
+                              :class="{ 'is-process-manage': step.name === 'process_manage' }"
                             >
                               <template v-if="step.kind === 'subagent'">
                                 <div v-if="step.argumentSummary">
@@ -278,20 +279,21 @@
                               <template v-else>
                                 <div
                                   v-if="
-                                    step.kind === 'tool' &&
-                                    toolStatusNeedsDetail(step)
+                                    step.inputDetail &&
+                                    (['terminal', 'execute_code'].includes(
+                                      step.name,
+                                    ) || isMcpTool(step))
                                   "
+                                  class="pc-tool-output-label"
                                 >
-                                  当前状态：{{
-                                    activityStatusLabel(step.status)
-                                  }}
+                                  {{ isMcpTool(step) ? '请求参数' : '运行参数' }}
                                 </div>
                                 <pre
                                   v-if="
                                     step.inputDetail &&
-                                    ['terminal', 'execute_code'].includes(
+                                    (['terminal', 'execute_code'].includes(
                                       step.name,
-                                    )
+                                    ) || isMcpTool(step))
                                   "
                                   class="pc-tool-code"
                                   >{{ step.inputDetail }}</pre>
@@ -301,13 +303,16 @@
                                 <div
                                   v-if="
                                     step.kind === 'tool' &&
+                                    !isMcpTool(step) &&
                                     step.status === 'running' &&
                                     step.progressText
                                   "
                                 >
                                   当前进展：{{ step.progressText }}
                                 </div>
-                                <div v-if="step.detail">{{ step.detail }}</div>
+                                <div v-if="step.detail && !isMcpTool(step)">
+                                  {{ step.detail }}
+                                </div>
                                 <template
                                   v-if="
                                     step.outputSections &&
@@ -331,10 +336,84 @@
                                       v-if="section.kind === 'code'"
                                       class="pc-tool-code"
                                       >{{ section.text }}</pre>
-                                    <pre
+                                    <ConversationDiff
                                       v-else-if="section.kind === 'diff'"
-                                      class="pc-tool-diff"
-                                      >{{ section.text }}</pre>
+                                      class="pc-activity-file-diff"
+                                      :text="section.text"
+                                      :path="step.argumentSummary"
+                                      title="本次改动"
+                                    />
+                                    <div
+                                      v-else-if="section.kind === 'read'"
+                                      class="pc-tool-read-detail"
+                                    >
+                                      <div v-if="section.range">
+                                        {{
+                                          section.extractedDocument
+                                            ? "提取文本范围"
+                                            : "读取范围"
+                                        }}：{{ section.range }}
+                                      </div>
+                                      <div v-if="section.partial">
+                                        本次仅返回部分内容
+                                      </div>
+                                      <div
+                                        v-if="section.preview"
+                                        class="pc-tool-read-preview"
+                                      >
+                                        内容预览：{{ section.preview }}
+                                      </div>
+                                    </div>
+                                    <div
+                                      v-else-if="section.kind === 'web'"
+                                      class="pc-tool-web-detail"
+                                    >
+                                      <div class="pc-tool-web-summary">{{ section.summary }}</div>
+                                      <ul class="pc-tool-web-list">
+                                        <li
+                                          v-for="(item, itemIndex) in section.items"
+                                          :key="itemIndex"
+                                        >
+                                          <el-popover
+                                            v-if="item.preview"
+                                            trigger="hover"
+                                            placement="top"
+                                            popper-class="pc-web-preview-popper"
+                                            :open-delay="80"
+                                          >
+                                            <div class="pc-web-preview-text">
+                                              {{ item.preview }}
+                                            </div>
+                                            <a
+                                              v-if="item.href"
+                                              slot="reference"
+                                              class="pc-tool-web-link"
+                                              :href="item.href"
+                                              target="_blank"
+                                              rel="noopener noreferrer"
+                                              >{{ item.title }}</a
+                                            >
+                                            <span v-else slot="reference">{{
+                                              item.title
+                                            }}</span>
+                                          </el-popover>
+                                          <a
+                                            v-else-if="item.href"
+                                            class="pc-tool-web-link"
+                                            :href="item.href"
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            >{{ item.title }}</a
+                                          >
+                                          <span v-else>{{ item.title }}</span>
+                                          <small
+                                            v-if="item.error"
+                                            class="pc-tool-web-error"
+                                            >{{ item.error }}</small
+                                          >
+                                        </li>
+                                      </ul>
+                                    </div>
                                     <ul
                                       v-else-if="section.kind === 'list'"
                                       class="pc-tool-result-list"
@@ -345,7 +424,18 @@
                                         ) in section.items"
                                         :key="itemIndex"
                                       >
-                                        {{ item.title }}
+                                        <button
+                                          v-if="
+                                            step.name === 'session_search' &&
+                                            sessionSearchTask(item)
+                                          "
+                                          type="button"
+                                          class="pc-tool-session-link"
+                                          @click="selectTask(sessionSearchTask(item))"
+                                        >
+                                          {{ item.title }}
+                                        </button>
+                                        <template v-else>{{ item.title }}</template>
                                         <span v-if="item.source">{{
                                           item.source
                                         }}</span>
@@ -354,14 +444,23 @@
                                     <div v-else>{{ section.text }}</div>
                                   </div>
                                 </template>
-                                <pre
+                                <ConversationDiff
                                   v-else-if="
                                     step.outputDetail &&
                                     step.outputKind === 'diff'
                                   "
-                                  class="pc-tool-diff"
-                                  >{{ step.outputDetail }}</pre>
+                                  class="pc-activity-file-diff"
+                                  :text="step.outputDetail"
+                                  :path="step.argumentSummary"
+                                  title="本次改动"
+                                />
                                 <div v-else-if="step.outputDetail">
+                                  <div
+                                    v-if="isMcpTool(step)"
+                                    class="pc-tool-output-label"
+                                  >
+                                    返回结果
+                                  </div>
                                   {{ step.outputDetail }}
                                 </div>
                                 <div
@@ -392,6 +491,7 @@
                         "
                         :key="block.id"
                         class="pc-expired-request"
+                        :class="{ 'is-approval': block.request.kind === 'approval' }"
                       >
                         <span class="pc-expired-request-icon" aria-hidden="true"
                           ><i
@@ -402,7 +502,11 @@
                         <div class="pc-expired-request-content">
                           <div
                             class="pc-expired-request-question"
-                            :title="block.request.prompt"
+                            :title="
+                              block.request.kind === 'approval'
+                                ? block.request.actionTitle || block.request.prompt
+                                : block.request.prompt
+                            "
                           >
                             {{
                               block.request.kind === "approval"
@@ -412,11 +516,7 @@
                             }}
                           </div>
                           <div class="pc-expired-request-footer">
-                            <span class="pc-expired-request-status">{{
-                              block.request.kind === "approval"
-                                ? "审批已超时 · 未授权"
-                                : "已超时"
-                            }}</span>
+                            <span class="pc-expired-request-status">已超时</span>
                             <span
                               v-if="block.request.lateAnswer"
                               class="pc-expired-request-result"
@@ -465,11 +565,7 @@
                               acceptedAnswerLabel(block.request, question.qid)
                             "
                             class="pc-human-answer"
-                          >
-                            {{
-                              acceptedAnswerLabel(block.request, question.qid)
-                            }}
-                          </strong>
+                          >{{ acceptedAnswerLabel(block.request, question.qid) }}</strong>
                         </span>
                         <strong
                           v-if="
@@ -485,9 +581,7 @@
                             !(block.request.questions || []).length
                           "
                           class="pc-human-answer"
-                        >
-                          {{ requestResponseLabel(block.request) }}
-                        </strong>
+                        >{{ requestResponseLabel(block.request) }}</strong>
                       </div>
                       <div
                         v-else-if="block.type === 'correction'"
@@ -499,9 +593,7 @@
                             requestPromptById(block.requestId)
                           }}</span
                         >
-                        <strong class="pc-human-answer">{{
-                          block.text
-                        }}</strong>
+                        <strong class="pc-human-answer">{{ block.text }}</strong>
                       </div>
                       <div
                         v-else
@@ -535,13 +627,27 @@
                     tabindex="0"
                     @scroll="hideResultPathTooltip"
                   >
-                    <div
+                    <el-popover
                       v-for="item in turnResultFiles(message)"
                       :key="item.resultId"
-                      class="pc-result-file-card"
-                      :class="`is-${item.operation}`"
-                      role="listitem"
+                      trigger="hover"
+                      placement="top"
+                      popper-class="pc-result-diff-popover"
+                      :open-delay="80"
+                      :disabled="!item.roundDiff"
                     >
+                      <ConversationDiff
+                        v-if="item.roundDiff"
+                        :text="item.roundDiff"
+                        :path="item.path || item.name"
+                        title="本轮改动"
+                      />
+                      <div
+                        slot="reference"
+                        class="pc-result-file-card"
+                        :class="`is-${item.operation}`"
+                        role="listitem"
+                      >
                       <span class="pc-result-file-icon" aria-hidden="true"
                         ><i
                           :class="
@@ -553,38 +659,7 @@
                       <span class="pc-result-file-copy">
                         <span class="pc-result-file-heading">
                           <strong :title="item.name">{{ item.name }}</strong>
-                          <el-popover
-                            v-if="item.roundDiff"
-                            trigger="hover"
-                            placement="top"
-                            popper-class="pc-result-diff-popover"
-                            :open-delay="80"
-                          >
-                            <div class="pc-result-diff-head">本轮改动</div>
-                            <div class="pc-result-diff-body">
-                              <div
-                                v-for="(line, index) in item.roundDiff.split(
-                                  '\n',
-                                )"
-                                :key="index"
-                                :class="{
-                                  'is-added': line.startsWith('+'),
-                                  'is-removed': line.startsWith('-'),
-                                }"
-                              >
-                                {{ line }}
-                              </div>
-                            </div>
-                            <button
-                              slot="reference"
-                              type="button"
-                              class="pc-result-file-kind is-interactive"
-                              :aria-label="`查看 ${item.name} 的本轮改动`"
-                            >
-                              {{ resultOperationLabel(item.operation) }}
-                            </button>
-                          </el-popover>
-                          <span v-else class="pc-result-file-kind">{{
+                          <span class="pc-result-file-kind">{{
                             resultOperationLabel(item.operation)
                           }}</span>
                         </span>
@@ -636,6 +711,7 @@
                         </el-tooltip>
                       </span>
                     </div>
+                    </el-popover>
                   </div>
                   <div
                     v-for="result in turnTodoResults(message)"
@@ -801,9 +877,7 @@
                       requestPromptById(message.replyToRequestId)
                     }}</span
                   >
-                  <strong class="pc-human-answer">{{
-                    lateClarificationText(message.content)
-                  }}</strong>
+                  <strong class="pc-human-answer">{{ lateClarificationText(message.content) }}</strong>
                 </div>
                 <div v-else-if="message.content" class="pc-user-bubble">
                   {{ message.content }}
@@ -1092,14 +1166,7 @@
                     :disabled="clarifySubmitting"
                     @click="skipClarification"
                   >
-                    {{
-                      clarifyQuestions.length > 1 &&
-                      clarifyQuestions.some((question) =>
-                        hasAcceptedClarifyAnswer(question.qid),
-                      )
-                        ? "跳过剩余问题"
-                        : "跳过"
-                    }}</button
+                    跳过</button
                   ><button
                     v-if="clarifyQuestionIndex > 0"
                     type="button"
@@ -1133,18 +1200,23 @@
                   v-if="activeInteraction.kind === 'approval'"
                   class="pc-approval-context"
                 >
-                  <strong>{{
+                  <strong v-if="!activeInteraction.safeCommand">{{
                     activeInteraction.actionTitle || "待授权操作"
                   }}</strong>
-                  <code v-if="activeInteraction.safeCommand">{{
-                    activeInteraction.safeCommand
-                  }}</code>
-                  <p>
-                    {{
-                      activeInteraction.actionDetail ||
-                      activeInteraction.content
-                    }}
-                  </p>
+                  <el-popover
+                    v-if="activeInteraction.safeCommand"
+                    trigger="hover"
+                    placement="top-start"
+                    popper-class="pc-approval-command-popper"
+                    :open-delay="100"
+                  >
+                    <pre class="pc-approval-command-full">{{
+                      activeInteraction.safeCommand
+                    }}</pre>
+                    <code slot="reference" tabindex="0">{{
+                      activeInteraction.safeCommand
+                    }}</code>
+                  </el-popover>
                 </div>
                 <p v-else>{{ activeInteraction.content }}</p>
                 <div
@@ -2524,6 +2596,7 @@ import { avatarSrcFor } from "../avatar";
 import {
   conversationProcessBlocks,
   formatTurnDuration,
+  turnResultsVisible,
 } from "../conversation-turns";
 import { hasToolDetail } from "../conversation-tools";
 import {
@@ -2531,6 +2604,7 @@ import {
   todoProgress,
 } from "../conversation-session-state";
 import ConversationMarkdown from "../components/ConversationMarkdown.vue";
+import ConversationDiff from "../components/ConversationDiff.vue";
 function approvalDisplayRequest(request) {
   if (request?.kind !== "approval") return request;
   const legacyTitle = {
@@ -2545,9 +2619,11 @@ function approvalDisplayRequest(request) {
         : request.prompt,
     actionTitle: legacyTitle[request.actionTitle] || request.actionTitle,
     actionDetail:
-      request.actionDetail ===
-      "此操作需要授权；允许后仅尝试执行，实际结果另行显示。"
-        ? "该命令需要授权，结果将单独呈现。"
+      [
+        "此操作需要授权；允许后仅尝试执行，实际结果另行显示。",
+        "该命令需要授权，结果将单独呈现。",
+      ].includes(request.actionDetail)
+        ? ""
         : request.actionDetail === "读取示例文件，允许后仅尝试执行。"
           ? "该文件需要读取授权。"
           : request.actionDetail,
@@ -2580,7 +2656,7 @@ function saveBlob(blob, name) {
 }
 export default {
   name: "DemoChatPage",
-  components: { ConversationMarkdown },
+  components: { ConversationMarkdown, ConversationDiff },
   data() {
     return {
       state,
@@ -3754,8 +3830,8 @@ export default {
       return (
         {
           running: "处理中",
-          recovering: "正在恢复 · 核对回合状态",
-          unknown: "运行异常 · 未能确认本轮结束状态",
+          recovering: "正在恢复",
+          unknown: "运行异常",
           waiting: "等待回应",
           complete: "已完成",
           interrupted: "已中断",
@@ -3798,6 +3874,7 @@ export default {
     },
     turnResultFiles(message) {
       const turn = this.turnFor(message);
+      if (!turnResultsVisible(turn)) return [];
       return (turn?.results || [])
         .filter((result) => result.kind === "file")
         .map((result) => {
@@ -3907,7 +3984,9 @@ export default {
       return this.turnFor(message)?.risks || [];
     },
     turnTodoResults(message) {
-      return (this.turnFor(message)?.results || []).filter(
+      const turn = this.turnFor(message);
+      if (!turnResultsVisible(turn)) return [];
+      return (turn.results || []).filter(
         (result) => result.kind === "todo" && result.items?.length,
       );
     },
@@ -3968,15 +4047,24 @@ export default {
           ? `${this.activityGroupName(activity)} · ${progressOrStatus}`
           : this.activityGroupName(activity);
       });
-      if (running.length > 2) visible.push(`另有 ${running.length - 2} 项`);
-      return visible.join("、");
+      return running.length > 2
+        ? `${visible.join("、")}等${running.length}项`
+        : visible.join("、");
     },
     activityGroupName(activity) {
       if (activity.kind === "subagent" && activity.argumentSummary)
         return `子代理（${activity.argumentSummary}）`;
+      if (
+        activity.kind === "tool" &&
+        ["terminal", "execute_code", "process_manage"].includes(activity.name)
+      )
+        return activity.title;
       if (activity.kind === "tool" && activity.argumentSummary)
         return `${activity.title} · ${activity.argumentSummary}`;
       return activity.title;
+    },
+    isMcpTool(activity) {
+      return String(activity?.name || "").startsWith("mcp__");
     },
     activityGroupLabel(activities, message) {
       const turnStatus = this.turnFor(message)?.status;
@@ -3984,9 +4072,14 @@ export default {
         ? this.runningActivitiesLabel(activities)
         : "";
       if (running) return `正在推进：${running}`;
-      return `处理经过：${[
+      const names = [
         ...new Set(activities.map((item) => item.title).filter(Boolean)),
-      ].join("、")}`;
+      ];
+      const summary =
+        activities.length > 3
+          ? `${names.slice(0, 2).join("、")}等${activities.length}项`
+          : names.join("、");
+      return `处理经过：${summary}`;
     },
     activityGroupRunning(activities, message) {
       return (
@@ -4047,19 +4140,43 @@ export default {
         .filter(Boolean)
         .join("\n\n");
     },
-    toolStatusNeedsDetail(activity) {
-      return ["error", "rejected", "interrupted", "unknown"].includes(
-        activity.status,
+    isRoutineProcessCheck(activity) {
+      return (
+        activity.name === "process_manage" &&
+        ["查询后台进程", "等待后台进程"].includes(activity.title)
       );
     },
     hasActivityDetail(activity) {
-      if (activity.kind === "tool") return hasToolDetail(activity);
+      if (activity.kind === "tool") {
+        if (this.isRoutineProcessCheck(activity)) {
+          if (["running", "requested"].includes(activity.status)) return false;
+          const sections = activity.outputSections || [];
+          const result = sections[0]?.text;
+          const extra = sections.slice(1);
+          if (
+            activity.status === "complete" &&
+            ["进程状态：运行中", "本次等待结束，后台进程仍在运行"].includes(result) &&
+            extra.length <= 1 &&
+            extra.every(
+              (section) =>
+                section.kind === "text" &&
+                /^(近期输出|进程输出)：/.test(section.text || ""),
+            )
+          )
+            return false;
+        }
+        return hasToolDetail(activity);
+      }
       return true;
     },
     childConversationFor(activity) {
       if (activity.kind !== "subagent" || !activity.childSessionId) return null;
       const child = conversationById(activity.childSessionId);
       return child?.expertId === this.expert?.id ? child : null;
+    },
+    sessionSearchTask(item) {
+      const task = item?.sessionId ? conversationById(item.sessionId) : null;
+      return task?.expertId === this.expert?.id && !task.archived ? task : null;
     },
     processExpanded(message) {
       return (
@@ -4569,7 +4686,6 @@ export default {
       if (!result) return this.$message.warning("回复暂未提交，请稍后重试");
       this.closeLateClarification();
       this.clockNow = Date.now();
-      this.$message.success("回复已提交");
       this.$nextTick(this.scrollBottom);
     },
     createFolder() {

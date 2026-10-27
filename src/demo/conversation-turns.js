@@ -3,11 +3,16 @@ import {
   toolArgumentSummary,
   toolOutcome,
   toolInputText,
+  memoryStatusText,
   toolOutputSections,
+  toolPendingApproval,
   toolProgressText,
 } from "./conversation-tools";
 
 const terminalStatuses = new Set(["complete", "interrupted", "error"]);
+export function turnResultsVisible(turn) {
+  return terminalStatuses.has(turn?.status);
+}
 const errorFallback = /^Error:\s*/i;
 const lifecycleText = {
   waiting_model: "正在等待回复",
@@ -22,6 +27,17 @@ function safeNotice(value) {
       "$1[已隐藏]",
     );
   return text.startsWith("{") || text.startsWith("[") ? "" : text.slice(0, 200);
+}
+
+function safeCommandText(value) {
+  return String(value || "")
+    .replace(/\r\n?/g, "\n")
+    .replace(/[\u0000-\u0008\u000b-\u001f\u007f]/g, "")
+    .replace(
+      /((?:password|token|api[_-]?key|secret)\s*[=:]\s*)\S+/gi,
+      "$1[已隐藏]",
+    )
+    .trim();
 }
 
 function appendNotice(assistant, ...values) {
@@ -246,6 +262,60 @@ export function normalizeConversationTurns(conversation) {
     changed = true;
   }
   for (const turn of conversation.turns) {
+    const assistant = conversation.messages.find(
+      (message) => message.id === turn.assistantMessageId,
+    );
+    const user = conversation.messages.find(
+      (message) => message.id === turn.userMessageId,
+    );
+    const legacyApprovalFailure = (turn.requests || []).some(
+      (request) => request.kind === "approval" && request.failAfterApproval,
+    );
+    const legacyApprovalDemo =
+      user?.content?.trim() === "请审批后演示失败" &&
+      (turn.requests || []).some((request) => request.kind === "approval");
+    if (legacyApprovalFailure || legacyApprovalDemo) {
+      if (
+        turn.status === "error" &&
+        /^后续(?:演示)?操作失败/.test(assistant?.error || "")
+      ) {
+        turn.status = "complete";
+        assistant.status = "done";
+        assistant.error = "";
+        changed = true;
+      }
+      for (const request of turn.requests)
+        if (Object.prototype.hasOwnProperty.call(request, "failAfterApproval")) {
+          delete request.failAfterApproval;
+          changed = true;
+        }
+    }
+    const legacyAnalysisIds = new Set(
+      (turn.activities || [])
+        .filter(
+          (activity) =>
+            activity.kind === "tool" &&
+            !activity.name &&
+            ["分析任务", "分析资料"].includes(activity.title),
+        )
+        .map((activity) => activity.id),
+    );
+    if (legacyAnalysisIds.size) {
+      turn.activities = turn.activities.filter(
+        (activity) => !legacyAnalysisIds.has(activity.id),
+      );
+      turn.groups = (turn.groups || [])
+        .map((group) => ({
+          ...group,
+          activityIds: group.activityIds.filter(
+            (id) => !legacyAnalysisIds.has(id),
+          ),
+        }))
+        .filter((group) => group.activityIds.length);
+      if (!turn.groups.some((group) => group.id === turn.activeGroupId))
+        turn.activeGroupId = null;
+      changed = true;
+    }
     if (!Array.isArray(turn.stages)) {
       turn.stages = [];
       changed = true;
@@ -348,9 +418,6 @@ export function normalizeConversationTurns(conversation) {
     turn.status = "unknown";
     turn.temporary = null;
     finishActiveStages(turn);
-    const assistant = conversation.messages.find(
-      (message) => message.id === turn.assistantMessageId,
-    );
     if (assistant) assistant.status = "stopped";
     for (const activity of turn.activities)
       if (["running", "requested"].includes(activity.status)) {
@@ -542,7 +609,7 @@ export function applyConversationEvent(conversation, event) {
       appendNotice(assistant, event.message);
       if (event.terminal) {
         turn.status = "recovering";
-        turn.temporary = "正在核对回合状态";
+        turn.temporary = null;
         conversation.status = "recovering";
       }
       break;
@@ -692,7 +759,7 @@ export function applyConversationEvent(conversation, event) {
           id: activityId,
           kind: event.kind || (isTool ? "tool" : "activity"),
           name: isTool ? event.name || "" : "",
-          title: event.title || (isTool ? toolAction(event.name) : "活动"),
+          title: event.title || (isTool ? toolAction(event.name, event.args) : "活动"),
           detail: event.detail || "",
           argumentSummary: isTool
             ? toolArgumentSummary(event.name, event.args)
@@ -719,7 +786,10 @@ export function applyConversationEvent(conversation, event) {
       const activityId = event.activityId || event.toolId;
       const activity = turn.activities.find((item) => item.id === activityId);
       if (activity && activity.status === "running") {
-        if (event.type === "tool.progress") {
+        if (
+          event.type === "tool.progress" &&
+          !["web_search", "web_extract"].includes(activity.name)
+        ) {
           const progress = toolProgressText(event);
           if (progress) {
             activity.progressText = progress;
@@ -743,13 +813,32 @@ export function applyConversationEvent(conversation, event) {
     case "activity.complete":
     case "tool.complete": {
       const activityId = event.activityId || event.toolId;
+      if (
+        event.type === "tool.complete" &&
+        toolPendingApproval({
+          ...event,
+          name:
+            event.name ||
+            turn.activities.find((item) => item.id === activityId)?.name,
+        })
+      ) {
+        turn.activities = turn.activities.filter((item) => item.id !== activityId);
+        turn.groups = turn.groups.filter((group) => {
+          group.activityIds = group.activityIds.filter((id) => id !== activityId);
+          return group.activityIds.length > 0;
+        });
+        if (!turn.groups.some((group) => group.id === turn.activeGroupId))
+          turn.activeGroupId = null;
+        turn.temporary = null;
+        break;
+      }
       let activity = turn.activities.find((item) => item.id === activityId);
       if (!activity && activityId) {
         activity = {
           id: activityId,
           kind: event.kind || "tool",
           name: event.name || "",
-          title: event.title || toolAction(event.name),
+          title: event.title || toolAction(event.name, event.args),
           detail: "",
           argumentSummary: toolArgumentSummary(event.name, event.args),
           progressText: "",
@@ -772,6 +861,8 @@ export function applyConversationEvent(conversation, event) {
             : event.error
               ? "error"
               : "complete";
+        if (event.type === "tool.complete")
+          activity.statusText = memoryStatusText(activity.name, event.result);
         activity.detail = event.detail || activity.detail;
         if (
           event.type === "activity.complete" &&
@@ -805,6 +896,11 @@ export function applyConversationEvent(conversation, event) {
               typeof event.error === "string"
                 ? safeNotice(event.error)
                 : "执行失败";
+          if (activity.name === "memory") {
+            activity.detail = "";
+            activity.outputDetail = "";
+            activity.outputKind = "text";
+          }
         }
       }
       break;
@@ -907,10 +1003,9 @@ export function applyConversationEvent(conversation, event) {
                 label: safeNotice(choice.label || choice),
               }))
             : [],
-          failAfterApproval: Boolean(event.failAfterApproval),
           actionTitle: safeNotice(event.actionTitle),
           actionDetail: safeNotice(event.actionDetail),
-          safeCommand: safeNotice(event.safeCommand),
+          safeCommand: safeCommandText(event.safeCommand),
           openedSeq: event.seq,
           status: "waiting",
           response: null,

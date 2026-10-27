@@ -2,11 +2,10 @@ const TOOL_ACTIONS = {
   web_search: "搜索网页",
   x_search: "搜索 X",
   web_extract: "读取网页",
-  session_search: "搜索历史对话",
   read_file: "读取文件",
+  list_files: "查看工作目录",
   write_file: "写入文件",
   patch: "修改文件",
-  search_files: "搜索文件",
   terminal: "执行命令",
   process_manage: "管理后台进程",
   execute_code: "运行代码",
@@ -18,11 +17,11 @@ const TOOL_ACTIONS = {
   xai_video_edit: "编辑视频",
   xai_video_extend: "编辑视频",
   text_to_speech: "生成语音",
-  skills_list: "查看技能",
+  skills_list: "查看可用技能",
   skill_view: "查看技能",
   skill_manage: "管理技能",
   todo_list: "管理待办",
-  memory: "管理记忆",
+  memory: "更新记忆",
   cronjob_manage: "管理定时任务",
   setup_mcp: "配置 MCP 服务",
   desktop_preview: "操作桌面界面",
@@ -60,6 +59,19 @@ function safePath(value) {
     : path.replace(/^\.\//, "");
 }
 
+function safeResultPath(value) {
+  const path = safePath(value);
+  if (!path) return "";
+  return path.split("/").includes("..") ? path.split("/").at(-1) || "" : path;
+}
+
+function safeSessionTime(value) {
+  const time = short(value, 48);
+  return /^\d{4}-\d{2}-\d{2}T/.test(time)
+    ? time.replace("T", " ").slice(0, 19)
+    : time;
+}
+
 function safeSource(value) {
   const source = String(value || "");
   if (source.startsWith("data:")) return "";
@@ -71,6 +83,23 @@ function safeUrl(value) {
     const url = new URL(String(value));
     if (!/^https?:$/.test(url.protocol)) return "";
     return short(url.hostname + url.pathname, 80);
+  } catch {
+    return "";
+  }
+}
+
+function safeWebHref(value) {
+  try {
+    const url = new URL(String(value));
+    if (!/^https?:$/.test(url.protocol) || url.username || url.password)
+      return "";
+    if (
+      [...url.searchParams.keys()].some((key) =>
+        /(?:token|secret|password|api[_-]?key|auth|signature|session)/i.test(key),
+      )
+    )
+      return "";
+    return url.href;
   } catch {
     return "";
   }
@@ -96,8 +125,63 @@ function redact(value) {
   return short(redactSensitive(value, 200, false));
 }
 
-export function toolAction(name) {
+function safeMcpValue(value, depth = 0) {
+  if (depth > 4) return "[内容已省略]";
+  if (Array.isArray(value))
+    return value.slice(0, 20).map((item) => safeMcpValue(item, depth + 1));
+  if (value && typeof value === "object")
+    return Object.fromEntries(
+      Object.entries(value)
+        .slice(0, 30)
+        .map(([key, item]) => [
+          short(key, 80),
+          /password|token|secret|api[_-]?key|authorization|cookie|credential|private[_-]?key/i.test(key)
+            ? "[已隐藏]"
+            : safeMcpValue(item, depth + 1),
+        ]),
+    );
+  if (typeof value === "string")
+    return redactSensitive(value.replace(/MEDIA:\S+/g, "[媒体内容]"), 1200);
+  return value;
+}
+
+function safeMcpText(value) {
+  if (value == null || value === "") return "";
+  if (typeof value === "object" && !Object.keys(value).length) return "";
+  const safe = safeMcpValue(value);
+  return redactSensitive(
+    typeof safe === "string" ? safe : JSON.stringify(safe, null, 2),
+    1800,
+  );
+}
+
+export function toolAction(name, args = {}) {
   const value = String(name || "");
+  if (value.startsWith("mcp__")) return `调用外部工具 · ${value}`;
+  if (value === "todo_list")
+    return Array.isArray(args?.todos) ? "更新执行计划" : "查看执行计划";
+  if (value === "terminal")
+    return args?.background ? "启动后台命令" : "执行命令";
+  if (value === "process_manage")
+    return {
+      list: "查看后台进程",
+      poll: "查询后台进程",
+      log: "读取进程日志",
+      wait: "等待后台进程",
+      kill: "终止后台进程",
+      write: "写入进程输入",
+      submit: "提交进程输入",
+      close: "关闭进程输入",
+      handoff: "移交后台进程",
+    }[args?.action] || "管理后台进程";
+  if (value === "search_files")
+    return args?.target === "files" ? "搜索文件" : "搜索文件内容";
+  if (value === "session_search") {
+    if (args?.session_id && args?.around_message_id)
+      return "查看历史对话片段";
+    if (args?.session_id) return "读取历史对话";
+    return args?.query ? "搜索历史对话" : "浏览近期对话";
+  }
   if (TOOL_ACTIONS[value]) return TOOL_ACTIONS[value];
   if (value.startsWith("browser_")) return "操作浏览器";
   if (value.startsWith("ha_")) return "操作智能家居";
@@ -119,9 +203,7 @@ export function toolArgumentSummary(name, args) {
     return path ? path + line : "";
   }
   if (name === "search_files") {
-    const pattern = redact(args.pattern);
-    const path = safePath(args.path);
-    return [pattern, path].filter(Boolean).join(" · ");
+    return redact(args.pattern);
   }
   if (["web_search", "x_search", "session_search"].includes(name))
     return redact(args.query);
@@ -144,9 +226,9 @@ export function toolArgumentSummary(name, args) {
     );
   }
   if (name === "process_manage")
-    return [short(args.action, 24), short(args.session_id, 20)]
-      .filter(Boolean)
-      .join(" · ");
+    return ["poll", "wait"].includes(args.action)
+      ? ""
+      : short(args.session_id, 24);
   if (name === "vision_analyze") return safeSource(args.image_url);
   if (name === "video_analyze") return safeSource(args.video_url);
   if (name === "browser_navigate") return safeUrl(args.url);
@@ -154,6 +236,9 @@ export function toolArgumentSummary(name, args) {
   if (name === "desktop_preview" && args.action === "查看当前窗口")
     return "查看当前窗口";
   if (name === "setup_mcp") return short(args.server, 60);
+  if (name === "memory") {
+    return "";
+  }
   if (["skill_view", "skill_manage"].includes(name))
     return short(args.name, 60);
   return "";
@@ -176,46 +261,39 @@ export function toolProgressText(event) {
 
 export function toolInputText(name, args) {
   if (!args || typeof args !== "object") return "";
-  if (name === "read_file")
-    return [
-      Number.isInteger(args.offset) && args.offset > 1
-        ? `起始行：${args.offset}`
-        : "",
-      Number.isInteger(args.limit) && args.limit > 0
-        ? `最多读取：${args.limit} 行`
-        : "",
-    ]
-      .filter(Boolean)
-      .join("\n");
+  if (name.startsWith("mcp__")) return safeMcpText(args);
+  if (name === "read_file") return "";
   if (name === "write_file") return "";
-  if (
-    [
-      "patch",
-      "search_files",
-      "web_search",
-      "x_search",
-      "session_search",
-    ].includes(name)
-  )
-    return "";
-  if (name === "web_extract") {
-    const urls = Array.isArray(args.urls) ? args.urls : [];
-    return urls.length > 1
-      ? urls
-          .map(safeUrl)
-          .filter(Boolean)
-          .map((url) => `网页：${url}`)
-          .join("\n")
-      : "";
+  if (name === "search_files") {
+    const path = safePath(args.path);
+    const parts = [
+      path && path !== "." ? `搜索范围：${path}` : "",
+      args.file_glob ? `文件筛选：${redact(args.file_glob)}` : "",
+    ];
+    return parts.filter(Boolean).join("\n");
   }
+  if (["patch", "web_search", "x_search", "session_search"].includes(name))
+    return "";
+  if (name === "web_extract") return "";
   if (name === "terminal" && typeof args.command === "string") {
-    const command = redactSensitive(args.command);
-    const cwd = safePath(args.cwd);
-    return cwd ? `${command}\n工作目录：${cwd}` : command;
+    return `命令：${redactSensitive(args.command, 4000)}`;
   }
   if (name === "execute_code" && typeof args.code === "string")
-    return redactSensitive(args.code);
-  if (name === "process_manage") return "";
+    return [
+      `代码：\n${redactSensitive(args.code, 4000)}`,
+      Object.prototype.hasOwnProperty.call(args, "reset")
+        ? `重置运行环境：${args.reset ? "是" : "否"}`
+        : "",
+    ].filter(Boolean).join("\n");
+  if (name === "process_manage")
+    return [
+      Number.isInteger(args.timeout) ? `等待上限：${args.timeout} 秒` : "",
+      Number.isInteger(args.offset) ? `日志起始行：${args.offset}` : "",
+      Number.isInteger(args.limit) ? `最多读取日志：${args.limit} 行` : "",
+      Object.prototype.hasOwnProperty.call(args, "data")
+        ? "输入内容：已隐藏"
+        : "",
+    ].filter(Boolean).join("\n");
   if (
     name === "browser_navigate" ||
     name === "computer_use" ||
@@ -258,6 +336,17 @@ function toolResultValue(result) {
   }
 }
 
+export function toolPendingApproval(event) {
+  const result = toolResultValue(event.result);
+  return Boolean(
+    event.name === "terminal" &&
+      result &&
+      typeof result === "object" &&
+      result.status === "pending_approval" &&
+      result.approval_pending === true,
+  );
+}
+
 export function toolOutcome(event) {
   const status = String(event.status || "").toLowerCase();
   if (["denied", "rejected", "blocked"].includes(status)) return "rejected";
@@ -266,6 +355,18 @@ export function toolOutcome(event) {
   if (["error", "failed", "timeout"].includes(status)) return "error";
 
   const result = toolResultValue(event.result);
+  if (event.name === "terminal" && result && typeof result === "object") {
+    const resultStatus = String(result.status || "").toLowerCase();
+    if (["blocked", "denied", "rejected"].includes(resultStatus))
+      return "rejected";
+    if (["cancelled", "canceled", "interrupted"].includes(resultStatus))
+      return "interrupted";
+    if (resultStatus === "pending_approval") return "unknown";
+  }
+  if (event.name === "execute_code" && result && typeof result === "object") {
+    if (result.status === "interrupted") return "interrupted";
+    if (["error", "timeout"].includes(result.status)) return "error";
+  }
   if (
     event.error ||
     (result &&
@@ -335,10 +436,40 @@ export function toolOutputSections(
   inlineDiff,
   outcome = "complete",
 ) {
-  if (typeof inlineDiff === "string" && inlineDiff.trim())
-    return [{ kind: "diff", text: redactSensitive(inlineDiff) }];
   const value = toolResultValue(result);
-  if (["error", "rejected", "interrupted", "unknown"].includes(outcome)) {
+  if (name === "memory") return [];
+  const rawDiff =
+    ["patch", "write_file", "skill_manage"].includes(name) &&
+    value &&
+    typeof value === "object" &&
+    typeof value.diff === "string" &&
+    value.diff.trim()
+      ? value.diff
+      : inlineDiff;
+  if (typeof rawDiff === "string" && rawDiff.trim())
+    return [{ kind: "diff", text: redactSensitive(rawDiff) }];
+  if (name.startsWith("mcp__")) {
+    let payload = value;
+    if (value && typeof value === "object") {
+      if (value.error != null) payload = value.error;
+      else if (Object.prototype.hasOwnProperty.call(value, "structuredContent"))
+        payload = value.structuredContent;
+      else if (Object.prototype.hasOwnProperty.call(value, "result"))
+        payload = value.result;
+    }
+    const output = safeMcpText(payload);
+    return output
+      ? [{
+          kind: payload && typeof payload === "object" ? "code" : "text",
+          label: "返回结果",
+          text: output,
+        }]
+      : [];
+  }
+  if (
+    ["error", "rejected", "interrupted", "unknown"].includes(outcome) &&
+    !["terminal", "execute_code", "process_manage"].includes(name)
+  ) {
     const reason =
       value && typeof value === "object"
         ? value.error || value.message
@@ -348,56 +479,242 @@ export function toolOutputSections(
     if (typeof reason === "string" && reason.trim())
       return [{ kind: "text", text: redactSensitive(reason.trim(), 300) }];
   }
+  if (name === "read_file" && value && typeof value === "object") {
+    if (value.dedup || value.content_returned === false)
+      return [{ kind: "text", text: "文件未变化，本次未重复返回内容。" }];
+    const content = typeof value.content === "string" ? value.content : "";
+    if (!content) {
+      if (value.total_lines === 0)
+        return [{ kind: "text", text: "文件为空。" }];
+      return [];
+    }
+    const rows = content.split(/\r?\n/);
+    const numbered = rows
+      .map((row) => /^(\d+)\|(.*)$/.exec(row))
+      .filter(Boolean);
+    const first = numbered.length ? Number(numbered[0][1]) : null;
+    const last = numbered.length
+      ? Number(numbered[numbered.length - 1][1])
+      : null;
+    const end = Number.isInteger(value.next_offset) && value.next_offset > 1
+      ? value.next_offset - 1
+      : last;
+    const total = Number.isInteger(value.total_lines) && value.total_lines >= 0
+      ? value.total_lines
+      : null;
+    const range = Number.isInteger(first) && Number.isInteger(end)
+      ? `第 ${first}${first === end ? "" : `–${end}`} 行${total === null ? "" : `，共 ${total} 行`}`
+      : "";
+    const previewLine = (numbered.find((row) => row[2].trim())?.[2] || rows[0])
+      .replace(/^\d+\|/, "")
+      .trim();
+    return [{
+      kind: "read",
+      range,
+      preview: redactSensitive(previewLine, 500, false),
+      partial: value.truncated === true,
+      extractedDocument: value.extracted_document === true,
+    }];
+  }
   if (
     ["terminal", "execute_code"].includes(name) &&
     value &&
     typeof value === "object"
   ) {
     const sections = [];
-    const outputFields =
-      outcome === "error"
-        ? [
-            ["stderr", "错误输出"],
-            ["stdout", "标准输出"],
-          ]
-        : [
-            ["stdout", "标准输出"],
-            ["stderr", "错误输出"],
-          ];
-    for (const [key, label] of outputFields)
-      if (typeof value[key] === "string" && value[key].trim())
-        sections.push({
-          kind: "code",
-          label,
-          text: redactSensitive(value[key].trim()),
-        });
+    if (value.session_id)
+      sections.push({
+        kind: "text",
+        text: `后台进程已启动 · ${short(value.session_id, 32)}`,
+      });
     if (
-      name === "terminal" &&
+      typeof value.output === "string" &&
+      value.output.trim() &&
+      !(value.session_id && value.output.trim() === "Background process started")
+    )
+      sections.push({
+        kind: "code",
+        label: "执行结果",
+        text: redactSensitive(value.output.trim()),
+      });
+    if (!sections.some((section) => section.kind === "code"))
+      for (const [key, label] of [
+        ["stdout", "标准输出"],
+        ["stderr", "错误输出"],
+      ])
+        if (typeof value[key] === "string" && value[key].trim())
+          sections.push({
+            kind: "code",
+            label,
+            text: redactSensitive(value[key].trim()),
+          });
+    if (
+      typeof value.error === "string" &&
+      value.error.trim() &&
+      !String(value.output || "").includes(value.error.trim())
+    )
+      sections.push({
+        kind: "text",
+        text: `${["rejected", "interrupted"].includes(outcome) ? "原因" : "错误"}：${redactSensitive(value.error.trim(), 300)}`,
+      });
+    if (
       Number.isInteger(value.exit_code) &&
-      value.exit_code !== 0
+      value.exit_code !== 0 &&
+      !["blocked", "cancelled", "pending_approval"].includes(value.status)
     )
       sections.push({ kind: "text", text: `退出码：${value.exit_code}` });
     if (sections.length) return sections;
   }
   if (name === "search_files" && value && typeof value === "object") {
+    const files = Array.isArray(value.files) ? value.files : [];
+    if (files.length) {
+      const items = files
+        .slice(0, 10)
+        .map((path) => ({ title: safeResultPath(path), source: "" }))
+        .filter((item) => item.title);
+      if (items.length) return [{ kind: "list", items }];
+    }
     const matches = Array.isArray(value.matches)
       ? value.matches
       : Array.isArray(value.results)
         ? value.results
         : [];
-    const items = matches
-      .slice(0, 10)
-      .map((item) => {
-        const path =
-          typeof item === "string"
-            ? item
-            : item && typeof item === "object"
-              ? item.path || item.name
-              : "";
-        return { title: safePath(path), source: "" };
-      })
-      .filter((item) => item.title);
+    const items = matches.slice(0, 10).map((item) => {
+      const path =
+        typeof item === "string"
+          ? item
+          : item && typeof item === "object"
+            ? item.path || item.name
+            : "";
+      const line = Number.isInteger(item?.line) && item.line > 0
+        ? `:${item.line}`
+        : "";
+      return {
+        title: safeResultPath(path) + line,
+        source:
+          item && typeof item === "object" && item.content
+            ? short(redactSensitive(item.content, 180, false), 180)
+            : "",
+      };
+    }).filter((item) => item.title);
+    if (!items.length && typeof value.matches_text === "string") {
+      let currentPath = "";
+      for (const row of value.matches_text.split(/\r?\n/)) {
+        const match = /^\s+(\d+):\s?(.*)$/.exec(row);
+        if (match && currentPath) {
+          items.push({
+            title: `${currentPath}:${match[1]}`,
+            source: short(redactSensitive(match[2], 180, false), 180),
+          });
+          if (items.length >= 10) break;
+        } else if (row && !/^\s/.test(row)) {
+          currentPath = safeResultPath(row);
+        }
+      }
+    }
     if (items.length) return [{ kind: "list", items }];
+    if (value.counts && typeof value.counts === "object") {
+      const counts = Object.entries(value.counts)
+        .slice(0, 10)
+        .map(([path, count]) => ({
+          title: safeResultPath(path),
+          source: Number.isFinite(count) ? `${count} 处命中` : "",
+        }))
+        .filter((item) => item.title);
+      if (counts.length) return [{ kind: "list", items: counts }];
+    }
+  }
+  if (name === "session_search" && value && typeof value === "object") {
+    const results = Array.isArray(value.results) ? value.results : [];
+    if (results.length) {
+      const items = results.slice(0, 10).map((item) => {
+        const time = safeSessionTime(item?.when || item?.started_at || "");
+        const snippet = short(
+          redactSensitive(item?.snippet || item?.preview || "", 160, false)
+            .replace(/<[^>]+>/g, ""),
+          160,
+        );
+        return {
+          title: redact(item?.title) || "历史会话",
+          source: [time, snippet].filter(Boolean).join(" · "),
+          sessionId: String(item?.session_id || ""),
+        };
+      });
+      return [{ kind: "list", items }];
+    }
+    const meta = value.session_meta;
+    if (meta && typeof meta === "object") {
+      const anchor = Array.isArray(value.messages)
+        ? value.messages.find((message) => message.anchor)
+        : null;
+      const source = anchor?.content
+        ? short(redactSensitive(anchor.content, 160, false), 160)
+        : Number.isInteger(value.message_count)
+          ? `${value.message_count} 条消息`
+          : "";
+      return [{
+        kind: "list",
+        items: [{
+          title: redact(meta.title) || "历史会话",
+          source,
+          sessionId: String(value.session_id || ""),
+        }],
+      }];
+    }
+  }
+  if (name === "web_search" && value && typeof value === "object") {
+    const results = Array.isArray(value.data?.web)
+      ? value.data.web
+      : Array.isArray(value.results)
+        ? value.results
+        : null;
+    if (results) {
+      const items = results.map((item) => {
+        const source = safeUrl(item?.url);
+        return {
+          title: redact(item?.title) || source || "未命名网页",
+          source,
+          href: safeWebHref(item?.url),
+          preview: String(item?.description || "").trim()
+            ? redactSensitive(item.description, 600)
+            : "",
+        };
+      });
+      return [{
+        kind: "web",
+        summary: `共搜索 ${results.length} 个网页`,
+        items,
+      }];
+    }
+  }
+  if (name === "web_extract" && value && typeof value === "object") {
+    const results = Array.isArray(value.results) ? value.results : null;
+    if (results) {
+      const readCount = results.filter(
+        (item) => !item?.error && String(item?.content || "").trim(),
+      ).length;
+      const items = results.map((item) => {
+        const source = safeUrl(item?.url);
+        return {
+          title: redact(item?.title) || source || "未命名网页",
+          source,
+          href: safeWebHref(item?.url),
+          preview: String(item?.content || "").trim()
+            ? redactSensitive(item.content, 600)
+            : "",
+          error: item?.error
+            ? redactSensitive(item.error, 180)
+            : !item?.content
+              ? "未取得网页正文"
+              : "",
+        };
+      });
+      return [{
+        kind: "web",
+        summary: `已读取 ${readCount}/${results.length} 个网页`,
+        items,
+      }];
+    }
   }
   const searchResults =
     value && typeof value === "object"
@@ -408,7 +725,7 @@ export function toolOutputSections(
           : null
       : null;
   if (
-    ["web_search", "x_search", "session_search"].includes(name) &&
+    name === "x_search" &&
     searchResults
   ) {
     const items = searchResults
@@ -425,17 +742,56 @@ export function toolOutputSections(
     if (items.length) return [{ kind: "list", items }];
   }
   if (name === "process_manage" && value && typeof value === "object") {
-    const processStatus = String(value.process_status || "").toLowerCase();
-    const label = {
-      running: "运行中",
-      completed: "已结束",
-      failed: "运行失败",
-      cancelled: "已取消",
-    }[processStatus];
-    if (label) return [{ kind: "text", text: `后台进程：${label}` }];
+    const sections = [];
+    const processStatus = String(value.status || value.process_status || "").toLowerCase();
+    const label =
+      processStatus === "timeout" && value.process_running
+        ? "本次等待结束，后台进程仍在运行"
+        : {
+            running: "进程状态：运行中",
+            exited: "进程状态：已结束",
+            completed: "进程状态：已结束",
+            failed: "进程状态：运行失败",
+            killed: "进程状态：已终止",
+            interrupted: "本次等待已中断",
+            not_found: "未找到后台进程",
+          }[processStatus];
+    if (label) sections.push({ kind: "text", text: label });
+    const output = typeof value.output === "string" && value.output.trim()
+      ? value.output
+      : value.output_preview;
+    if (typeof output === "string" && output.trim()) {
+      const safeOutput = redactSensitive(output.trim());
+      if (!safeOutput.includes("\n") && safeOutput.length <= 180)
+        sections.push({
+          kind: "text",
+          text: `${value.output ? "进程输出" : "近期输出"}：${safeOutput}`,
+        });
+      else
+        sections.push({
+          kind: "code",
+          label: value.output ? "进程输出" : "近期输出",
+          text: safeOutput,
+        });
+    }
+    if (Array.isArray(value.processes) && value.processes.length)
+      sections.push({
+        kind: "list",
+        items: value.processes.slice(0, 10).map((process) => ({
+          title: short(process?.session_id, 32),
+          source: short(process?.status, 24),
+        })).filter((item) => item.title),
+      });
+    if (typeof value.error === "string" && value.error.trim())
+      sections.push({
+        kind: "text",
+        text: `错误：${redactSensitive(value.error.trim(), 300)}`,
+      });
+    if (Number.isInteger(value.exit_code) && value.exit_code !== 0)
+      sections.push({ kind: "text", text: `退出码：${value.exit_code}` });
+    if (sections.length) return sections;
   }
   const summaryAllowed = [
-    "read_file",
     "search_files",
     "session_search",
     "web_search",
@@ -457,6 +813,14 @@ export function toolOutputSections(
     if (text) return [{ kind: "code", text }];
   }
   return [];
+}
+
+export function memoryStatusText(name, result) {
+  if (name !== "memory") return "";
+  const value = toolResultValue(result);
+  return value && typeof value === "object" && value.staged === true
+    ? "待审批"
+    : "";
 }
 
 export function hasToolDetail(activity) {

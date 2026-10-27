@@ -5,6 +5,7 @@ import {
   normalizeConversationTurns,
   formatTurnDuration,
   conversationProcessBlocks,
+  turnResultsVisible,
 } from "./conversation-turns";
 
 function makeConversation() {
@@ -31,6 +32,120 @@ function makeConversation() {
 }
 
 describe("本地回合事件", () => {
+  it("工具产出先保存，最终回复收口后才展示结果卡", () => {
+    const session = makeConversation();
+    const base = { sessionId: session.id, turnId: "turn1" };
+    applyConversationEvent(session, {
+      ...base,
+      seq: 1,
+      type: "result.add",
+      resultId: "file-result",
+      kind: "file",
+      fileId: "report",
+      name: "报告.md",
+      operation: "created",
+    });
+    expect(session.turns[0].results).toHaveLength(1);
+    expect(turnResultsVisible(session.turns[0])).toBe(false);
+    applyConversationEvent(session, {
+      ...base,
+      seq: 2,
+      type: "message.interim",
+      text: "报告已保存，继续整理结论。",
+    });
+    expect(turnResultsVisible(session.turns[0])).toBe(false);
+    applyConversationEvent(session, {
+      ...base,
+      seq: 3,
+      type: "message.complete",
+      status: "complete",
+      text: "结论已整理。",
+    });
+    expect(turnResultsVisible(session.turns[0])).toBe(true);
+    expect(turnResultsVisible({ status: "interrupted" })).toBe(true);
+    expect(turnResultsVisible({ status: "error" })).toBe(true);
+    expect(turnResultsVisible({ status: "unknown" })).toBe(false);
+  });
+  it("旧审批失败演示恢复为单项工具失败，不保留回合尾部错误", () => {
+    const session = makeConversation();
+    const turn = session.turns[0];
+    turn.status = "error";
+    turn.requests.push({
+      id: "legacy-approval",
+      kind: "approval",
+      status: "resolved",
+      failAfterApproval: true,
+    });
+    turn.activities.push({
+      id: "failed-tool",
+      kind: "tool",
+      name: "terminal",
+      title: "执行命令",
+      status: "error",
+      outputSections: [{ kind: "text", text: "后续操作失败" }],
+    });
+    session.messages[1].status = "error";
+    session.messages[1].error = "后续操作失败，请核查相关资料。";
+
+    expect(normalizeConversationTurns(session)).toBe(true);
+    expect(turn.status).toBe("complete");
+    expect(turn.activities[0].status).toBe("error");
+    expect(session.messages[1]).toMatchObject({ status: "done", error: "" });
+    expect(turn.requests[0]).not.toHaveProperty("failAfterApproval");
+
+    const older = makeConversation();
+    older.messages[0].content = "请审批后演示失败";
+    older.messages[1].status = "error";
+    older.messages[1].error = "后续演示操作失败，请核查演示数据。";
+    older.turns[0].status = "error";
+    older.turns[0].requests.push({
+      id: "older-approval",
+      kind: "approval",
+      status: "resolved",
+    });
+    expect(normalizeConversationTurns(older)).toBe(true);
+    expect(older.turns[0].status).toBe("complete");
+    expect(older.messages[1]).toMatchObject({ status: "done", error: "" });
+  });
+
+  it("阻断和取消按结果状态结算，待审批结果交给人工请求", () => {
+    const session = makeConversation();
+    const emit = (seq, type, payload) =>
+      applyConversationEvent(session, {
+        sessionId: session.id,
+        turnId: "turn1",
+        seq,
+        type,
+        ...payload,
+      });
+    emit(1, "tool.start", { toolId: "blocked", name: "terminal", args: { command: "echo A" } });
+    emit(2, "tool.complete", {
+      toolId: "blocked", name: "terminal",
+      result: { status: "blocked", output: "", exit_code: -1, error: "安全策略阻止" },
+    });
+    emit(3, "tool.start", { toolId: "cancelled", name: "terminal", args: { command: "echo B" } });
+    emit(4, "tool.complete", {
+      toolId: "cancelled", name: "terminal",
+      result: { status: "cancelled", output: "", exit_code: -1, error: "执行被取消" },
+    });
+    emit(5, "tool.start", { toolId: "approval", name: "terminal", args: { command: "echo C" } });
+    emit(6, "tool.complete", {
+      toolId: "approval", name: "terminal",
+      result: { status: "pending_approval", approval_pending: true, exit_code: -1, error: "" },
+    });
+    emit(7, "request.open", {
+      requestId: "approval1", kind: "approval", prompt: "是否允许运行？",
+      choices: [{ value: "once", label: "允许本次" }, { value: "deny", label: "拒绝" }],
+    });
+    expect(session.turns[0].activities.map((item) => item.status)).toEqual([
+      "rejected", "interrupted",
+    ]);
+    expect(session.turns[0].groups[0].activityIds).toEqual(["blocked", "cancelled"]);
+    expect(session.turns[0].requests[0]).toMatchObject({ id: "approval1", status: "waiting" });
+    expect(session.turns[0].activities[0].outputSections).toEqual([
+      { kind: "text", text: "原因：安全策略阻止" },
+    ]);
+  });
   it("按回合序号去重，并按 ID 分别结算同名并行活动", () => {
     const session = makeConversation();
     const emit = (seq, type, payload = {}) =>
@@ -284,7 +399,7 @@ describe("本地回合事件", () => {
     expect(session.messages[1].error).toBe("Error: 数据源不可用");
     expect(session.turns[0].status).toBe("error");
   });
-  it("工具进度在同一调用内替换参数摘要，收口后不留正在进行文案", () => {
+  it("网页读取活动不展示模拟逐页进度，结束后在详情统计结果", () => {
     const session = makeConversation();
     const emit = (seq, type, payload) =>
       applyConversationEvent(session, {
@@ -307,15 +422,24 @@ describe("本地回合事件", () => {
       argumentSummary: "example.com/a 等 2 个网页",
     });
     emit(2, "tool.progress", { toolId: "web1", preview: "已读取 2/5 个网页" });
-    expect(activity.progressText).toBe("已读取 2/5 个网页");
+    expect(activity.progressText).toBe("");
     emit(3, "tool.progress", {
       toolId: "web1",
       preview: "正在读取第 3 个网页",
     });
-    expect(activity.progressText).toBe("正在读取第 3 个网页");
-    emit(4, "tool.complete", { toolId: "web1", result: { verified: true } });
+    expect(activity.progressText).toBe("");
+    emit(4, "tool.complete", {
+      toolId: "web1",
+      result: {
+        results: [
+          { url: "https://example.com/a", title: "报告 A", content: "正文" },
+          { url: "https://example.org/b", title: "报告 B", error: "超时" },
+        ],
+      },
+    });
     expect(activity.progressText).toBe("");
     expect(activity.outputDetail).toBe("");
+    expect(activity.outputSections[0].summary).toBe("已读取 1/2 个网页");
     expect(activity.argumentSummary).toBe("example.com/a 等 2 个网页");
     expect(session.turns[0].activities).toHaveLength(1);
   });
@@ -334,12 +458,12 @@ describe("本地回合事件", () => {
       name: "terminal",
       args: {
         command: "run --token private-value",
-        cwd: "C:\\private\\reports",
+        workdir: "C:\\private\\reports",
       },
     });
     emit(2, "tool.complete", {
       toolId: "cmd1",
-      result: { exit_code: 1, stderr: "运行失败" },
+      result: { exit_code: 1, output: "运行失败", error: "命令失败" },
     });
     emit(3, "tool.output_risk", {
       toolId: "cmd1",
@@ -348,10 +472,11 @@ describe("本地回合事件", () => {
     });
     expect(session.turns[0].activities[0]).toMatchObject({
       status: "error",
-      inputDetail: "run --token [已隐藏]\n工作目录：reports",
+      inputDetail: "命令：run --token [已隐藏]",
       outputDetail: "",
       outputSections: [
-        { kind: "code", label: "错误输出", text: "运行失败" },
+        { kind: "code", label: "执行结果", text: "运行失败" },
+        { kind: "text", text: "错误：命令失败" },
         { kind: "text", text: "退出码：1" },
       ],
     });
@@ -409,8 +534,12 @@ describe("本地回合事件", () => {
     emit(1, "tool.start", { toolId: "read", title: "读取文件" });
     emit(2, "tool.complete", { toolId: "read" });
     emit(3, "message.delta", { text: "最终回复的前半段" });
-    emit(4, "tool.start", { toolId: "analyze", title: "分析任务" });
-    emit(5, "tool.complete", { toolId: "analyze" });
+    emit(4, "tool.start", {
+      toolId: "search",
+      name: "search_files",
+      args: { pattern: "异常" },
+    });
+    emit(5, "tool.complete", { toolId: "search" });
     emit(6, "message.complete", {
       status: "complete",
       text: "最终回复的完整内容",
@@ -420,7 +549,7 @@ describe("本地回合事件", () => {
       conversationProcessBlocks(session.turns[0]).map((block) =>
         block.activities.map((activity) => activity.id),
       ),
-    ).toEqual([["read", "analyze"]]);
+    ).toEqual([["read", "search"]]);
 
     const withRequest = makeConversation();
     const requestEvent = (seq, type, payload) =>
@@ -445,7 +574,11 @@ describe("本地回合事件", () => {
       requestId: "approval1",
       response: "approved",
     });
-    requestEvent(4, "tool.start", { toolId: "after", title: "分析任务" });
+    requestEvent(4, "tool.start", {
+      toolId: "after",
+      name: "search_files",
+      args: { pattern: "异常" },
+    });
     expect(
       conversationProcessBlocks(withRequest.turns[0]).map((block) =>
         block.type === "group"
@@ -453,6 +586,88 @@ describe("本地回合事件", () => {
           : block.type,
       ),
     ).toEqual([["before"], "request", ["after"]]);
+  });
+
+  it("审批命令保留多行供完整查看，同时隐藏敏感参数", () => {
+    const session = makeConversation();
+    applyConversationEvent(session, {
+      sessionId: session.id,
+      turnId: "turn1",
+      seq: 1,
+      type: "request.open",
+      requestId: "approval-command",
+      kind: "approval",
+      prompt: "运行分析脚本",
+      safeCommand:
+        "python scripts/analyze_yield.py \\\n  --input 分析资料/良率样例.csv \\\n  --token=private-value \\\n  --output 分析结果/报告.md",
+    });
+
+    expect(session.turns[0].requests[0].safeCommand).toBe(
+      "python scripts/analyze_yield.py \\\n  --input 分析资料/良率样例.csv \\\n  --token=[已隐藏] \\\n  --output 分析结果/报告.md",
+    );
+  });
+
+  it("记忆工具的失败与待审批留在活动行，不生成详情", () => {
+    for (const [result, status, statusText] of [
+      [{ success: false, error: "记忆空间已满" }, "error", ""],
+      [{ success: true, staged: true, pending_id: "p1" }, "complete", "待审批"],
+    ]) {
+      const session = makeConversation();
+      const emit = (seq, type, payload) =>
+        applyConversationEvent(session, {
+          sessionId: session.id,
+          turnId: "turn1",
+          seq,
+          type,
+          ...payload,
+        });
+      emit(1, "tool.start", {
+        toolId: "memory1",
+        name: "memory",
+        args: { action: "replace", target: "memory" },
+      });
+      emit(2, "tool.complete", {
+        toolId: "memory1",
+        name: "memory",
+        result,
+        error: status === "error" ? "记忆空间已满" : false,
+        inlineDiff: "--- a/MEMORY.md\n+++ b/MEMORY.md\n@@ -1 +1 @@\n-旧\n+新",
+      });
+      expect(session.turns[0].activities[0]).toMatchObject({
+        status,
+        statusText,
+        detail: "",
+        outputDetail: "",
+        outputSections: [],
+      });
+    }
+  });
+
+  it("恢复旧演示任务时移除伪装成工具的分析活动", () => {
+    const session = makeConversation();
+    const emit = (seq, type, payload) =>
+      applyConversationEvent(session, {
+        sessionId: session.id,
+        turnId: "turn1",
+        seq,
+        type,
+        ...payload,
+      });
+    emit(1, "tool.start", {
+      toolId: "read",
+      name: "read_file",
+      args: { path: "运营简报.txt" },
+    });
+    emit(2, "tool.start", { toolId: "fake", title: "分析任务" });
+    emit(3, "tool.complete", { toolId: "fake" });
+    emit(4, "tool.complete", { toolId: "read" });
+    expect(normalizeConversationTurns(session)).toBe(true);
+    expect(session.turns[0].activities.map((activity) => activity.id)).toEqual([
+      "read",
+    ]);
+    expect(conversationProcessBlocks(session.turns[0])[0].activities).toHaveLength(
+      1,
+    );
   });
 
   it("大量连续活动仍归入一个按开始顺序排列的活动组", () => {
@@ -557,12 +772,12 @@ describe("本地回合事件", () => {
     emit(8, "tool.complete", {
       toolId: "pending",
       name: "read_file",
-      result: { summary: "已读取 5 行" },
+      result: { content: "1|日期,良率\n2|2026-10-08,97.2%", total_lines: 5, truncated: true },
     });
     expect(session.turns[0].activities[2]).toMatchObject({
       status: "complete",
       endedSeq: 8,
-      outputSections: [{ kind: "text", text: "已读取 5 行" }],
+      outputSections: [{ kind: "read", range: "第 1–2 行，共 5 行", partial: true }],
     });
     expect(session.turns[0].status).toBe("complete");
     expect(session.messages[1].content).toBe("已根据可用资料作答");
