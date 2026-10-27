@@ -102,7 +102,7 @@
 | --- | --- | --- | --- |
 | `演示工具：生成结果文件` | 工具活动＋回合文件卡 | 写入确认本身无详情；文件名下方显示 `workspace/演示核对报告.md`，卡片分别提供预览、下载，均使用本轮快照。该文件会加入工作空间；不是真实 Hermes 工具执行。 | `write_file(path=演示核对报告.md,content=演示正文)`；`verified=true` 后，本地 `result.add(operation=created,sourceToolId=本次调用)`。 |
 | `演示产出：多个文件` | 12 张新建文件卡 | 不显示额外标题与数量汇总；文件卡随宽度分列，最多四列，路径位于文件名下方并以 `workspace/` 开始；超出容器高度时内部上下滚动。 | 复用 §2.1“写入文件”建立 12 次独立调用，每次写一个批次报告；各有自己的 `tool_id`、活动行及一条 `result.add(operation=created,sourceToolId=本次调用)`。 |
-| `演示产出：修改文件` | 既有文件修改卡 | 卡片标为“已修改”，悬停标签查看本轮差异，预览和下载使用同一本轮版本。 | 一次模拟 `patch(path=当前专家文件)`；完成后 `result.add(operation=modified,sourceToolId=本次调用)`；路径随专家变更。 |
+| `演示产出：修改文件` | 既有文件修改卡 | 卡片标为“修改”，悬停卡片查看本轮差异，预览和下载使用同一本轮版本。 | 一次模拟 `patch(path=当前专家文件)`；完成后 `result.add(operation=modified,sourceToolId=本次调用)`；路径随专家变更。 |
 | `演示产出：新建和修改文件` | 同一回合含两条工具活动、两张文件卡 | 先模拟写入 `质量核对摘要.md`，再修改当前专家的演示文件；两张卡分别关联工具与本轮版本。 | 顺序复用 §2.1“写入文件”和“修改文件”，各有独立 `tool_id` 与 `tool.complete`；分别发 `result.add(created/modified)`。 |
 
 ## 3. 人工介入

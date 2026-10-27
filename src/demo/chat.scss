@@ -504,15 +504,8 @@
   background: #fff;
   transition: background-color 0.15s ease;
 }
-.pc-result-file-card.is-modified {
-  border-color: #deebe4;
-  background: #fbfdfc;
-}
 .pc-result-file-card:hover {
   background: #f8fafc;
-}
-.pc-result-file-card.is-modified:hover {
-  background: #f4faf6;
 }
 .pc-result-file-icon {
   display: grid;
@@ -524,10 +517,6 @@
   background: #f0f5ff;
   color: #4080ff;
   font-size: 14px;
-}
-.pc-result-file-card.is-modified .pc-result-file-icon {
-  background: #eaf6f0;
-  color: #398a6c;
 }
 .pc-result-file-copy {
   display: block;
@@ -596,12 +585,10 @@
   font-size: 11px;
   line-height: 16px;
 }
-.pc-result-file-card.is-created .pc-result-file-kind {
-  color: #6684b9;
-}
+.pc-result-file-card.is-created .pc-result-file-kind,
 .pc-result-file-card.is-modified .pc-result-file-kind,
 .pc-result-file-card.is-created-modified .pc-result-file-kind {
-  color: #4e9675;
+  color: #6684b9;
 }
 .pc-result-file-actions {
   display: flex;
@@ -3465,11 +3452,6 @@
   background: #fff;
   color: #4080ff;
   font-size: 20px;
-}
-.pc-dialog-icon.is-modified {
-  border-color: #cde9da;
-  background: #f3faf6;
-  color: #398a6c;
 }
 .pc-dialog-head strong,
 .pc-dialog-head span {

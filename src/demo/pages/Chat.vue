@@ -2529,9 +2529,6 @@
       ><div slot="title" class="pc-dialog-head">
         <div
           class="pc-dialog-icon"
-          :class="{
-            'is-modified': previewItem && previewItem.operation === 'modified',
-          }"
         >
           <i
             :class="
@@ -3975,7 +3972,7 @@ export default {
       return (
         {
           created: "新建",
-          modified: "已修改",
+          modified: "修改",
           created_modified: "新建并修改",
         }[operation] || "文件"
       );
