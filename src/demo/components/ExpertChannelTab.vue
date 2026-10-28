@@ -16,7 +16,13 @@
         :class="{ active: item.id === activeId }"
         @click="activeId = item.id"
       >
-        {{ item.name }}
+        <img
+          class="channel-switcher-icon"
+          :src="channelIcon(item.id)"
+          alt=""
+          aria-hidden="true"
+        />
+        <span>{{ item.name }}</span>
         <small>{{ item.connected ? "已连接" : "未连接" }}</small>
       </button>
     </div>
@@ -733,6 +739,7 @@
 import Vue from "vue";
 import { persist } from "../state";
 import { demoChannelCandidates } from "../channel-target-fixtures";
+import { publicAsset } from "../public-asset";
 import wecomConfigQr from "../assets/wecom-config-qr.svg";
 
 export default {
@@ -913,6 +920,9 @@ export default {
   },
   methods: {
     persist,
+    channelIcon(id) {
+      return publicAsset(`/experts/channel-icons/${id}.svg`);
+    },
     setRequireMention(enabled) {
       Vue.set(this.channel, "requireMention", Boolean(enabled));
       persist();

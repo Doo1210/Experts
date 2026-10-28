@@ -15,6 +15,10 @@ import {
 } from "./conversation-session-state";
 import { clearFiles, deleteFile } from "./file-db";
 import { createImDemoChats, createImWorkspaceItems } from "./im-fixtures";
+import {
+  createEventTaskFixtures,
+  createEventWorkspaceItems,
+} from "./event-task-fixtures";
 import { mcpDemoPreset } from "./mcp-demo";
 import {
   KNOWLEDGE_CATALOG,
@@ -37,7 +41,7 @@ const clone = (value) => JSON.parse(JSON.stringify(value));
 const uid = (prefix) =>
   `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`;
 const now = () => new Date().toISOString();
-const DEMO_DATA_REVISION = 20;
+const DEMO_DATA_REVISION = 29;
 const HUMAN_REQUEST_TIMEOUT_DEMO_MS = 10_000;
 const TEXT_DEMO_TRIGGERS = new Set([
   "演示过程",
@@ -523,6 +527,9 @@ export function createSeed() {
             parentId: null,
             kind: "folder",
           },
+          ...createEventWorkspaceItems(
+            createEventTaskFixtures().filter((event) => event.expertId === "exp_quality"),
+          ),
         ],
       },
       {
@@ -597,6 +604,9 @@ export function createSeed() {
             parentId: null,
             kind: "folder",
           },
+          ...createEventWorkspaceItems(
+            createEventTaskFixtures().filter((event) => event.expertId === "exp_ops"),
+          ),
         ],
       },
       ...ADDITIONAL_EXPERT_SPECS.map(createSupplementalExpert),
@@ -682,31 +692,7 @@ export function createSeed() {
       },
     ],
     imChats: createImDemoChats(),
-    eventRuns: [
-      {
-        id: "evt_daily",
-        expertId: "exp_quality",
-        name: "每日质量巡检",
-        trigger: "Timer",
-        enabled: true,
-        runs: [
-          {
-            id: "run_1",
-            status: "success",
-            at: "2026-10-10T08:00:00+08:00",
-            summary: "已生成质量日报（演示）",
-          },
-        ],
-      },
-      {
-        id: "evt_alert",
-        expertId: "exp_ops",
-        name: "运营异常提醒",
-        trigger: "WebHook",
-        enabled: false,
-        runs: [],
-      },
-    ],
+    eventRuns: createEventTaskFixtures(),
     projects: [
       {
         id: "proj_factory",
@@ -817,8 +803,7 @@ export function upgradeExpertFixtures(saved) {
     const quality = saved.experts.find((item) => item.id === "exp_quality");
     const fixtureIds = new Set([
       "im_wecom_1",
-      "im_exp_quality_group",
-      "im_exp_quality_dm",
+      ...createImDemoChats().map((chat) => chat.id),
     ]);
     saved.imChats = (Array.isArray(saved.imChats) ? saved.imChats : []).filter(
       (chat) => !fixtureIds.has(chat.id),
@@ -1010,6 +995,248 @@ export function upgradeExpertFixtures(saved) {
             wecom[key].push(clone(item));
         }
       }
+    }
+  }
+  if (previousRevision < 21) {
+    const fixtures = createImDemoChats();
+    saved.imChats = Array.isArray(saved.imChats) ? saved.imChats : [];
+    const known = new Set(saved.imChats.map((chat) => chat.id));
+    for (const fixture of fixtures) {
+      const existing = saved.imChats.find((chat) => chat.id === fixture.id);
+      if (existing) {
+        if (!existing.identifierName)
+          existing.identifierName = fixture.identifierName;
+        if (!existing.identifierValue)
+          existing.identifierValue = existing.chatId || fixture.identifierValue;
+      } else if (!known.has(fixture.id)) {
+        saved.imChats.push(clone(fixture));
+      }
+    }
+    const quality = saved.experts.find((expert) => expert.id === "exp_quality");
+    if (quality) {
+      quality.files = Array.isArray(quality.files) ? quality.files : [];
+      const fileIds = new Set(quality.files.map((file) => file.id));
+      for (const item of createImWorkspaceItems(fixtures))
+        if (!fileIds.has(item.id)) quality.files.push(item);
+    }
+  }
+  if (previousRevision < 22) {
+    const fixture = createImDemoChats().find(
+      (chat) => chat.id === "im_exp_quality_feishu-single",
+    );
+    const index = (saved.imChats || []).findIndex(
+      (chat) => chat.id === fixture?.id,
+    );
+    if (fixture && index >= 0) saved.imChats[index] = clone(fixture);
+  }
+  if (previousRevision < 23) {
+    for (const fixture of createImDemoChats()) {
+      const chat = (saved.imChats || []).find((item) => item.id === fixture.id);
+      if (!chat) continue;
+      const fixtureMessages = [
+        ...(fixture.segments || []),
+        ...(fixture.scopes || []).flatMap((scope) => scope.segments || []),
+      ].flatMap((segment) => segment.messages || []);
+      const known = new Map(fixtureMessages.map((item) => [item.id, item]));
+      const savedSegments = [
+        ...(chat.segments || []),
+        ...(chat.scopes || []).flatMap((scope) => scope.segments || []),
+        ...(chat.members || []).flatMap((member) => member.segments || []),
+      ];
+      for (const entry of savedSegments.flatMap(
+        (segment) => segment.messages || [],
+      )) {
+        const source = known.get(entry.id);
+        if (
+          source?.turnStatus &&
+          source.content === entry.content &&
+          !entry.turnStatus
+        )
+          entry.turnStatus = source.turnStatus;
+      }
+    }
+  }
+  if (previousRevision < 24) {
+    const fixtureChat = createImDemoChats().find(
+      (chat) => chat.id === "im_exp_quality_group",
+    );
+    const savedChat = (saved.imChats || []).find(
+      (chat) => chat.id === "im_exp_quality_group",
+    );
+    const fixtureEntries = fixtureChat.scopes.flatMap((scope) =>
+      scope.segments.flatMap((segment) => segment.messages),
+    );
+    const known = new Map(fixtureEntries.map((entry) => [entry.id, entry]));
+    for (const entry of (savedChat?.scopes || []).flatMap((scope) =>
+      scope.segments.flatMap((segment) => segment.messages),
+    )) {
+      const fixture = known.get(entry.id);
+      if (fixture?.title && fixture.content === entry.content && !entry.title)
+        entry.title = fixture.title;
+    }
+    const quality = saved.experts.find((expert) => expert.id === "exp_quality");
+    for (const file of quality?.files || []) {
+      const source = known.get(file.id.replace(/^f_im_file_/, ""));
+      if (source?.role === "file" && file.content === `演示文件：${file.name}`)
+        file.content = source.content || file.content;
+    }
+  }
+  if (previousRevision < 25) {
+    for (const fixture of createImDemoChats()) {
+      const savedChat = (saved.imChats || []).find(
+        (chat) => chat.id === fixture.id,
+      );
+      if (!savedChat) continue;
+      const source = new Map(
+        [
+          ...(fixture.segments || []),
+          ...(fixture.scopes || []).flatMap((scope) => scope.segments || []),
+        ]
+          .flatMap((segment) => segment.messages || [])
+          .map((entry) => [entry.id, entry]),
+      );
+      for (const entry of [
+        ...(savedChat.segments || []),
+        ...(savedChat.scopes || []).flatMap((scope) => scope.segments || []),
+      ].flatMap((segment) => segment.messages || [])) {
+        const sample = source.get(entry.id);
+        if (
+          sample?.content === entry.content &&
+          Number.isFinite(sample.durationMs) &&
+          !Number.isFinite(entry.durationMs)
+        )
+          entry.durationMs = sample.durationMs;
+      }
+    }
+  }
+  if (previousRevision < 26) {
+    const mergeSegments = (savedSegments, fixtureSegments) => {
+      for (const sample of fixtureSegments || []) {
+        const target = (savedSegments || []).find(
+          (segment) => segment.id === sample.id,
+        );
+        if (!target) continue;
+        const existing = new Map(
+          (target.messages || []).map((entry) => [entry.id, entry]),
+        );
+        const sampleIds = new Set(sample.messages.map((entry) => entry.id));
+        const merged = [
+          ...sample.messages.map(
+            (entry) => existing.get(entry.id) || clone(entry),
+          ),
+          ...(target.messages || []).filter(
+            (entry) => !sampleIds.has(entry.id),
+          ),
+        ];
+        for (let index = 0; index < merged.length; index++) {
+          const entry = merged[index];
+          if (existing.has(entry.id)) continue;
+          const previous = merged[index - 1]?.dbId;
+          const next = merged
+            .slice(index + 1)
+            .find(
+              (item) => existing.has(item.id) && Number.isFinite(item.dbId),
+            )?.dbId;
+          if (Number.isFinite(previous) && Number.isFinite(next))
+            entry.dbId = (previous + next) / 2;
+          else if (Number.isFinite(previous)) entry.dbId = previous + 0.5;
+          else if (Number.isFinite(next)) entry.dbId = next - 0.5;
+        }
+        target.messages = merged;
+      }
+    };
+    for (const fixture of createImDemoChats()) {
+      const target = (saved.imChats || []).find(
+        (chat) => chat.id === fixture.id,
+      );
+      if (!target) continue;
+      mergeSegments(target.segments, fixture.segments);
+      for (const sampleScope of fixture.scopes || []) {
+        const savedScope = (target.scopes || []).find(
+          (scope) => scope.id === sampleScope.id,
+        );
+        if (savedScope)
+          mergeSegments(savedScope.segments, sampleScope.segments);
+      }
+    }
+  }
+  if (previousRevision < 27) {
+    const fixtures = createEventTaskFixtures();
+    saved.eventRuns = Array.isArray(saved.eventRuns) ? saved.eventRuns : [];
+    for (const fixture of fixtures) {
+      const existing = saved.eventRuns.find((event) => event.id === fixture.id);
+      if (!existing) {
+        saved.eventRuns.push(clone(fixture));
+        continue;
+      }
+      if (existing.id === "evt_daily" && existing.name === "每日质量巡检")
+        existing.name = fixture.name;
+      for (const key of ["sourceSummary", "sourceName", "cwd", "instruction", "branch", "delivery"])
+        if (!existing[key]) existing[key] = fixture[key];
+      existing.runs = Array.isArray(existing.runs) ? existing.runs : [];
+      const known = new Set(existing.runs.map((run) => run.id));
+      for (const run of fixture.runs)
+        if (!known.has(run.id)) existing.runs.push(clone(run));
+      existing.runs.sort((a, b) => String(b.at || "").localeCompare(String(a.at || "")));
+    }
+    for (const expert of saved.experts) {
+      const events = fixtures.filter((event) => event.expertId === expert.id);
+      if (!events.length) continue;
+      expert.files = Array.isArray(expert.files) ? expert.files : [];
+      const known = new Set(expert.files.map((file) => file.id));
+      for (const item of createEventWorkspaceItems(events))
+        if (!known.has(item.id)) expert.files.push(item);
+    }
+  }
+  if (previousRevision < 28) {
+    const chat = (saved.imChats || []).find(
+      (item) => item.id === "im_exp_quality_feishu-group",
+    );
+    if (chat?.runState === "ready" && !chat.gatewayStatus)
+      chat.runState = "running";
+  }
+  if (previousRevision < 29) {
+    const fixtures = createImDemoChats();
+    for (const id of [
+      "im_exp_quality_dingtalk-group",
+      "im_exp_quality_feishu-group",
+      "im_exp_quality_wecom-single",
+    ]) {
+      const savedChat = (saved.imChats || []).find((chat) => chat.id === id);
+      const fixture = fixtures.find((chat) => chat.id === id);
+      if (!savedChat || !fixture) continue;
+      if (savedChat.runState === "ready" || savedChat.runState === "running")
+        savedChat.runState = "running";
+      const segment = savedChat.chatType === "single"
+        ? savedChat.segments?.[0]
+        : savedChat.scopes?.[0]?.segments?.[0];
+      const sample = fixture.chatType === "single"
+        ? fixture.segments?.[0]
+        : fixture.scopes?.[0]?.segments?.[0];
+      if (!segment || !sample) continue;
+      const known = new Set((segment.messages || []).map((entry) => entry.id));
+      let dbId = Math.max(0, ...(segment.messages || []).map((entry) =>
+        Number.isFinite(entry.dbId) ? entry.dbId : 0,
+      ));
+      for (const entry of sample.messages.filter((item) => item.id.includes("-running-")))
+        if (!known.has(entry.id)) segment.messages.push({ ...clone(entry), dbId: ++dbId });
+    }
+    for (const fixture of createEventTaskFixtures()) {
+      if (!["evt_pulsar_quality", "evt_kafka_sensor"].includes(fixture.id)) continue;
+      const event = (saved.eventRuns || []).find((item) => item.id === fixture.id);
+      if (!event) continue;
+      const known = new Set((event.runs || []).map((run) => run.id));
+      for (const run of fixture.runs)
+        if (!known.has(run.id)) event.runs.unshift(clone(run));
+      event.runs.sort((a, b) => String(b.at || "").localeCompare(String(a.at || "")));
+    }
+    const quality = saved.experts.find((expert) => expert.id === "exp_quality");
+    if (quality) {
+      const known = new Set((quality.files || []).map((file) => file.id));
+      for (const item of createEventWorkspaceItems(
+        createEventTaskFixtures().filter((event) => event.expertId === "exp_quality"),
+      ))
+        if (!known.has(item.id)) quality.files.push(item);
     }
   }
   saved.demoDataRevision = DEMO_DATA_REVISION;
@@ -3000,10 +3227,18 @@ export function submitDemoLateClarification(conversationId, requestId, answer) {
 export function triggerEvent(id) {
   const event = state.eventRuns.find((item) => item.id === id);
   if (!event) return;
+  if (event.archived) event.archived = false;
   const run = {
     id: uid("run"),
     status: "running",
     at: now(),
+    input: event.instruction || "事件触发：请分析本次事件数据。",
+    reply: "",
+    process: [
+      { id: uid("step"), role: "notice", content: "已接收事件数据，开始核对。" },
+      { id: uid("step"), role: "tool", title: "核对事件数据", content: "已读取本地样例记录。" },
+    ],
+    outputs: [],
     summary: "正在生成演示结果",
   };
   event.runs.unshift(run);
@@ -3011,6 +3246,8 @@ export function triggerEvent(id) {
   setTimeout(() => {
     run.status = "success";
     run.summary = "已完成演示执行并生成结果";
+    run.reply = "已根据本次事件数据完成分析，建议核对关键记录后推进处理。";
+    run.durationMs = 1100;
     persist();
   }, 1100);
 }

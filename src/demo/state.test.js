@@ -343,6 +343,83 @@ describe("演示状态", () => {
         .messages.some((entry) => entry.role === "notice"),
     ).toBe(true);
   });
+  it("补充处理经过时保留现有聊天内容、问题标记和消息顺序", () => {
+    const saved = demo.createSeed();
+    saved.demoDataRevision = 25;
+    const chat = saved.imChats.find(
+      (item) => item.id === "im_exp_quality_feishu-single",
+    );
+    chat.bookmarkedQuestionKeys = ["single:db:9000"];
+    const segment = chat.segments[0];
+    segment.messages = segment.messages.filter(
+      (entry) => !["feishu-single-stage", "feishu-single-tool-1", "feishu-single-tool-2", "feishu-single-interim"].includes(entry.id),
+    );
+    const user = segment.messages.find((entry) => entry.id === "feishu-single-user");
+    const originalDbId = user.dbId;
+    user.content = "保留自定义消息";
+    const upgraded = demo.upgradeExpertFixtures(saved);
+    const result = upgraded.imChats.find((item) => item.id === chat.id);
+    expect(result.bookmarkedQuestionKeys).toEqual(["single:db:9000"]);
+    expect(result.segments[0].messages.find((entry) => entry.id === user.id)).toMatchObject({
+      content: "保留自定义消息",
+      dbId: originalDbId,
+    });
+    expect(result.segments[0].messages.some((entry) => entry.id === "feishu-single-tool-1")).toBe(true);
+    const ids = result.segments[0].messages.map((entry) => entry.dbId);
+    expect(new Set(ids).size).toBe(ids.length);
+  });
+  it("升级自主任务卡片样例时保留已有动作设置和执行记录", () => {
+    const saved = demo.createSeed();
+    saved.demoDataRevision = 26;
+    saved.eventRuns = [
+      {
+        id: "evt_daily",
+        expertId: "exp_quality",
+        name: "自定义巡检",
+        trigger: "Timer",
+        enabled: false,
+        runs: [
+          {
+            id: "manual_run",
+            at: "2026-10-20T08:30:00+08:00",
+            status: "success",
+            summary: "保留的执行记录",
+          },
+        ],
+      },
+    ];
+    const upgraded = demo.upgradeExpertFixtures(saved);
+    const quality = upgraded.eventRuns.filter(
+      (event) => event.expertId === "exp_quality",
+    );
+    expect(quality).toHaveLength(6);
+    const daily = quality.find((event) => event.id === "evt_daily");
+    expect(daily.name).toBe("自定义巡检");
+    expect(daily.enabled).toBe(false);
+    expect(daily.runs.some((run) => run.id === "manual_run")).toBe(true);
+    expect(daily.sourceSummary).toBe("每日 08:30");
+  });
+  it("补充运行中样例时保留卡片别名与归档状态", () => {
+    const saved = demo.createSeed();
+    saved.demoDataRevision = 28;
+    const chat = saved.imChats.find((item) => item.id === "im_exp_quality_wecom-single");
+    chat.displayName = "夜班联系人";
+    chat.archived = true;
+    chat.runState = "ready";
+    chat.segments[0].messages = chat.segments[0].messages.filter(
+      (entry) => !entry.id.includes("-running-"),
+    );
+    const event = saved.eventRuns.find((item) => item.id === "evt_pulsar_quality");
+    event.displayName = "停机检查";
+    event.archived = true;
+    event.runs = event.runs.filter((run) => run.id !== "run_pulsar_live");
+    const upgraded = demo.upgradeExpertFixtures(saved);
+    expect(chat).toMatchObject({ displayName: "夜班联系人", archived: true, runState: "running" });
+    expect(chat.segments[0].messages.some((entry) => entry.id === "wecom-single-running-tool")).toBe(true);
+    expect(event).toMatchObject({ displayName: "停机检查", archived: true });
+    expect(event.runs.some((run) => run.id === "run_pulsar_live" && run.status === "running")).toBe(true);
+    expect(upgraded.demoDataRevision).toBe(29);
+  });
   it("旧单聊样例迁移为无范围结构并保留会话内容", () => {
     const saved = demo.createSeed();
     saved.demoDataRevision = 8;
