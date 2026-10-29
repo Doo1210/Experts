@@ -169,6 +169,30 @@ describe("消息渠道状态文案", () => {
     expect(dingFailure).not.toHaveProperty("raw_response");
   });
 
+  it("测试发送要求文字或工作空间文件至少填写一项", () => {
+    const warnings = [];
+    const target = { id: "ding_user_001" };
+    const context = {
+      testTargetItem: target,
+      channel: { enabled: true, connected: true, proactive: true, files: true },
+      testKind: "person",
+      ensureTargets: () => [target],
+      testText: "   ",
+      testFileId: "",
+      $message: { warning: (message) => warnings.push(message) },
+    };
+    ExpertChannelTab.methods.sendDemoTest.call(context);
+    expect(warnings).toEqual(["请输入文字或选择文件"]);
+
+    context.testFileId = "image-1";
+    context.testResult = { status: "accepted" };
+    context.testFilePickerVisible = true;
+    ExpertChannelTab.methods.clearTestFile.call(context);
+    expect(context.testFileId).toBe("");
+    expect(context.testResult).toBeNull();
+    expect(context.testFilePickerVisible).toBe(false);
+  });
+
   it("旧浏览器数据不再泄漏原型提示语", () => {
     expect(productCopy("旧版演示名单")).toBe("管理员添加");
     expect(productCopy("本地连接状态仅供演示；出站权限需平台验证")).toBe(

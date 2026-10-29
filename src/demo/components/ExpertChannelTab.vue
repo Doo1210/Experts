@@ -279,7 +279,7 @@
             channel.id === "wecom"
               ? "企微名单来自本专家机器人的历史互动，当前可达性仍以平台发送结果为准。"
               : "群聊需 @ 只控制专家收到群消息时是否响应。"
-          }}关闭主动沟通后不能发送；图片和文件还受文件开关控制。
+          }}关闭主动沟通后不能发送；文件还受文件开关控制。
         </p>
         <p class="channel-proactive-note">
           例如：“把工作空间里的质检报告发到产线协作群”。专家会先确认文件，再查名单目标；跨平台同名群会询问平台。回复当前消息会话无需主动沟通。
@@ -287,18 +287,8 @@
       </section>
       <section class="channel-file-card">
         <div>
-          <strong>允许收发图片与文件</strong>
-          <p>
-            文件保存在当前渠道对话工作目录；向名单目标发送附件还需开启主动沟通。<template
-              v-if="channel.id === 'dingtalk'"
-              >钉钉群内 @机器人不支持发送语音、视频和文件。<a
-                href="https://open.dingtalk.com/document/development/robot-message-type.md"
-                target="_blank"
-                rel="noopener noreferrer"
-                >查看钉钉说明</a
-              ></template
-            >
-          </p>
+          <strong>允许收发文件</strong>
+          <p>开启后，专家可处理收到的文件，并发送专家工作空间中的文件</p>
         </div>
         <el-switch
           v-model="channel.files"
@@ -787,125 +777,6 @@
             <strong>{{ lastTestSendValue(testTargetItem) }}</strong>
           </div>
         </div>
-        <div class="im-1023-type-tabs" role="group" aria-label="附件类型">
-          <button
-            type="button"
-            :class="{ active: testType === 'none' }"
-            @click="selectTestType('none')"
-          >
-            无附件
-          </button>
-          <button
-            type="button"
-            :class="{ active: testType === 'image' }"
-            :disabled="!channel.files"
-            @click="selectTestType('image')"
-          >
-            图片
-          </button>
-          <button
-            type="button"
-            :class="{ active: testType === 'file' }"
-            :disabled="!channel.files"
-            @click="selectTestType('file')"
-          >
-            文件
-          </button>
-        </div>
-        <p v-if="!channel.files" class="im-1023-media-hint">
-          开启“允许收发图片与文件”后，才可附加工作空间文件；文字仍可单独发送。
-        </p>
-        <div v-if="testType !== 'none'" class="im-1023-upload-field">
-          <div class="im-1023-test-input-head">
-            <span
-              >选择{{ testType === "image" ? "图片" : "文件" }} <em>*</em></span
-            >
-          </div>
-          <el-popover
-            v-model="testFilePickerVisible"
-            placement="bottom-start"
-            trigger="click"
-            width="440"
-            popper-class="pc-reference-popper im-test-file-popper"
-          >
-            <div class="pc-reference-picker im-test-file-picker">
-              <div class="pc-reference-search">
-                <i class="el-icon-search" />
-                <input
-                  v-model="testFileSearch"
-                  type="search"
-                  placeholder="搜索工作空间文件"
-                />
-              </div>
-              <div class="pc-reference-list">
-                <div
-                  v-for="node in testWorkspaceRows"
-                  :key="node.item.id"
-                  class="pc-reference-tree-row"
-                  :style="{ paddingLeft: `${8 + node.depth * 16}px` }"
-                >
-                  <button
-                    v-if="node.item.kind === 'folder'"
-                    type="button"
-                    class="pc-reference-tree-entry"
-                    @click="toggleTestFolder(node.item.id)"
-                  >
-                    <i
-                      :class="
-                        testExpandedFolderIds.includes(node.item.id)
-                          ? 'el-icon-arrow-down'
-                          : 'el-icon-arrow-right'
-                      "
-                    />
-                    <i class="el-icon-folder" />
-                    <span>{{ node.item.name }}</span>
-                  </button>
-                  <button
-                    v-else
-                    type="button"
-                    class="pc-reference-tree-entry"
-                    :class="{ selected: testFileId === node.item.id }"
-                    :title="testFilePath(node.item)"
-                    @click="selectTestFile(node.item)"
-                  >
-                    <span class="pc-reference-tree-spacer" />
-                    <i class="el-icon-document" />
-                    <span>{{ node.item.name }}</span>
-                    <i
-                      v-if="testFileId === node.item.id"
-                      class="el-icon-check"
-                      aria-hidden="true"
-                    />
-                  </button>
-                </div>
-                <p v-if="!testWorkspaceRows.length" class="pc-reference-empty">
-                  没有匹配的{{ testType === "image" ? "图片" : "文件" }}
-                </p>
-              </div>
-            </div>
-            <button
-              slot="reference"
-              type="button"
-              class="im-1023-file-trigger"
-              :aria-label="`选择${testType === 'image' ? '图片' : '文件'}`"
-              :title="selectedTestFile ? testFilePath(selectedTestFile) : ''"
-            >
-              <span>{{
-                selectedTestFile
-                  ? testFilePath(selectedTestFile)
-                  : `从当前专家工作空间选择${testType === "image" ? "图片" : "文件"}`
-              }}</span>
-              <i class="el-icon-arrow-down" aria-hidden="true" />
-            </button>
-          </el-popover>
-          <p class="im-1023-upload-help">
-            {{
-              selectableWorkspaceFiles.length
-                ? "选择当前专家工作空间中的文件。"
-                : "工作空间暂无此类文件；请先在专家工作空间上传，再返回此处选择。"
-            }}
-          </p>
-        </div>
         <div class="im-1023-test-input-head">
           <span>文字</span>
         </div>
@@ -915,9 +786,137 @@
           :rows="3"
           maxlength="1000"
           show-word-limit
-          placeholder="输入将发送的文字；没有附件时必填"
+          placeholder="输入将发送的文字"
           @input="testResult = null"
         />
+        <div class="im-1023-upload-field">
+          <div class="im-1023-test-input-head">
+            <span :class="{ 'is-disabled': !channel.files }">文件</span>
+          </div>
+          <el-tooltip
+            :disabled="channel.files"
+            content="请先开启“允许收发文件”"
+            placement="top"
+          >
+            <div
+              ref="testFileControl"
+              class="im-1023-file-control"
+              :class="{
+                'is-disabled': !channel.files,
+                'has-file': !!selectedTestFile,
+              }"
+              @click.capture="syncTestFilePopoverWidth"
+            >
+              <el-popover
+                ref="testFilePopover"
+                v-model="testFilePickerVisible"
+                :disabled="!channel.files"
+                placement="top-start"
+                trigger="click"
+                :width="testFilePopoverWidth"
+                popper-class="pc-reference-popper im-test-file-popper"
+                @show="syncTestFilePopoverWidth"
+              >
+                <div class="pc-reference-picker im-test-file-picker">
+                  <div class="pc-reference-search">
+                    <i class="el-icon-search" />
+                    <input
+                      v-model="testFileSearch"
+                      type="search"
+                      placeholder="搜索工作空间文件"
+                      @input="repositionTestFilePopover"
+                    />
+                  </div>
+                  <div class="pc-reference-list">
+                    <div
+                      v-for="node in testWorkspaceRows"
+                      :key="node.item.id"
+                      class="pc-reference-tree-row"
+                      :style="{ paddingLeft: `${8 + node.depth * 16}px` }"
+                    >
+                      <button
+                        v-if="node.item.kind === 'folder'"
+                        type="button"
+                        class="pc-reference-tree-entry"
+                        @click="toggleTestFolder(node.item.id)"
+                      >
+                        <i
+                          :class="
+                            testExpandedFolderIds.includes(node.item.id)
+                              ? 'el-icon-arrow-down'
+                              : 'el-icon-arrow-right'
+                          "
+                        />
+                        <i class="el-icon-folder" />
+                        <span>{{ node.item.name }}</span>
+                      </button>
+                      <button
+                        v-else
+                        type="button"
+                        class="pc-reference-tree-entry"
+                        :class="{ selected: testFileId === node.item.id }"
+                        :title="testFilePath(node.item)"
+                        @click="selectTestFile(node.item)"
+                      >
+                        <span class="pc-reference-tree-spacer" />
+                        <i class="el-icon-document" />
+                        <span>{{ node.item.name }}</span>
+                        <i
+                          v-if="testFileId === node.item.id"
+                          class="el-icon-check"
+                          aria-hidden="true"
+                        />
+                      </button>
+                    </div>
+                    <p
+                      v-if="!testWorkspaceRows.length"
+                      class="pc-reference-empty"
+                    >
+                      没有匹配的文件
+                    </p>
+                  </div>
+                </div>
+                <button
+                  slot="reference"
+                  type="button"
+                  class="im-1023-file-trigger"
+                  :disabled="!channel.files"
+                  :aria-label="
+                    selectedTestFile
+                      ? `更换文件：${selectedTestFile.name}`
+                      : '选择文件'
+                  "
+                  :title="
+                    selectedTestFile ? testFilePath(selectedTestFile) : ''
+                  "
+                >
+                  <span v-if="selectedTestFile" class="im-1023-file-chip">
+                    <i class="el-icon-document" aria-hidden="true" />
+                    {{ selectedTestFile.name }}
+                  </span>
+                  <span v-else>从当前专家工作空间选择文件</span>
+                  <i class="el-icon-arrow-down" aria-hidden="true" />
+                </button>
+              </el-popover>
+              <button
+                v-if="selectedTestFile && channel.files"
+                type="button"
+                class="im-1023-file-clear"
+                aria-label="移除已选文件"
+                title="移除已选文件"
+                @click="clearTestFile"
+              >
+                <i class="el-icon-close" aria-hidden="true" />
+              </button>
+            </div>
+          </el-tooltip>
+          <p
+            v-if="channel.files && !selectableWorkspaceFiles.length"
+            class="im-1023-upload-help"
+          >
+            当前专家工作空间暂无文件，请先上传后再选择。
+          </p>
+        </div>
         <div
           v-if="testResult"
           class="im-1023-test-result"
@@ -1001,10 +1000,10 @@ export default {
       testVisible: false,
       testKind: "person",
       testTargetItem: null,
-      testType: "none",
       testText: "",
       testFileId: "",
       testFilePickerVisible: false,
+      testFilePopoverWidth: 440,
       testFileSearch: "",
       testExpandedFolderIds: [],
       testResult: null,
@@ -1127,13 +1126,7 @@ export default {
       return this.channel?.groups || [];
     },
     selectableWorkspaceFiles() {
-      return (this.expert.files || []).filter(
-        (file) =>
-          file.kind === "file" &&
-          (this.testType !== "image" ||
-            file.mime?.startsWith("image/") ||
-            /\.(png|jpe?g|gif|webp|svg)$/i.test(file.name)),
-      );
+      return (this.expert.files || []).filter((file) => file.kind === "file");
     },
     selectedTestFile() {
       return this.selectableWorkspaceFiles.find(
@@ -1622,7 +1615,6 @@ export default {
         return this.$message.warning("请先连接渠道并开启主动沟通");
       this.testKind = kind;
       this.testTargetItem = item;
-      this.testType = "none";
       this.testText = "";
       this.testFileId = "";
       this.testFilePickerVisible = false;
@@ -1631,21 +1623,33 @@ export default {
       this.testResult = null;
       this.testVisible = true;
     },
-    selectTestType(type) {
-      this.testType = type;
-      this.testResult = null;
-      this.testFileId = "";
-      this.testFilePickerVisible = false;
-      this.testFileSearch = "";
-      this.testExpandedFolderIds = [];
-    },
     toggleTestFolder(id) {
       this.testExpandedFolderIds = this.testExpandedFolderIds.includes(id)
         ? this.testExpandedFolderIds.filter((item) => item !== id)
         : [...this.testExpandedFolderIds, id];
+      this.repositionTestFilePopover();
+    },
+    repositionTestFilePopover() {
+      this.$nextTick(() => this.$refs.testFilePopover?.updatePopper?.());
     },
     selectTestFile(file) {
       this.testFileId = file.id;
+      this.testResult = null;
+      this.testFilePickerVisible = false;
+    },
+    syncTestFilePopoverWidth() {
+      const width = this.$refs.testFileControl?.getBoundingClientRect().width;
+      if (!width) return;
+      this.testFilePopoverWidth = width;
+      this.$nextTick(() => {
+        const popover = this.$refs.testFilePopover;
+        if (!popover?.popperElm) return;
+        popover.popperElm.style.width = `${width}px`;
+        popover.updatePopper?.();
+      });
+    },
+    clearTestFile() {
+      this.testFileId = "";
       this.testResult = null;
       this.testFilePickerVisible = false;
     },
@@ -1676,14 +1680,14 @@ export default {
         )
       )
         return this.$message.warning("请先连接渠道并开启主动沟通");
-      if (!this.testText.trim() && this.testType === "none")
-        return this.$message.warning("请输入测试文字或选择一个工作空间附件");
+      if (!this.testText.trim() && !this.testFileId)
+        return this.$message.warning("请输入文字或选择文件");
       if (this.testText.length > 1000)
         return this.$message.warning("测试文字最多 1000 字");
-      if (this.testType !== "none" && !this.channel.files)
-        return this.$message.warning("请先开启允许收发图片与文件");
+      if (this.testFileId && !this.channel.files)
+        return this.$message.warning("请先开启允许收发文件");
       if (
-        this.testType !== "none" &&
+        this.testFileId &&
         !this.selectableWorkspaceFiles.some(
           (file) => file.id === this.testFileId,
         )
@@ -1759,7 +1763,7 @@ export default {
         targetName: this.testTargetItem.name,
         targetId: id,
         initiator: "管理员测试",
-        summary: `${this.testText.trim() ? `文字：${this.testText.trim().slice(0, 28)}` : ""}${selectedFile ? `${this.testText.trim() ? " + " : ""}${this.testType === "image" ? "图片" : "文件"}：${selectedFile.name}` : ""}`,
+        summary: `${this.testText.trim() ? `文字：${this.testText.trim().slice(0, 28)}` : ""}${selectedFile ? `${this.testText.trim() ? " + " : ""}文件：${selectedFile.name}` : ""}`,
         at: result.at,
         status,
         receipt: result.code,

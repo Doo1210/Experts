@@ -8107,45 +8107,6 @@ button {
   line-height: 1.45;
   overflow-wrap: anywhere;
 }
-.im-1023-type-tabs {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 4px;
-  width: 100%;
-  padding: 4px;
-  border-radius: 9px;
-  background: #f0f4fa;
-}
-.im-1023-type-tabs button {
-  min-width: 0;
-  padding: 9px 12px;
-  border: 0;
-  border-radius: 7px;
-  background: transparent;
-  color: #74849a;
-  font: inherit;
-  font-size: 12px;
-  cursor: pointer;
-}
-.im-1023-type-tabs button.active {
-  background: #fff;
-  color: #3277ef;
-  font-weight: 600;
-  box-shadow: 0 1px 5px rgba(38, 75, 132, 0.11);
-}
-.im-1023-type-tabs button:disabled {
-  color: #b6c1d0;
-  cursor: not-allowed;
-}
-.im-1023-type-tabs button:focus-visible {
-  outline: 2px solid #85b7ff;
-  outline-offset: 1px;
-}
-.im-1023-media-hint {
-  margin: -8px 0 0;
-  color: #94a2b5;
-  font-size: 11px;
-}
 .im-1023-test-input-head {
   display: flex;
   align-items: center;
@@ -8158,6 +8119,9 @@ button {
 .im-1023-test-input-head em {
   color: #e36565;
   font-style: normal;
+}
+.im-1023-test-input-head .is-disabled {
+  color: #aab6c5;
 }
 .im-1023-test-input-head .el-checkbox {
   margin-right: 0;
@@ -8174,6 +8138,13 @@ button {
   flex-direction: column;
   gap: 9px;
   min-width: 0;
+}
+.im-1023-file-control {
+  position: relative;
+  min-width: 0;
+}
+.im-1023-file-control.is-disabled {
+  cursor: not-allowed;
 }
 .im-1023-file-trigger {
   display: flex;
@@ -8201,10 +8172,64 @@ button {
   flex: 0 0 auto;
   color: #8fa0b5;
 }
+.im-1023-file-control.has-file .im-1023-file-trigger {
+  padding-right: 42px;
+}
+.im-1023-file-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  max-width: 100%;
+  padding: 4px 8px;
+  border: 1px solid #dce5f3;
+  border-radius: 5px;
+  background: #f4f7fc;
+  color: #506680;
+}
+.im-1023-file-chip > i {
+  color: #6092d8;
+}
+.im-1023-file-clear {
+  position: absolute;
+  top: 50%;
+  right: 36px;
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  transform: translateY(-50%);
+  border: 0;
+  border-radius: 50%;
+  background: #dce4ef;
+  color: #6d7e95;
+  cursor: pointer;
+}
+.im-1023-file-clear:hover {
+  background: #cbdaf0;
+  color: #365f98;
+}
+.im-1023-file-clear:focus-visible {
+  outline: 2px solid #85b7ff;
+  outline-offset: 2px;
+}
+.im-1023-file-trigger:disabled {
+  border-color: #e5eaf1;
+  background: #f5f7fa;
+  color: #aab6c5;
+  cursor: not-allowed;
+}
+.im-1023-file-trigger:disabled > i {
+  color: #b6c1ce;
+}
 .im-1023-file-trigger:hover,
 .im-1023-file-trigger:focus-visible {
   border-color: #83b1f5;
   outline: none;
+}
+.im-1023-file-trigger:disabled:hover {
+  border-color: #e5eaf1;
 }
 .im-test-file-picker.pc-reference-picker {
   height: auto;
