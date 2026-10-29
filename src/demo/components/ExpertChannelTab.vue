@@ -4,7 +4,7 @@
       <div>
         <h2>消息渠道</h2>
         <p>
-          接入钉钉、企业微信和飞书机器人。回复当前会话无需主动沟通；向其他人或群发送须开启主动沟通并批准目标。
+          接入钉钉、企业微信和飞书机器人。回复当前会话无需主动沟通；向其他人或群发送须开启主动沟通并将目标加入名单。
         </p>
       </div>
     </div>
@@ -116,25 +116,19 @@
             >
           </div>
           <span class="channel-check-state"
-            >发送条件检查　{{
-              productCopy(channel.checkStatus || "待检查")
-            }}</span
+            >发送条件检查　{{ channelCheckSummary }}</span
           ><el-button type="text" @click="checkConfig">检查配置</el-button
           ><el-switch
             v-model="channel.proactive"
             :disabled="!channel.enabled || !channel.connected"
-            @change="persist"
+            @change="resetCheck"
           />
         </div>
         <p
-          v-if="
-            channel.proactive &&
-            !people.some((item) => item.approved !== false) &&
-            !groups.some((item) => item.approved !== false)
-          "
+          v-if="channel.proactive && !people.length && !groups.length"
           class="channel-empty-warning"
         >
-          主动沟通已开启，暂无已批准的可发送目标。
+          主动沟通已开启，暂无已加入名单的可发送目标。
         </p>
         <div class="channel-target-columns">
           <div class="channel-target-group">
@@ -151,33 +145,57 @@
                 :key="item.id"
                 class="channel-target-row"
               >
-                <strong>{{ item.name }}</strong
-                ><small v-if="item.purpose" class="channel-target-purpose">{{
-                  item.purpose
-                }}</small
-                ><span :class="targetStatusClass(item)">{{
-                  targetStatusLabel(item)
-                }}</span
-                ><button
-                  type="button"
-                  @click="openTargetDetail('person', item)"
-                >
-                  详情</button
-                ><button
-                  type="button"
-                  :disabled="
-                    !channel.enabled || !channel.connected || !channel.proactive
-                  "
-                  @click="openTest('person', item)"
-                >
-                  测试</button
-                ><button
-                  type="button"
-                  class="remove"
-                  @click="removeTarget('person', item)"
-                >
-                  移除
-                </button>
+                <div class="channel-target-primary">
+                  <strong :title="item.name">{{ item.name }}</strong>
+                  <span
+                    class="channel-target-interaction"
+                    :title="`最近主动沟通时间：${formatRecentProactiveTime(item)}`"
+                    ><span class="channel-target-interaction-label"
+                      >最近主动沟通时间：</span
+                    >{{ formatRecentProactiveTime(item) }}</span
+                  >
+                </div>
+                <div class="channel-target-actions">
+                  <button
+                    type="button"
+                    aria-label="查看详情"
+                    title="查看详情"
+                    @click="openTargetDetail('person', item)"
+                  >
+                    <i class="el-icon-view" aria-hidden="true" /><span
+                      class="channel-action-label"
+                      >详情</span
+                    >
+                  </button>
+                  <button
+                    type="button"
+                    :disabled="
+                      !channel.enabled ||
+                      !channel.connected ||
+                      !channel.proactive
+                    "
+                    aria-label="测试发送"
+                    title="测试发送"
+                    @click="openTest('person', item)"
+                  >
+                    <i class="el-icon-s-promotion" aria-hidden="true" /><span
+                      class="channel-action-label"
+                      >测试</span
+                    >
+                  </button>
+                  <button
+                    type="button"
+                    class="remove"
+                    aria-label="移除目标"
+                    title="移除目标"
+                    @click="removeTarget('person', item)"
+                  >
+                    <i class="el-icon-delete" aria-hidden="true" /><span
+                      class="channel-action-label"
+                      >移除</span
+                    >
+                  </button>
+                </div>
               </div>
               <p v-if="!people.length">
                 暂无可私聊的人。{{ targetEmptyFor("person") }}
@@ -198,30 +216,57 @@
                 :key="item.id"
                 class="channel-target-row"
               >
-                <strong>{{ item.name }}</strong
-                ><small v-if="item.purpose" class="channel-target-purpose">{{
-                  item.purpose
-                }}</small
-                ><span :class="targetStatusClass(item)">{{
-                  targetStatusLabel(item)
-                }}</span
-                ><button type="button" @click="openTargetDetail('group', item)">
-                  详情</button
-                ><button
-                  type="button"
-                  :disabled="
-                    !channel.enabled || !channel.connected || !channel.proactive
-                  "
-                  @click="openTest('group', item)"
-                >
-                  测试</button
-                ><button
-                  type="button"
-                  class="remove"
-                  @click="removeTarget('group', item)"
-                >
-                  移除
-                </button>
+                <div class="channel-target-primary">
+                  <strong :title="item.name">{{ item.name }}</strong>
+                  <span
+                    class="channel-target-interaction"
+                    :title="`最近主动沟通时间：${formatRecentProactiveTime(item)}`"
+                    ><span class="channel-target-interaction-label"
+                      >最近主动沟通时间：</span
+                    >{{ formatRecentProactiveTime(item) }}</span
+                  >
+                </div>
+                <div class="channel-target-actions">
+                  <button
+                    type="button"
+                    aria-label="查看详情"
+                    title="查看详情"
+                    @click="openTargetDetail('group', item)"
+                  >
+                    <i class="el-icon-view" aria-hidden="true" /><span
+                      class="channel-action-label"
+                      >详情</span
+                    >
+                  </button>
+                  <button
+                    type="button"
+                    :disabled="
+                      !channel.enabled ||
+                      !channel.connected ||
+                      !channel.proactive
+                    "
+                    aria-label="测试发送"
+                    title="测试发送"
+                    @click="openTest('group', item)"
+                  >
+                    <i class="el-icon-s-promotion" aria-hidden="true" /><span
+                      class="channel-action-label"
+                      >测试</span
+                    >
+                  </button>
+                  <button
+                    type="button"
+                    class="remove"
+                    aria-label="移除目标"
+                    title="移除目标"
+                    @click="removeTarget('group', item)"
+                  >
+                    <i class="el-icon-delete" aria-hidden="true" /><span
+                      class="channel-action-label"
+                      >移除</span
+                    >
+                  </button>
+                </div>
               </div>
               <p v-if="!groups.length">
                 暂无可发的群。{{ targetEmptyFor("group") }}
@@ -237,7 +282,7 @@
           }}关闭主动沟通后不能发送；图片和文件还受文件开关控制。
         </p>
         <p class="channel-proactive-note">
-          例如：“把工作空间里的质检报告发到产线协作群”。专家会先确认文件，再查已批准目标；跨平台同名群会询问平台。回复当前消息会话无需主动沟通。
+          例如：“把工作空间里的质检报告发到产线协作群”。专家会先确认文件，再查名单目标；跨平台同名群会询问平台。回复当前消息会话无需主动沟通。
         </p>
       </section>
       <section class="channel-file-card">
@@ -374,16 +419,18 @@
               v-for="item in filteredCandidates"
               :key="item.id"
               type="button"
-              :disabled="item.isApproved"
-              :aria-pressed="targetDraft.id === item.id"
-              :class="{ selected: targetDraft.id === item.id }"
+              :disabled="item.isAdded"
+              :aria-pressed="isCandidateSelected(item.id)"
+              :class="{ selected: isCandidateSelected(item.id) }"
               @click="selectCandidate(item)"
             >
-              <span class="channel-candidate-radio" aria-hidden="true" />
+              <span class="channel-candidate-radio" aria-hidden="true">{{
+                isCandidateSelected(item.id) ? "✓" : ""
+              }}</span>
               <span class="channel-candidate-copy">
                 <span class="channel-candidate-name">
                   <strong>{{ item.name }}</strong>
-                  <small v-if="item.isApproved">已加入名单</small>
+                  <small v-if="item.isAdded">已加入名单</small>
                 </span>
                 <span class="channel-candidate-meta">
                   <code :title="item.id">ID {{ item.id }}</code>
@@ -419,15 +466,81 @@
         </div>
 
         <div class="channel-target-review">
-          <p
-            v-if="targetMode === 'candidate' && targetDraft.id"
-            class="channel-target-selected"
+          <div
+            v-if="targetMode === 'candidate'"
+            class="channel-selected-targets"
           >
-            已选：<strong>{{ targetDraft.name }}</strong> · {{ targetIdLabel }}
-            {{ targetDraft.id }}
-          </p>
-          <label class="channel-target-purpose-label">
-            <span>用途说明 <small>选填</small></span>
+            <div class="channel-selected-head">
+              <strong
+                >已选 {{ selectedCandidates.length }}
+                {{ targetKind === "person" ? "人" : "个群" }}</strong
+              >
+              <button
+                v-if="selectedCandidates.length"
+                type="button"
+                @click="clearSelectedCandidates"
+              >
+                清空
+              </button>
+            </div>
+            <p v-if="!selectedCandidates.length" class="channel-selected-empty">
+              从上方选择要加入名单的{{
+                targetKind === "person" ? "单聊" : "群聊"
+              }}。
+            </p>
+            <div v-else class="channel-selected-list">
+              <div
+                v-for="item in selectedCandidates"
+                :key="item.id"
+                class="channel-selected-item"
+              >
+                <div class="channel-selected-summary">
+                  <div>
+                    <strong>{{ item.name || item.platformName }}</strong>
+                    <small :title="item.id">{{ item.id }}</small>
+                  </div>
+                  <button
+                    type="button"
+                    @click="
+                      editingCandidateId =
+                        editingCandidateId === item.id ? '' : item.id
+                    "
+                  >
+                    {{ editingCandidateId === item.id ? "收起" : "编辑" }}
+                  </button>
+                  <button
+                    type="button"
+                    class="remove"
+                    :aria-label="`移除${item.platformName}`"
+                    @click="removeSelectedCandidate(item.id)"
+                  >
+                    移除
+                  </button>
+                </div>
+                <div
+                  v-if="editingCandidateId === item.id"
+                  class="channel-selected-fields"
+                >
+                  <label
+                    ><span>平台显示名称</span>
+                    <el-input
+                      v-model.trim="item.name"
+                      maxlength="80"
+                      placeholder="填写平台显示名称"
+                  /></label>
+                  <label
+                    ><span>说明 <small>选填</small></span
+                    ><el-input
+                      v-model.trim="item.purpose"
+                      maxlength="200"
+                      placeholder="填写该目标的说明"
+                  /></label>
+                </div>
+              </div>
+            </div>
+          </div>
+          <label v-else class="channel-target-purpose-label">
+            <span>说明 <small>选填</small></span>
             <el-input
               v-model.trim="targetDraft.purpose"
               :placeholder="
@@ -437,82 +550,117 @@
               "
             />
           </label>
-          <el-checkbox
-            v-model="targetConfirmed"
-            :disabled="!targetDraft.id || !targetDraft.name"
-          >
-            {{
-              targetKind === "person"
-                ? "已核对人员身份及当前应用的适用范围"
-                : "已核对群身份，且确认当前机器人在目标群内"
-            }}
-          </el-checkbox>
           <p class="channel-target-caveat">
-            {{
-              targetKind === "person"
-                ? "加入名单不代表消息已送达，可在名单中测试。"
-                : "加入名单不代表当前可达，可在名单中测试。"
-            }}
+            请确认目标身份和平台
+            ID。加入名单后可作为主动发送目标，实际可达性以测试结果为准。
           </p>
         </div>
       </div>
       <span slot="footer" class="channel-target-footer">
         <el-button @click="targetVisible = false">取消</el-button>
-        <el-button type="primary" @click="saveTarget">批准加入名单</el-button>
+        <el-button
+          type="primary"
+          :disabled="targetMode === 'candidate' && !selectedCandidates.length"
+          @click="saveTarget"
+          >{{
+            targetMode === "candidate"
+              ? `添加 ${selectedCandidates.length} ${targetKind === "person" ? "人" : "个群"}到名单`
+              : "添加到名单"
+          }}</el-button
+        >
       </span>
     </el-dialog>
     <el-dialog
       :visible.sync="detailVisible"
-      title="已批准目标详情"
+      title="目标详情"
       width="500px"
       custom-class="manage-dialog channel-detail-dialog"
     >
       <div v-if="detailItem" class="channel-detail-body">
-        <p>
-          <strong>平台显示名称</strong><span>{{ detailItem.name }}</span>
-        </p>
-        <p>
-          <strong>目标类型</strong
-          ><span>{{ detailKind === "person" ? "人员" : "群聊" }}</span>
-        </p>
-        <p>
-          <strong>来源</strong
-          ><span>{{ productCopy(detailItem.source || "管理员添加") }}</span>
-        </p>
-        <p>
-          <strong>最近互动</strong
-          ><span>{{ detailItem.lastInteractionAt || "无记录" }}</span>
-        </p>
-        <p>
-          <strong>最近核对</strong
-          ><span>{{ detailItem.checkedAt || "旧版记录，待重新核对" }}</span>
-        </p>
-        <p>
-          <strong>原生 ID</strong><code>{{ detailItem.id }}</code
-          ><el-button type="text" @click="copyTargetId">复制</el-button>
-        </p>
-        <p>
-          <strong>验证状态</strong
-          ><span>{{
-            detailItem.testedAt
-              ? targetStatusLabel(detailItem)
-              : "已批准 · 尚未验证"
+        <div class="channel-detail-row">
+          <strong>平台显示名称</strong>
+          <div class="channel-detail-cell">
+            <el-input
+              v-if="detailNameEditing"
+              v-model.trim="detailName"
+              maxlength="80"
+              placeholder="填写平台显示名称"
+            />
+            <template v-else>
+              <span class="channel-detail-value">{{ detailItem.name }}</span>
+              <button
+                type="button"
+                class="channel-detail-icon-button"
+                aria-label="编辑平台显示名称"
+                title="编辑平台显示名称"
+                @click="detailNameEditing = true"
+              >
+                <i class="el-icon-edit" aria-hidden="true" />
+              </button>
+            </template>
+          </div>
+        </div>
+        <div class="channel-detail-row">
+          <strong>{{ detailIdLabel }}</strong>
+          <div class="channel-detail-cell">
+            <code>{{ detailItem.id }}</code>
+            <button
+              type="button"
+              class="channel-detail-icon-button"
+              aria-label="复制目标 ID"
+              title="复制目标 ID"
+              @click="copyTargetId"
+            >
+              <i class="el-icon-document-copy" aria-hidden="true" />
+            </button>
+          </div>
+        </div>
+        <div class="channel-detail-row">
+          <strong>说明</strong>
+          <div class="channel-detail-cell">
+            <el-input
+              v-if="detailPurposeEditing"
+              v-model.trim="detailPurpose"
+              maxlength="200"
+              :placeholder="
+                detailKind === 'person'
+                  ? '负责设备维护与停机协调'
+                  : '用于产线异常协同'
+              "
+            />
+            <template v-else>
+              <span
+                class="channel-detail-value"
+                :class="{ empty: !detailItem.purpose }"
+                >{{ detailItem.purpose || "未填写" }}</span
+              >
+              <button
+                type="button"
+                class="channel-detail-icon-button"
+                aria-label="编辑说明"
+                title="编辑说明"
+                @click="detailPurposeEditing = true"
+              >
+                <i class="el-icon-edit" aria-hidden="true" />
+              </button>
+            </template>
+          </div>
+        </div>
+        <div class="channel-detail-row">
+          <strong>来源</strong>
+          <span class="channel-detail-value">{{ detailSourceLabel }}</span>
+        </div>
+        <div class="channel-detail-row">
+          <strong>最近主动沟通时间</strong>
+          <span class="channel-detail-value">{{
+            formatRecentProactiveTime(detailItem)
           }}</span>
-        </p>
-        <label
-          >用途说明（选填）<el-input
-            v-model.trim="detailPurpose"
-            :placeholder="
-              detailKind === 'person'
-                ? '负责设备维护与停机协调'
-                : '用于产线异常协同'
-            "
-        /></label>
+        </div>
       </div>
       <span slot="footer"
         ><el-button @click="detailVisible = false">取消</el-button
         ><el-button type="primary" @click="saveTargetDetail"
-          >保存用途说明</el-button
+          >保存修改</el-button
         ></span
       >
     </el-dialog>
@@ -528,15 +676,24 @@
       </div>
       <div
         class="channel-check-overview"
-        :class="{ 'has-blocker': checkHasBlocker }"
+        :class="{
+          'has-blocker': checkHasBlocker,
+          'has-pending': !checkHasBlocker && checkHasPending,
+        }"
       >
         <strong>{{
-          checkHasBlocker ? "有条件待补齐" : "基础条件已具备"
+          checkHasBlocker
+            ? "有条件待补齐"
+            : checkHasPending
+              ? "机器人发送链路尚未验证"
+              : "发送前提已满足"
         }}</strong>
         <span>{{
           checkHasBlocker
-            ? "请处理下方阻断项后再发送。"
-            : "平台权限与目标可达性仍需实际发送确认。"
+            ? "请处理下方未满足的条件。"
+            : checkHasPending
+              ? "机器人发送链路仍需通过平台核验。"
+              : "可以对名单目标进行测试发送。"
         }}</span>
       </div>
       <ul class="channel-check-list">
@@ -563,7 +720,7 @@
         </li>
       </ul>
       <p class="channel-check-caveat">
-        检查配置不会发送消息；目标实际可达性以发送结果为准。
+        检查不会发送消息；平台是否允许发给某个目标、目标是否可达，请以该目标的测试发送结果为准。
       </p>
       <span slot="footer" class="channel-check-footer">
         <el-button @click="checkConfig">重新检查</el-button>
@@ -589,8 +746,7 @@
         <div class="im-1023-dialog-header-copy">
           <h3>主动沟通测试</h3>
           <p>
-            {{ channel?.name }}机器人（{{ channel?.botId || "当前机器人" }}）→
-            {{ testTargetItem?.name || "目标" }}
+            {{ channel?.name }}机器人（{{ channel?.botId || "当前机器人" }}）
           </p>
         </div>
         <button
@@ -603,67 +759,34 @@
         </button>
       </div>
       <div v-if="testTargetItem" class="im-1023-dialog-body">
-        <div class="im-1023-test-context">
-          <span class="im-1023-test-context-label">发送目标</span
-          ><strong
-            >{{ testTargetItem.name }} ·
-            {{ testKind === "person" ? "单聊" : "群聊" }}</strong
-          ><code :title="testTargetItem.id">{{
-            shortId(testTargetItem.id)
-          }}</code>
-        </div>
-        <div
-          v-if="testResult"
-          class="im-1023-test-result"
-          :class="`is-${testResult.status}`"
-          role="status"
-        >
-          <div class="im-1023-result-head">
-            <span aria-hidden="true">{{
-              testResult.status === "accepted"
-                ? "✓"
-                : testResult.status === "failed"
-                  ? "!"
-                  : testResult.status === "partial"
-                    ? "!"
-                    : "?"
-            }}</span
-            ><strong>{{
-              testResult.status === "accepted"
-                ? "平台已受理"
-                : testResult.status === "failed"
-                  ? "发送失败"
-                  : testResult.status === "partial"
-                    ? "部分成功"
-                    : "结果未知"
-            }}</strong>
+        <div class="im-1023-test-summary">
+          <div class="im-1023-test-context">
+            <span class="im-1023-test-target-icon" aria-hidden="true">
+              <i
+                :class="
+                  testKind === 'person'
+                    ? 'el-icon-user'
+                    : 'el-icon-chat-line-round'
+                "
+              />
+            </span>
+            <div class="im-1023-test-target-main">
+              <small>发送目标</small>
+              <div>
+                <strong>{{ testTargetItem.name }}</strong>
+                <span>{{ testKind === "person" ? "单聊" : "群聊" }}</span>
+              </div>
+            </div>
+            <div class="im-1023-test-target-id">
+              <small>目标 ID</small>
+              <code :title="testTargetItem.id">{{ testTargetItem.id }}</code>
+            </div>
           </div>
-          <p>{{ productCopy(testResult.detail) }}</p>
-          <p>
-            发送时间：{{ formatDeliveryTime(testResult.at) }} · 平台回执：{{
-              productReceipt(testResult.code)
-            }}
-          </p>
-          <details>
-            <summary>技术详情</summary>
-            <code
-              >{{ productReceipt(testResult.code) }} ·
-              {{ productDeliveryId(testResult.deliveryId) }} ·
-              {{ channel.name }} · {{ shortId(testTargetItem.id) }}</code
-            >
-          </details>
+          <div class="im-1023-last-test">
+            <small>上次测试发送：</small>
+            <strong>{{ lastTestSendValue(testTargetItem) }}</strong>
+          </div>
         </div>
-        <div class="im-1023-test-input-head">
-          <span>测试文字（可选，与附件可一起发送）</span>
-        </div>
-        <el-input
-          v-model="testText"
-          type="textarea"
-          :rows="3"
-          maxlength="20000"
-          show-word-limit
-          placeholder="输入将发送的文字；没有附件时必填"
-        />
         <div class="im-1023-type-tabs" role="group" aria-label="附件类型">
           <button
             type="button"
@@ -695,24 +818,86 @@
         <div v-if="testType !== 'none'" class="im-1023-upload-field">
           <div class="im-1023-test-input-head">
             <span
-              >从当前专家工作空间选择{{
-                testType === "image" ? "图片" : "文件"
-              }}
-              <em>*</em></span
+              >选择{{ testType === "image" ? "图片" : "文件" }} <em>*</em></span
             >
           </div>
-          <el-select
-            v-model="testFileId"
-            placeholder="选择一个工作空间文件"
-            style="width: 100%"
+          <el-popover
+            v-model="testFilePickerVisible"
+            placement="bottom-start"
+            trigger="click"
+            width="440"
+            popper-class="pc-reference-popper im-test-file-popper"
           >
-            <el-option
-              v-for="file in selectableWorkspaceFiles"
-              :key="file.id"
-              :label="file.name"
-              :value="file.id"
-            />
-          </el-select>
+            <div class="pc-reference-picker im-test-file-picker">
+              <div class="pc-reference-search">
+                <i class="el-icon-search" />
+                <input
+                  v-model="testFileSearch"
+                  type="search"
+                  placeholder="搜索工作空间文件"
+                />
+              </div>
+              <div class="pc-reference-list">
+                <div
+                  v-for="node in testWorkspaceRows"
+                  :key="node.item.id"
+                  class="pc-reference-tree-row"
+                  :style="{ paddingLeft: `${8 + node.depth * 16}px` }"
+                >
+                  <button
+                    v-if="node.item.kind === 'folder'"
+                    type="button"
+                    class="pc-reference-tree-entry"
+                    @click="toggleTestFolder(node.item.id)"
+                  >
+                    <i
+                      :class="
+                        testExpandedFolderIds.includes(node.item.id)
+                          ? 'el-icon-arrow-down'
+                          : 'el-icon-arrow-right'
+                      "
+                    />
+                    <i class="el-icon-folder" />
+                    <span>{{ node.item.name }}</span>
+                  </button>
+                  <button
+                    v-else
+                    type="button"
+                    class="pc-reference-tree-entry"
+                    :class="{ selected: testFileId === node.item.id }"
+                    :title="testFilePath(node.item)"
+                    @click="selectTestFile(node.item)"
+                  >
+                    <span class="pc-reference-tree-spacer" />
+                    <i class="el-icon-document" />
+                    <span>{{ node.item.name }}</span>
+                    <i
+                      v-if="testFileId === node.item.id"
+                      class="el-icon-check"
+                      aria-hidden="true"
+                    />
+                  </button>
+                </div>
+                <p v-if="!testWorkspaceRows.length" class="pc-reference-empty">
+                  没有匹配的{{ testType === "image" ? "图片" : "文件" }}
+                </p>
+              </div>
+            </div>
+            <button
+              slot="reference"
+              type="button"
+              class="im-1023-file-trigger"
+              :aria-label="`选择${testType === 'image' ? '图片' : '文件'}`"
+              :title="selectedTestFile ? testFilePath(selectedTestFile) : ''"
+            >
+              <span>{{
+                selectedTestFile
+                  ? testFilePath(selectedTestFile)
+                  : `从当前专家工作空间选择${testType === "image" ? "图片" : "文件"}`
+              }}</span>
+              <i class="el-icon-arrow-down" aria-hidden="true" />
+            </button>
+          </el-popover>
           <p class="im-1023-upload-help">
             {{
               selectableWorkspaceFiles.length
@@ -720,6 +905,42 @@
                 : "工作空间暂无此类文件；请先在专家工作空间上传，再返回此处选择。"
             }}
           </p>
+        </div>
+        <div class="im-1023-test-input-head">
+          <span>文字</span>
+        </div>
+        <el-input
+          v-model="testText"
+          type="textarea"
+          :rows="3"
+          maxlength="1000"
+          show-word-limit
+          placeholder="输入将发送的文字；没有附件时必填"
+          @input="testResult = null"
+        />
+        <div
+          v-if="testResult"
+          class="im-1023-test-result"
+          :class="
+            testResult.status === 'accepted' ? 'is-accepted' : 'is-failed'
+          "
+          role="status"
+        >
+          <div class="im-1023-result-head">
+            <span aria-hidden="true">{{
+              testResult.status === "accepted" ? "✓" : "!"
+            }}</span>
+            <strong>{{
+              testResult.status === "accepted" ? "发送成功" : "发送失败"
+            }}</strong>
+          </div>
+          <p class="im-1023-result-time">
+            发送时间：{{ formatDeliveryTime(testResult.at) }}
+          </p>
+          <details>
+            <summary>查看返回信息</summary>
+            <pre>{{ formatReturnInfo(testResult.returnInfo) }}</pre>
+          </details>
         </div>
       </div>
       <div slot="footer" class="im-1023-dialog-footer">
@@ -760,7 +981,8 @@ export default {
       targetKind: "person",
       targetMode: "candidate",
       targetSearch: "",
-      targetConfirmed: false,
+      selectedCandidates: [],
+      editingCandidateId: "",
       targetDraft: {
         id: "",
         name: "",
@@ -771,7 +993,10 @@ export default {
       detailVisible: false,
       detailItem: null,
       detailKind: "person",
+      detailName: "",
+      detailNameEditing: false,
       detailPurpose: "",
+      detailPurposeEditing: false,
       checkVisible: false,
       testVisible: false,
       testKind: "person",
@@ -779,6 +1004,9 @@ export default {
       testType: "none",
       testText: "",
       testFileId: "",
+      testFilePickerVisible: false,
+      testFileSearch: "",
+      testExpandedFolderIds: [],
       testResult: null,
     };
   },
@@ -803,6 +1031,15 @@ export default {
         }[this.channel?.id] || ""
       );
     },
+    channelCheckSummary() {
+      const status = this.channel?.checkStatus || "待检查";
+      if (
+        status === "发送前提已满足" &&
+        this.channel?.sendLinkStatus !== "verified"
+      )
+        return "发送链路待验证";
+      return this.productCopy(status);
+    },
     targetIdLabel() {
       const labels = {
         dingtalk: { person: "人员 userId", group: "群 openConversationId" },
@@ -813,6 +1050,20 @@ export default {
         },
       };
       return labels[this.channel?.id]?.[this.targetKind] || "目标 ID";
+    },
+    detailIdLabel() {
+      const labels = {
+        dingtalk: { person: "userId", group: "openConversationId" },
+        feishu: { person: "open_id", group: "chat_id" },
+        wecom: { person: "userid", group: "chatid" },
+      };
+      return labels[this.channel?.id]?.[this.detailKind] || "目标 ID";
+    },
+    detailSourceLabel() {
+      return /手动|管理员|旧版/.test(this.detailItem?.source || "") ||
+        !this.detailItem?.source
+        ? "手动添加"
+        : "从消息渠道已有对话选择";
     },
     candidateModeLabel() {
       return this.targetKind === "person" ? "从已有单聊选择" : "从已有群聊选择";
@@ -858,8 +1109,8 @@ export default {
         this.channel?.id,
         this.targetKind,
       )
-        .map((item) => ({ ...item, isApproved: known.has(item.id) }))
-        .sort((a, b) => Number(a.isApproved) - Number(b.isApproved));
+        .map((item) => ({ ...item, isAdded: known.has(item.id) }))
+        .sort((a, b) => Number(a.isAdded) - Number(b.isAdded));
     },
     filteredCandidates() {
       const query = this.targetSearch.trim().toLowerCase();
@@ -884,18 +1135,72 @@ export default {
             /\.(png|jpe?g|gif|webp|svg)$/i.test(file.name)),
       );
     },
+    selectedTestFile() {
+      return this.selectableWorkspaceFiles.find(
+        (file) => file.id === this.testFileId,
+      );
+    },
+    testWorkspaceRows() {
+      const files = this.expert.files || [];
+      const allowed = new Set(
+        this.selectableWorkspaceFiles.map((file) => file.id),
+      );
+      const visibleFolders = new Set();
+      for (const file of this.selectableWorkspaceFiles) {
+        let parentId = file.parentId;
+        while (parentId && !visibleFolders.has(parentId)) {
+          visibleFolders.add(parentId);
+          parentId = files.find((item) => item.id === parentId)?.parentId;
+        }
+      }
+      const search = this.testFileSearch.trim().toLowerCase();
+      if (search)
+        return files
+          .filter(
+            (item) =>
+              allowed.has(item.id) &&
+              this.testFilePath(item).toLowerCase().includes(search),
+          )
+          .map((item) => ({ item, depth: 0 }));
+      const rows = [];
+      const visit = (parentId, depth) => {
+        const children = files
+          .filter((item) => item.parentId === parentId)
+          .sort((a, b) =>
+            a.kind === b.kind
+              ? a.name.localeCompare(b.name)
+              : a.kind === "folder"
+                ? -1
+                : 1,
+          );
+        for (const item of children) {
+          if (item.kind === "file" && !allowed.has(item.id)) continue;
+          if (item.kind === "folder" && !visibleFolders.has(item.id)) continue;
+          rows.push({ item, depth });
+          if (
+            item.kind === "folder" &&
+            this.testExpandedFolderIds.includes(item.id)
+          )
+            visit(item.id, depth + 1);
+        }
+      };
+      visit(null, 0);
+      return rows;
+    },
     checkHasBlocker() {
       return (this.channel?.checkReport || []).some(
         (item) => item.status === "blocked",
       );
     },
+    checkHasPending() {
+      return (this.channel?.checkReport || []).some(
+        (item) => item.status === "pending",
+      );
+    },
   },
   watch: {
-    "targetDraft.id"() {
-      this.targetConfirmed = false;
-    },
-    "targetDraft.name"() {
-      this.targetConfirmed = false;
+    testVisible(visible) {
+      if (!visible) this.testFilePickerVisible = false;
     },
     activeId() {
       this.qrVisible = false;
@@ -927,13 +1232,19 @@ export default {
       Vue.set(this.channel, "requireMention", Boolean(enabled));
       persist();
     },
+    resetCheck() {
+      Vue.set(this.channel, "checkStatus", "待检查");
+      Vue.set(this.channel, "checkReport", []);
+      persist();
+    },
     onEnabledChange(enabled) {
       if (!enabled) {
         Vue.set(this.channel, "connected", false);
         Vue.set(this.channel, "proactive", false);
+        Vue.set(this.channel, "sendLinkStatus", null);
         this.testVisible = false;
       }
-      persist();
+      this.resetCheck();
     },
     loadDraft() {
       this.botIdDraft = "";
@@ -955,7 +1266,8 @@ export default {
       if (this.channel.id === "dingtalk")
         Vue.set(this.channel, "robotCode", this.robotCodeDraft);
       Vue.set(this.channel, "connected", Boolean(this.channel.enabled));
-      persist();
+      Vue.set(this.channel, "sendLinkStatus", null);
+      this.resetCheck();
       this.botSecretDraft = "";
       this.$message.success(
         this.channel.enabled
@@ -967,40 +1279,50 @@ export default {
       const hasCredentials = Boolean(
         this.channel.botId && this.channel.botSecretConfigured,
       );
+      const isWecom = this.channel.id === "wecom";
+      const sendLinkStatus = this.channel.sendLinkStatus;
+      const linkDetail =
+        sendLinkStatus === "verified"
+          ? isWecom
+            ? "机器人 WebSocket 已认证"
+            : "应用身份凭证已取得"
+          : sendLinkStatus === "failed"
+            ? isWecom
+              ? "机器人 WebSocket 认证失败"
+              : "应用身份凭证获取失败"
+            : hasCredentials
+              ? "已填写，尚未验证"
+              : isWecom && this.channel.connected
+                ? "已连接，WebSocket 认证尚未验证"
+                : isWecom
+                  ? "机器人 WebSocket 未认证"
+                  : "应用凭据未填写完整";
+      const linkStatus =
+        sendLinkStatus === "verified"
+          ? "ok"
+          : sendLinkStatus === "failed" ||
+              (!hasCredentials && !(isWecom && this.channel.connected))
+            ? "blocked"
+            : "pending";
       const report = [
         {
-          label: "渠道启用",
-          detail: this.channel.enabled ? "已开启" : "未开启；无法发送",
+          label: "渠道已启用",
+          detail: this.channel.enabled
+            ? "可接收并回复此渠道消息"
+            : "请先启用渠道",
           status: this.channel.enabled ? "ok" : "blocked",
         },
         {
-          label: "机器人凭据",
-          detail: hasCredentials
-            ? "凭据已填写；发送权限仍需核对"
-            : "凭据未填写完整；请补齐后重新检查",
-          status: hasCredentials ? "ok" : "blocked",
+          label: "机器人发送链路",
+          detail: linkDetail,
+          status: linkStatus,
         },
         {
-          label: "应用发送权限",
-          detail: "请确认平台授权范围与机器人发送权限",
-          status: "pending",
-        },
-        {
-          label: "连接条件",
-          detail:
-            this.channel.id === "wecom"
-              ? this.channel.connected
-                ? "已连接；发送时仍需确认目标会话可达"
-                : "未连接；企微主动发送需要该机器人连接"
-              : this.channel.connected
-                ? "渠道已连接；出站权限需另行确认"
-                : "渠道未连接；请先完成连接",
-          status: this.channel.connected ? "ok" : "blocked",
-        },
-        {
-          label: "目标可达性",
-          detail: "静态检查无法确认；需实际发送验证",
-          status: "pending",
+          label: "主动沟通已开启",
+          detail: this.channel.proactive
+            ? "可向名单目标发起发送"
+            : "请先开启主动沟通",
+          status: this.channel.proactive ? "ok" : "blocked",
         },
       ];
       Vue.set(this.channel, "checkReport", report);
@@ -1009,7 +1331,9 @@ export default {
         "checkStatus",
         report.some((item) => item.status === "blocked")
           ? "部分条件待补"
-          : "基础项已检查",
+          : report.some((item) => item.status === "pending")
+            ? "发送链路待验证"
+            : "发送前提已满足",
       );
       persist();
       this.checkVisible = true;
@@ -1021,7 +1345,7 @@ export default {
         return "可从入站 open_id 或有权限的通讯录查询中核对目标。";
       if (this.channel.id === "dingtalk" && kind === "group")
         return "让机器人先加入群并互动，或输入并核对 openConversationId。";
-      return "让目标先与当前专家机器人互动，再从线索中核对并批准。";
+      return "让目标先与当前专家机器人互动，再从线索中核对并加入名单。";
     },
     productCopy(value) {
       return String(value || "")
@@ -1069,13 +1393,44 @@ export default {
         .replaceAll("演示", "")
         .replaceAll("模拟", "");
     },
-    productDeliveryId(id) {
-      return String(id || "")
-        .replace(/^demo-delivery-/, "dly-")
-        .replace(/^demo-/, "dly-");
+    formatReturnInfo(info) {
+      return JSON.stringify(info, null, 2);
     },
-    productReceipt(receipt) {
-      return String(receipt || "").replace(/^DEMO_/, "");
+    demoReturnInfo(status, deliveryId) {
+      const success = status === "accepted";
+      const messageId = success ? `msg_${deliveryId.slice(4)}` : null;
+      const platform = this.channel.id;
+      const result = { success, message_id: messageId };
+      if (!success) {
+        result.error =
+          status === "unknown"
+            ? `Timeout sending message to ${platform === "dingtalk" ? "DingTalk" : platform === "wecom" ? "WeCom" : "Feishu"}`
+            : status === "partial"
+              ? "File upload failed after text send"
+              : platform === "wecom"
+                ? this.testKind === "group"
+                  ? "No req_id available for group chat (passive reply required)"
+                  : "WeCom errcode 846609: subscription lost"
+                : platform === "dingtalk"
+                  ? "HTTP 403: send failed"
+                  : "[1] send failed";
+      }
+      if (status === "partial")
+        result.parts = {
+          text: { success: true },
+          attachment: { success: false, error: "File upload failed" },
+        };
+      if (platform === "wecom" && success)
+        result.raw_response = {
+          errcode: 0,
+          errmsg: "ok",
+          headers: { req_id: messageId },
+        };
+      if (platform === "feishu" && status !== "unknown")
+        result.raw_response = success
+          ? { code: 0, msg: "success", data: { message_id: messageId } }
+          : { code: 1, msg: "send failed" };
+      return result;
     },
     formatDeliveryTime(at) {
       return new Date(at).toLocaleString("zh-CN", { hour12: false });
@@ -1083,12 +1438,20 @@ export default {
     openTargetDetail(kind, item) {
       this.detailKind = kind;
       this.detailItem = item;
+      this.detailName = item.name || "";
+      this.detailNameEditing = false;
       this.detailPurpose = item.purpose || "";
+      this.detailPurposeEditing = false;
       this.detailVisible = true;
     },
     saveTargetDetail() {
       if (!this.detailItem) return;
-      Vue.set(this.detailItem, "purpose", this.detailPurpose);
+      if (this.detailNameEditing && !this.detailName.trim())
+        return this.$message.warning("平台显示名称不能为空");
+      if (this.detailNameEditing)
+        Vue.set(this.detailItem, "name", this.detailName.trim());
+      if (this.detailPurposeEditing)
+        Vue.set(this.detailItem, "purpose", this.detailPurpose.trim());
       persist();
       this.detailVisible = false;
     },
@@ -1109,48 +1472,71 @@ export default {
           ? "candidate"
           : "manual";
       this.targetSearch = "";
-      this.targetConfirmed = false;
+      this.selectedCandidates = [];
+      this.editingCandidateId = "";
       this.targetDraft = {
         id: "",
         name: "",
         purpose: "",
-        source: this.targetMode === "manual" ? "管理员手动输入" : "",
+        source: this.targetMode === "manual" ? "手动添加" : "",
         lastInteractionAt: "",
       };
       this.targetVisible = true;
     },
     setManualTarget() {
       if (this.targetMode === "manual") return;
-      const purpose = this.targetDraft.purpose;
       this.targetMode = "manual";
       this.targetSearch = "";
-      this.targetConfirmed = false;
+      this.selectedCandidates = [];
+      this.editingCandidateId = "";
       this.targetDraft = {
         id: "",
         name: "",
-        purpose,
-        source: "管理员手动输入",
+        purpose: "",
+        source: "手动添加",
         lastInteractionAt: "",
       };
     },
     setCandidateMode() {
       if (this.targetMode === "candidate") return;
-      const purpose = this.targetDraft.purpose;
       this.targetMode = "candidate";
       this.targetSearch = "";
-      this.targetConfirmed = false;
+      this.selectedCandidates = [];
+      this.editingCandidateId = "";
       this.targetDraft = {
         id: "",
         name: "",
-        purpose,
+        purpose: "",
         source: "",
         lastInteractionAt: "",
       };
     },
     selectCandidate(item) {
-      if (item.isApproved) return;
-      this.targetConfirmed = false;
-      this.targetDraft = { ...item, purpose: this.targetDraft.purpose };
+      if (item.isAdded) return;
+      if (this.isCandidateSelected(item.id)) {
+        this.removeSelectedCandidate(item.id);
+        return;
+      }
+      this.selectedCandidates.push({
+        id: item.id,
+        name: item.name,
+        platformName: item.name,
+        purpose: "",
+        lastInteractionAt: item.lastInteractionAt || "",
+      });
+    },
+    isCandidateSelected(id) {
+      return this.selectedCandidates.some((item) => item.id === id);
+    },
+    removeSelectedCandidate(id) {
+      this.selectedCandidates = this.selectedCandidates.filter(
+        (item) => item.id !== id,
+      );
+      if (this.editingCandidateId === id) this.editingCandidateId = "";
+    },
+    clearSelectedCandidates() {
+      this.selectedCandidates = [];
+      this.editingCandidateId = "";
     },
     ensureTargets(kind) {
       const key = kind === "person" ? "people" : "groups";
@@ -1158,64 +1544,80 @@ export default {
       return this.channel[key];
     },
     saveTarget() {
-      const id = this.targetDraft.id.trim();
-      if (!id) return this.$message.warning("请先选择或输入目标");
-      if (!this.targetDraft.name.trim())
-        return this.$message.warning("请填写已核对的平台显示名称");
-      if (!this.targetConfirmed)
-        return this.$message.warning("请先核对身份并明确批准");
+      const drafts =
+        this.targetMode === "candidate"
+          ? this.selectedCandidates
+          : [this.targetDraft];
+      if (!drafts.length || drafts.some((item) => !item.id.trim()))
+        return this.$message.warning("请先选择或输入目标");
+      if (drafts.some((item) => !item.name.trim()))
+        return this.$message.warning("请填写每个目标的平台显示名称");
       const list = this.ensureTargets(this.targetKind);
-      if (list.some((item) => item.id === id))
-        return this.$message.warning("目标已存在");
-      const item = {
-        id,
-        name: this.targetDraft.name.trim(),
-        purpose: this.targetDraft.purpose.trim(),
-        source: this.targetDraft.source,
-        lastInteractionAt: this.targetDraft.lastInteractionAt,
-        checkedAt: new Date().toLocaleString("zh-CN", { hour12: false }),
-        approved: true,
-        result: "",
-        testedAt: "",
-      };
-      list.push(item);
+      if (drafts.some((item) => list.some((target) => target.id === item.id)))
+        return this.$message.warning(
+          "所选目标中已有加入名单的目标，请重新选择",
+        );
+      const addedAt = new Date().toLocaleString("zh-CN", { hour12: false });
+      list.push(
+        ...drafts.map((item) => ({
+          id: item.id.trim(),
+          name: item.name.trim(),
+          platformName: item.platformName || item.name.trim(),
+          purpose: item.purpose.trim(),
+          source:
+            this.targetMode === "manual"
+              ? "手动添加"
+              : "从消息渠道已有对话选择",
+          lastInteractionAt: item.lastInteractionAt,
+          lastProactiveAt: "",
+          checkedAt: addedAt,
+          result: "",
+          testedAt: "",
+        })),
+      );
       persist();
       this.targetVisible = false;
-      this.$message.success("目标已批准加入名单，尚未发送验证");
+      this.$message.success(`${drafts.length} 个目标已加入名单，尚未发送测试`);
     },
     shortId(id) {
       return String(id).length > 18 ? `…${String(id).slice(-10)}` : id;
     },
-    targetStatusClass(item) {
-      if (!item.testedAt) return "untested";
+    lastTestSendValue(item) {
+      if (!item.testedAt) return "未测试";
       const status = item.lastTest?.status || item.result;
-      if (status === "failed" || status === "失败") return "failed";
-      if (status === "unknown" || status === "未知") return "unknown";
-      if (status === "partial" || status === "部分成功") return "partial";
-      return "success";
+      const success = [
+        "accepted",
+        "sent",
+        "success",
+        "成功",
+        "已受理",
+      ].includes(status);
+      const time = this.formatRecentProactiveTime({
+        lastProactiveAt: item.lastTest?.at || item.testedAt,
+      });
+      return `${time} ${success ? "成功" : "失败"}`;
     },
-    targetStatusLabel(item) {
-      if (!item.testedAt) return "已批准 · 尚未验证";
-      const labels = {
-        accepted: "已受理",
-        成功: "已受理",
-        failed: "发送失败",
-        失败: "发送失败",
-        unknown: "结果未知",
-        未知: "结果未知",
-        partial: "部分成功",
-        部分成功: "部分成功",
-      };
-      return `上次测试${labels[item.lastTest?.status || item.result] || "结果待确认"} · ${item.testedAt}`;
+    formatRecentProactiveTime(item) {
+      const raw = String(
+        item?.lastProactiveAt || item?.lastTest?.at || item?.testedAt || "",
+      );
+      if (!raw) return "无记录";
+      const isoDate = /^\d{4}-\d{2}-\d{2}T/.test(raw) ? new Date(raw) : null;
+      if (isoDate && !Number.isNaN(isoDate.getTime()))
+        return `${isoDate.getFullYear()}年${isoDate.getMonth() + 1}月${isoDate.getDate()}日 ${String(isoDate.getHours()).padStart(2, "0")}:${String(isoDate.getMinutes()).padStart(2, "0")}`;
+      const match = raw.match(
+        /^(?:(\d{4})[-/])?(\d{1,2})[-/](\d{1,2})[ T](\d{1,2}):(\d{2})/,
+      );
+      return match
+        ? `${match[1] || new Date().getFullYear()}年${Number(match[2])}月${Number(match[3])}日 ${match[4].padStart(2, "0")}:${match[5]}`
+        : raw;
     },
     openTest(kind, item) {
       if (
         !this.channel.enabled ||
         !this.channel.connected ||
         !this.channel.proactive ||
-        !this.ensureTargets(kind).some(
-          (target) => target.id === item.id && target.approved !== false,
-        )
+        !this.ensureTargets(kind).some((target) => target.id === item.id)
       )
         return this.$message.warning("请先连接渠道并开启主动沟通");
       this.testKind = kind;
@@ -1223,6 +1625,9 @@ export default {
       this.testType = "none";
       this.testText = "";
       this.testFileId = "";
+      this.testFilePickerVisible = false;
+      this.testFileSearch = "";
+      this.testExpandedFolderIds = [];
       this.testResult = null;
       this.testVisible = true;
     },
@@ -1230,6 +1635,34 @@ export default {
       this.testType = type;
       this.testResult = null;
       this.testFileId = "";
+      this.testFilePickerVisible = false;
+      this.testFileSearch = "";
+      this.testExpandedFolderIds = [];
+    },
+    toggleTestFolder(id) {
+      this.testExpandedFolderIds = this.testExpandedFolderIds.includes(id)
+        ? this.testExpandedFolderIds.filter((item) => item !== id)
+        : [...this.testExpandedFolderIds, id];
+    },
+    selectTestFile(file) {
+      this.testFileId = file.id;
+      this.testResult = null;
+      this.testFilePickerVisible = false;
+    },
+    testFilePath(file) {
+      const parts = [file.name];
+      const seen = new Set([file.id]);
+      let parentId = file.parentId;
+      while (parentId && !seen.has(parentId)) {
+        const folder = (this.expert.files || []).find(
+          (item) => item.id === parentId,
+        );
+        if (!folder) break;
+        parts.unshift(folder.name);
+        seen.add(parentId);
+        parentId = folder.parentId;
+      }
+      return `/${parts.join("/")}`;
     },
     sendDemoTest() {
       // 原型交互只更新本地状态；这里不调用任何消息平台接口。
@@ -1239,13 +1672,14 @@ export default {
         !this.channel.connected ||
         !this.channel.proactive ||
         !this.ensureTargets(this.testKind).some(
-          (item) =>
-            item.id === this.testTargetItem.id && item.approved !== false,
+          (item) => item.id === this.testTargetItem.id,
         )
       )
         return this.$message.warning("请先连接渠道并开启主动沟通");
       if (!this.testText.trim() && this.testType === "none")
         return this.$message.warning("请输入测试文字或选择一个工作空间附件");
+      if (this.testText.length > 1000)
+        return this.$message.warning("测试文字最多 1000 字");
       if (this.testType !== "none" && !this.channel.files)
         return this.$message.warning("请先开启允许收发图片与文件");
       if (
@@ -1272,14 +1706,17 @@ export default {
           "wc-inspector",
           "wc-group-partial",
         ].includes(id);
+      const previousResult = this.testTargetItem.result;
       const status =
         selectedFile &&
         this.testText.trim() &&
         /partial|upload-fail/i.test(`${id} ${selectedFile.name}`)
           ? "partial"
-          : /timeout/i.test(id)
+          : /timeout/i.test(id) || previousResult === "未知"
             ? "unknown"
-            : unavailableWecom || /expired|denied|no-bot|no-dm/i.test(id)
+            : unavailableWecom ||
+                /expired|denied|no-bot|no-dm/i.test(id) ||
+                ["失败", "部分成功"].includes(previousResult)
               ? "failed"
               : "accepted";
       const detail =
@@ -1290,7 +1727,9 @@ export default {
             : status === "unknown"
               ? "请求超时，结果未知；请人工核实后再决定是否重试。"
               : this.channel.id === "wecom"
-                ? "目标会话已失效，当前无法发送。"
+                ? this.testKind === "group"
+                  ? "群聊缺少可用的发送上下文，当前无法发送。"
+                  : "目标会话已失效，当前无法发送。"
                 : this.testKind === "group"
                   ? "机器人未加入目标群，发送失败。"
                   : "机器人没有向该用户发送消息的权限。";
@@ -1310,6 +1749,7 @@ export default {
                   ? "SESSION_UNAVAILABLE"
                   : "SEND_FORBIDDEN",
       };
+      result.returnInfo = this.demoReturnInfo(status, result.deliveryId);
       this.testResult = result;
       if (!Array.isArray(this.channel.deliveries))
         Vue.set(this.channel, "deliveries", []);
@@ -1350,6 +1790,7 @@ export default {
             .replaceAll("/", "-"),
         );
         Vue.set(stored, "lastTest", result);
+        Vue.set(stored, "lastProactiveAt", result.at);
         persist();
       }
     },
