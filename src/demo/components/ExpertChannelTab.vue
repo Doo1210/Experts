@@ -30,7 +30,16 @@
       <div class="channel-profile">
         <div>
           <strong>{{ channel.name }}</strong>
-          <p>{{ channelDescription }}</p>
+          <p class="channel-profile-description">
+            <span>{{ channelDescription }}</span>
+            <a
+              :href="channelConfigUrl"
+              target="_blank"
+              rel="noopener noreferrer"
+              :aria-label="`前往${channel.name}官方后台配置`"
+              >前往配置 <i class="el-icon-top-right" aria-hidden="true"></i
+            ></a>
+          </p>
         </div>
         <span :class="{ disconnected: !channel.connected }">{{
           channel.connected ? "已连接" : "未连接"
@@ -1024,10 +1033,19 @@ export default {
     channelDescription() {
       return (
         {
-          wecom: "AI Bot · 仅对已有会话主动发送",
+          wecom: "AI Bot",
           dingtalk: "企业内部应用机器人",
           feishu: "企业自建应用机器人",
         }[this.channel?.id] || ""
+      );
+    },
+    channelConfigUrl() {
+      return (
+        {
+          wecom: "https://work.weixin.qq.com/wework_admin/frame#apps",
+          dingtalk: "https://open.dingtalk.com/",
+          feishu: "https://open.feishu.cn/app",
+        }[this.channel?.id] || "#"
       );
     },
     channelCheckSummary() {

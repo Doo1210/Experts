@@ -556,7 +556,7 @@ button {
 
 /* 专家列表：沿用原型的横向名片与悬停操作。 */
 .expert-list-page .card-grid {
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 16px;
 }
 .expert-list-page .expert-card-mine {
@@ -576,10 +576,10 @@ button {
 }
 .expert-card-mine .expert-card-body {
   display: flex;
-  align-items: center;
-  gap: 10px;
-  min-height: 104px;
-  padding: 14px 14px 8px;
+  align-items: flex-start;
+  gap: 12px;
+  min-height: 106px;
+  padding: 12px 14px 8px;
   cursor: pointer;
 }
 .expert-card-mine .expert-card-body:focus-visible {
@@ -588,9 +588,9 @@ button {
   border-radius: 12px;
 }
 .expert-card-mine .card-avatar {
-  width: 72px;
-  height: 72px;
-  flex: 0 0 72px;
+  width: 84px;
+  height: 84px;
+  flex: 0 0 84px;
   border: 2px solid #fff;
   border-radius: 15px;
   background: #f2f6fc;
@@ -601,25 +601,33 @@ button {
 }
 .expert-card-mine .card-header-text {
   min-width: 0;
+  height: 86px;
   flex: 1;
 }
 .expert-card-mine .card-name {
   overflow: hidden;
   margin: 0;
   color: #24334b;
-  font-size: 15.5px;
+  font-size: 16px;
   font-weight: 650;
-  line-height: 1.4;
+  line-height: 1.45;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.expert-card-mine .card-desc-region {
+  display: flex;
+  align-items: center;
+  height: 58px;
+  margin-top: 4px;
 }
 .expert-card-mine .card-desc {
   display: -webkit-box;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 3;
   overflow: hidden;
-  max-height: 54px;
-  margin: 6px 0 0;
+  width: 100%;
+  max-height: 56px;
+  margin: 0;
   color: #6b778b;
   font-size: 11.5px;
   line-height: 1.55;
@@ -5794,6 +5802,24 @@ button {
   margin: 5px 0 0;
   color: #8996a6;
   font-size: 12px;
+}
+.expert-channel-page .channel-profile-description {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.expert-channel-page .channel-profile-description a {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  color: #3a8ee6;
+  font-size: 12px;
+  text-decoration: none;
+  white-space: nowrap;
+}
+.expert-channel-page .channel-profile-description a:hover {
+  color: #1f73d8;
+  text-decoration: underline;
 }
 .expert-channel-page .channel-profile > span {
   padding: 4px 8px;

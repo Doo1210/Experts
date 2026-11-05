@@ -46,8 +46,15 @@
                 :alt="item.name"
               />
               <div class="card-header-text">
-                <h2 class="card-name">{{ item.name }}</h2>
-                <p class="card-desc">{{ item.description || "暂无简介" }}</p>
+                <h2 class="card-name" :title="item.name">{{ item.name }}</h2>
+                <div class="card-desc-region">
+                  <p
+                    class="card-desc"
+                    :title="item.description || '暂无简介'"
+                  >
+                    {{ item.description || "暂无简介" }}
+                  </p>
+                </div>
               </div>
             </div>
             <el-dropdown
@@ -76,8 +83,8 @@
               <div class="expert-card-info">
                 <span
                   class="expert-card-stat"
-                  :title="`正在执行 ${runningCount(item)}`"
-                  ><span>正在执行</span
+                  :title="`运行中任务 ${runningCount(item)}`"
+                  ><span>运行中任务</span
                   ><span class="expert-card-stat-number">{{
                     runningCount(item)
                   }}</span></span

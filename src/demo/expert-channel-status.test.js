@@ -6,6 +6,26 @@ const { lastTestSendValue, formatRecentProactiveTime, productCopy } =
   ExpertChannelTab.methods;
 
 describe("消息渠道状态文案", () => {
+  it("三家机器人类型提供对应的官方配置入口", () => {
+    const context = { channel: { id: "wecom" } };
+    expect(ExpertChannelTab.computed.channelDescription.call(context)).toBe(
+      "AI Bot",
+    );
+    expect(ExpertChannelTab.computed.channelConfigUrl.call(context)).toBe(
+      "https://work.weixin.qq.com/wework_admin/frame#apps",
+    );
+
+    context.channel.id = "dingtalk";
+    expect(ExpertChannelTab.computed.channelConfigUrl.call(context)).toBe(
+      "https://open.dingtalk.com/",
+    );
+
+    context.channel.id = "feishu";
+    expect(ExpertChannelTab.computed.channelConfigUrl.call(context)).toBe(
+      "https://open.feishu.cn/app",
+    );
+  });
+
   it("钉钉有候选时直接展示已有会话，入口按类型命名", () => {
     const context = {
       expert: { id: "exp_ops" },
