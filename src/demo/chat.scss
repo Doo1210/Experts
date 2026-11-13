@@ -137,6 +137,7 @@
   color: #3478ee;
 }
 .pc-body {
+  position: relative;
   display: flex;
   flex: 1;
   min-width: 0;
@@ -975,6 +976,268 @@
 .pc-process-detail > * + * {
   margin-top: 7px;
 }
+.pc-knowledge-summary {
+  margin: 0;
+  padding-left: 16px;
+}
+.pc-knowledge-link,
+.pc-process .pc-knowledge-link,
+.pc-markdown .pc-knowledge-citation {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: #2869cf;
+  font-size: inherit;
+  text-align: left;
+}
+.pc-knowledge-link:hover,
+.pc-process .pc-knowledge-link:hover,
+.pc-markdown .pc-knowledge-citation:hover {
+  text-decoration: underline;
+}
+.pc-markdown .pc-knowledge-citation {
+  margin-left: 2px;
+  padding: 0 3px;
+  border-radius: 4px;
+  background: #eaf2ff;
+  font-size: 12px;
+  white-space: nowrap;
+}
+.pc-citation-preview {
+  position: absolute;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  width: min(420px, calc(100% - 16px));
+  max-height: min(320px, var(--pc-citation-available-height, calc(100% - 16px)));
+  overflow: hidden;
+  border: 1px solid #dce6f4;
+  border-radius: 10px;
+  background: #fff;
+  box-shadow: 0 8px 24px rgba(27, 46, 75, 0.16);
+  color: #344054;
+  font-size: 12px;
+}
+.pc-citation-preview-head {
+  flex: 0 0 auto;
+  padding: 8px 12px;
+  border-bottom: 1px solid #e8edf4;
+  background: #f4f8ff;
+}
+.pc-citation-preview-list {
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+  scrollbar-width: thin;
+  padding: 10px 12px 12px;
+  overflow-wrap: anywhere;
+}
+.pc-citation-preview-tabs {
+  display: flex;
+  flex-shrink: 0;
+  gap: 4px;
+  padding: 7px 12px 0;
+  overflow-x: auto;
+}
+.pc-citation-preview-tabs button {
+  padding: 2px 7px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: #f4f6f9;
+  color: #526783;
+  font-size: 11px;
+  white-space: nowrap;
+}
+.pc-citation-preview-tabs button[aria-pressed="true"] {
+  border-color: #c9ddff;
+  background: #eaf2ff;
+  color: #2869cf;
+}
+.pc-citation-preview-list p {
+  margin: 0;
+  line-height: 1.6;
+  white-space: pre-wrap;
+}
+.pc-knowledge-sources {
+  --pc-knowledge-source-gap: 8px;
+  position: absolute;
+  top: var(--pc-knowledge-source-gap);
+  right: 16px;
+  z-index: 9;
+  display: flex;
+  flex-direction: column;
+  width: min(348px, calc(100% - 32px));
+  bottom: calc(
+    var(--pc-knowledge-input-height, 0px) + var(--pc-knowledge-source-gap)
+  );
+  min-height: 0;
+  overflow: hidden;
+  border: 1px solid #dfe6ef;
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: 0 8px 30px rgba(27, 46, 75, 0.17);
+}
+.pc-knowledge-sources .pc-panel-head {
+  flex-basis: 46px;
+  padding: 0 12px;
+}
+.pc-knowledge-float-enter-active,
+.pc-knowledge-float-leave-active {
+  transition: opacity 150ms ease, transform 150ms ease;
+}
+.pc-knowledge-float-leave-active {
+  pointer-events: none;
+}
+.pc-knowledge-float-enter,
+.pc-knowledge-float-leave-to {
+  opacity: 0;
+  transform: translateX(8px);
+}
+.pc-knowledge-filters {
+  display: flex;
+  flex-shrink: 0;
+  gap: 4px;
+  padding: 10px 12px;
+}
+.pc-knowledge-filters button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 8px;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: transparent;
+  color: #606266;
+  font-size: 12px;
+  white-space: nowrap;
+}
+.pc-knowledge-filters button span {
+  min-width: 16px;
+  padding: 0 3px;
+  border-radius: 4px;
+  background: #edf0f4;
+  color: #526783;
+  font-size: 11px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+.pc-knowledge-filters button[aria-pressed="true"] {
+  border-color: #c9ddff;
+  background: #edf4ff;
+  color: #2869cf;
+}
+.pc-knowledge-filters button[aria-pressed="true"] span {
+  background: #dceaff;
+  color: #2869cf;
+}
+.pc-knowledge-evidence {
+  position: relative;
+  min-height: 0;
+  flex: 1;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+  padding: 0 12px 12px;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.pc-knowledge-evidence article {
+  margin: 0 0 10px;
+  padding: 12px;
+  border: 1px solid #e1e6ed;
+  border-radius: 7px;
+  background: #fff;
+}
+.pc-knowledge-evidence article.is-selected {
+  border-color: #83adf7;
+  background: #f6f9ff;
+}
+.pc-knowledge-fragment-header {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+.pc-knowledge-fragment-number {
+  flex-shrink: 0;
+  color: #2869cf;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.pc-knowledge-fragment-sources {
+  flex: 1;
+  min-width: 0;
+}
+.pc-knowledge-document-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 5px;
+}
+.pc-knowledge-document-heading + .pc-knowledge-document-heading {
+  margin-top: 3px;
+}
+.pc-knowledge-document-heading strong,
+.pc-knowledge-document-heading small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pc-knowledge-document-heading strong {
+  min-width: 0;
+  color: #344054;
+  font-size: 13px;
+}
+.pc-knowledge-evidence small {
+  color: #657184;
+  font-size: 11px;
+}
+.pc-knowledge-document-heading small {
+  min-width: 0;
+  max-width: 45%;
+  text-align: right;
+  color: #657184;
+  font-size: 11px;
+}
+.pc-knowledge-fragment-status {
+  flex-shrink: 0;
+  margin-left: auto;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: #f0f2f5;
+  color: #657184;
+  font-size: 11px;
+}
+.pc-knowledge-fragment-status.is-cited {
+  background: #edf4ff;
+  color: #315b91;
+}
+.pc-knowledge-evidence p {
+  margin: 0;
+  color: #455468;
+  line-height: 1.6;
+}
+.pc-knowledge-evidence .pc-knowledge-fragment-text {
+  max-height: 96px;
+  margin-top: 8px;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+  scrollbar-width: thin;
+  white-space: pre-wrap;
+}
+.pc-knowledge-fragment-footer {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  margin-top: 8px;
+}
+.pc-knowledge-fragment-originals {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+}
+.pc-knowledge-evidence article:focus-visible {
+  outline: 1px solid #83adf7;
+  outline-offset: 1px;
+}
 .pc-process-detail .pc-tool-code {
   max-width: 100%;
   overflow-x: auto;
@@ -1146,6 +1409,10 @@
   }
 }
 @media (prefers-reduced-motion: reduce) {
+  .pc-knowledge-float-enter-active,
+  .pc-knowledge-float-leave-active {
+    transition: none;
+  }
   .pc-activity-title.is-running .pc-activity-title-text,
   .pc-process-step.is-running .pc-process-step-content {
     animation: none;
@@ -3664,9 +3931,6 @@
   }
   .pc-chat {
     min-width: 0;
-  }
-  .pc-body {
-    position: relative;
   }
   .pc-main {
     --pc-content-left: 32px;

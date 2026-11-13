@@ -1390,11 +1390,17 @@ describe("演示状态", () => {
     try {
       const conversation = demo.createConversation("exp_quality", "常见处理过程");
       demo.sendDemoMessage(conversation.id, "演示过程");
-      await vi.advanceTimersByTimeAsync(2200);
+      await vi.advanceTimersByTimeAsync(1000);
+      const turn = conversation.turns[0];
+      expect(conversationProcessBlocks(turn)[0].activities).toMatchObject([
+        { name: "read_file", status: "running", argumentSummary: expect.stringContaining("良率样例.csv") },
+        { name: "use_knowledge", stageType: "reading", progressText: "阅读资料" },
+      ]);
+      await vi.advanceTimersByTimeAsync(1750);
       expect(conversation.turns[0].stages).toMatchObject([
         { kind: "model_wait", state: "running" },
       ]);
-      await vi.advanceTimersByTimeAsync(3100);
+      await vi.advanceTimersByTimeAsync(2550);
       expect(conversation.turns[0].stages).toMatchObject([
         { kind: "model_wait", state: "complete" },
         { kind: "compression", state: "running" },
@@ -1410,11 +1416,11 @@ describe("演示状态", () => {
       ]);
       expect(turnResultsVisible(conversation.turns[0])).toBe(false);
       await vi.advanceTimersByTimeAsync(2200);
-      const turn = conversation.turns[0];
       expect(turn.status).toBe("complete");
       expect(turnResultsVisible(turn)).toBe(true);
       expect(turn.activities.map((item) => item.name)).toEqual([
         "read_file",
+        "use_knowledge",
         "search_files",
         "terminal",
         "execute_code",
@@ -1427,6 +1433,89 @@ describe("演示状态", () => {
         "group", "interim", "group",
       ]);
       expect(conversation.messages[1].content).toContain("本轮文件操作结果");
+      expect(turn.activities[1]).toMatchObject({
+        answerMessageId: conversation.messages[1].id,
+        evidence: [
+          { source: { title: "ZX-42 维护手册" }, final_citation_number: 1 },
+          { source: { title: "传感器校准作业规范" }, final_citation_number: null },
+        ],
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+  it("检索知识的专项触发词展示实际阶段、结果和调用来源", async () => {
+    vi.useFakeTimers();
+    try {
+      const success = demo.createConversation("exp_quality", "知识检索");
+      demo.sendDemoMessage(success.id, " 演示工具：检索知识 ");
+      const [turn] = success.turns;
+      const [activity] = turn.activities;
+      expect(activity.stageType).toBe("accepted");
+      for (const [elapsed, stage] of [
+        [1000, "understanding"],
+        [1200, "searching"],
+        [1500, "reading"],
+        [1600, "summarizing"],
+      ]) {
+        await vi.advanceTimersByTimeAsync(elapsed);
+        expect(activity.stageType).toBe(stage);
+        expect(success.messages[1].content).toBe("");
+      }
+      await vi.advanceTimersByTimeAsync(1500);
+      expect(turn.activities).toEqual([activity]);
+      expect(activity).toMatchObject({
+        stageType: "completed", status: "running", progressText: "正在读取结果", evidence: [],
+      });
+      await vi.advanceTimersByTimeAsync(760);
+      expect(success.messages[1].content).toBe("");
+      expect(activity.evidence.every((item) => item.final_citation_number === null)).toBe(true);
+      await vi.advanceTimersByTimeAsync(1700);
+      expect(success.messages[1].status).toBe("streaming");
+      expect(success.messages[1].content).toContain("[1][2][3][4][5]");
+      expect(activity.answerMessageId).toBe(success.messages[1].id);
+      expect(activity.evidence.map((item) => item.final_citation_number)).toEqual([
+        1, 2, 3, 4, 5, null, null, null,
+      ]);
+      await vi.advanceTimersByTimeAsync(3860);
+      expect(activity).toMatchObject({ status: "complete", resultStatus: "success", statusText: "" });
+      expect(success.messages[1].content).toContain("[1][2][3][4][5]");
+      expect(success.messages[1].content).toContain("再开始校准。[1][2][3]");
+      expect(new Set(activity.evidence.flatMap((item) =>
+        item.source ? [item.source.id] : item.calculation_sources.map((source) => source.id),
+      )).size).toBe(4);
+      expect(activity.evidence.map((item) => item.final_citation_number)).toEqual([
+        1, 2, 3, 4, 5, 6, 7, null,
+      ]);
+
+      for (const [trigger, statusText, detail] of [
+        ["检索知识部分完成", "部分完成", "知识侧摘要达到输出上限。"],
+        ["检索知识无结果", "未找到可用资料", ""],
+        ["检索知识失败", "检索失败", "当前没有访问所选资料的权限。"],
+        ["检索知识取消", "已取消", ""],
+        ["检索知识超时", "检索超时", ""],
+      ]) {
+        const conversation = demo.createConversation("exp_quality", trigger);
+        demo.sendDemoMessage(conversation.id, `演示工具：${trigger}`);
+        await vi.advanceTimersByTimeAsync(8000);
+        expect(conversation.turns[0].status).toBe("complete");
+        expect(conversation.turns[0].activities).toMatchObject([{ statusText, detail }]);
+      }
+
+      const multiple = demo.createConversation("exp_quality", "多次检索");
+      demo.sendDemoMessage(multiple.id, "演示工具：多次检索知识");
+      await vi.advanceTimersByTimeAsync(12000);
+      const calls = multiple.turns[0].activities;
+      expect(calls).toHaveLength(2);
+      expect(calls[0].knowledgeRunId).not.toBe(calls[1].knowledgeRunId);
+      expect(calls.map((call) => call.evidence[0].final_citation_number)).toEqual([1, 2]);
+      expect(calls[1].evidence[0].calculation.summary).toContain("1 条待复核");
+
+      const disabled = demo.createConversation("exp_ops", "知识已关闭");
+      demo.sendDemoMessage(disabled.id, "演示工具：检索知识");
+      await vi.advanceTimersByTimeAsync(8000);
+      expect(disabled.turns[0].activities).toHaveLength(0);
+      expect(disabled.messages[1].content).toBe("当前专家未启用知识库。");
     } finally {
       vi.useRealTimers();
     }
@@ -2074,6 +2163,18 @@ describe("演示状态", () => {
       });
       await vi.advanceTimersByTimeAsync(10000);
       expect(conversation.turns[0].status).toBe("complete");
+      const [activity] = conversation.turns[0].activities;
+      expect(conversation.turns[0].activities).toHaveLength(1);
+      expect(activity).toMatchObject({
+        name: "use_knowledge",
+        resultStatus: "success",
+        evidence: [
+          { source: { id: "doc_quality_incoming" }, final_citation_number: 1 },
+          { source: { id: "doc_quality_yield" }, final_citation_number: 2 },
+          { source: { id: "doc_quality_exception" }, final_citation_number: 3 },
+        ],
+      });
+      expect(conversation.messages[1].content).toContain("良率按合格件数除以检验件数计算");
 
       const knowledgeDisabled = demo.createConversation(
         "exp_ops",
@@ -2086,6 +2187,63 @@ describe("演示状态", () => {
         [{ kind: "knowledge_library", id: "kb_quality" }],
       );
       expect(knowledgeDisabled.messages[0].references).toEqual([]);
+      expect(knowledgeDisabled.turns[0].activities).toHaveLength(0);
+      await vi.advanceTimersByTimeAsync(5000);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+  it("指定知识文档时只检索该文档，下一轮的工作空间引用不沿用知识范围", async () => {
+    vi.useFakeTimers();
+    try {
+      const conversation = demo.createConversation("exp_quality", "指定文档检索");
+      demo.sendDemoMessage(conversation.id, "换型前有哪些检查？", [], [
+        { kind: "knowledge_document", id: "doc_process_changeover" },
+      ]);
+      expect(conversation.turns[0].activities).toMatchObject([
+        { name: "use_knowledge", stageType: "accepted" },
+      ]);
+      await vi.advanceTimersByTimeAsync(9000);
+      expect(conversation.turns[0].activities[0].evidence).toMatchObject([
+        { source: { title: "产线换型操作指南.md" }, final_citation_number: 1 },
+      ]);
+      expect(conversation.messages[1].content).toContain("记录首件确认结果。[1]");
+
+      demo.sendDemoMessage(conversation.id, "请汇总记录", [], [
+        { kind: "workspace_file", id: "f_quality_csv" },
+        { kind: "knowledge_library", id: "kb_supplier" },
+        { kind: "knowledge_document", id: "missing" },
+      ]);
+      await vi.advanceTimersByTimeAsync(5000);
+      expect(conversation.turns[1].activities).toHaveLength(0);
+      expect(conversation.messages[2].references).toMatchObject([
+        { kind: "workspace_file", id: "f_quality_csv" },
+      ]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+  it("演示过程带知识引用时按本轮指定的资料生成来源", async () => {
+    vi.useFakeTimers();
+    try {
+      const conversation = demo.createConversation("exp_quality", "组合演示");
+      demo.sendDemoMessage(conversation.id, "演示过程", [], [
+        { kind: "knowledge_document", id: "doc_case_tracking" },
+      ]);
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(conversationProcessBlocks(conversation.turns[0])[0].activities).toMatchObject([
+        { name: "read_file" },
+        { name: "use_knowledge", stageType: "table_analysis" },
+      ]);
+      await vi.advanceTimersByTimeAsync(13000);
+      expect(conversation.turns[0].activities[1].evidence).toMatchObject([
+        {
+          kind: "calculation",
+          calculation_sources: [{ title: "整改闭环记录.xlsx" }],
+          final_citation_number: 1,
+        },
+      ]);
+      expect(conversation.messages[1].content).toContain("本轮文件操作结果");
     } finally {
       vi.useRealTimers();
     }

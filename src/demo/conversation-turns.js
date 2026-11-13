@@ -8,6 +8,13 @@ import {
   toolPendingApproval,
   toolProgressText,
 } from "./conversation-tools";
+import {
+  knowledgeAction,
+  knowledgeErrors,
+  knowledgeResults,
+  knowledgeStages,
+  knowledgeWarnings,
+} from "./knowledge-activity";
 
 const terminalStatuses = new Set(["complete", "interrupted", "error"]);
 export function turnResultsVisible(turn) {
@@ -102,6 +109,38 @@ function addToActivityGroup(turn, activity, seq) {
   if (!group.activityIds.includes(activity.id))
     group.activityIds.push(activity.id);
   activity.groupId = group.id;
+}
+
+function knowledgeActivityFor(turn, runId) {
+  return turn.activities.find(
+    (activity) =>
+      activity.kind === "knowledge" && activity.knowledgeRunId === runId,
+  );
+}
+
+function getOrAddKnowledgeActivity(turn, data, seq) {
+  const existing = knowledgeActivityFor(turn, data.knowledge_run_id);
+  if (existing) return existing;
+  const activity = {
+    id: `knowledge_${data.knowledge_run_id}`,
+    kind: "knowledge",
+    name: "use_knowledge",
+    title: knowledgeAction,
+    knowledgeRunId: data.knowledge_run_id,
+    stageType: "",
+    resultStatus: "",
+    status: "running",
+    progressText: "",
+    statusText: "",
+    detail: "",
+    evidence: [],
+    answerMessageId: null,
+    startedSeq: seq,
+    groupId: null,
+  };
+  turn.activities.push(activity);
+  addToActivityGroup(turn, activity, seq);
+  return activity;
 }
 
 function closeReasoningSegment(turn) {
@@ -285,7 +324,9 @@ export function normalizeConversationTurns(conversation) {
         changed = true;
       }
       for (const request of turn.requests)
-        if (Object.prototype.hasOwnProperty.call(request, "failAfterApproval")) {
+        if (
+          Object.prototype.hasOwnProperty.call(request, "failAfterApproval")
+        ) {
           delete request.failAfterApproval;
           changed = true;
         }
@@ -446,10 +487,29 @@ export function applyConversationEvent(conversation, event) {
         activity.id === event.toolId &&
         activity.status === "unknown",
     );
+  const knowledgeEvent = [
+    "extension_knowledge_stage",
+    "knowledge.result",
+    "knowledge.evidence",
+  ].includes(event.type);
+  const knowledgeData = knowledgeEvent ? event.data : null;
+  const knowledgeActivity = knowledgeData
+    ? knowledgeActivityFor(turn, knowledgeData.knowledge_run_id)
+    : null;
+  if (
+    knowledgeEvent &&
+    (!knowledgeData?.knowledge_run_id ||
+      knowledgeData.message_id !== turn.userMessageId)
+  )
+    return false;
   if (
     terminalStatuses.has(turn.status) &&
     event.type !== "subagent.complete" &&
-    !lateToolCompletion
+    !lateToolCompletion &&
+    !(
+      knowledgeActivity &&
+      ["knowledge.result", "knowledge.evidence"].includes(event.type)
+    )
   )
     return false;
   if (
@@ -462,6 +522,9 @@ export function applyConversationEvent(conversation, event) {
       "tool.progress",
       "tool.complete",
       "tool.output_risk",
+      "extension_knowledge_stage",
+      "knowledge.result",
+      "knowledge.evidence",
       "activity.start",
       "activity.progress",
       "activity.delta",
@@ -516,8 +579,94 @@ export function applyConversationEvent(conversation, event) {
   }
   if (event.type.startsWith("subagent.") && !subagentIdentity(event))
     return false;
+  if (event.type === "extension_knowledge_stage") {
+    if (
+      !Object.hasOwn(knowledgeStages, knowledgeData.stage?.type) ||
+      (knowledgeActivity && knowledgeActivity.stageType === "completed") ||
+      (knowledgeActivity && knowledgeActivity.status !== "running")
+    )
+      return false;
+  }
+  if (
+    event.type === "knowledge.result" &&
+    !Object.hasOwn(knowledgeResults, knowledgeData.status)
+  )
+    return false;
+  if (
+    event.type === "knowledge.evidence" &&
+    (!knowledgeActivity || !Array.isArray(knowledgeData.items))
+  )
+    return false;
   turn.lastSeq = event.seq;
   switch (event.type) {
+    case "extension_knowledge_stage": {
+      const activity = getOrAddKnowledgeActivity(
+        turn,
+        knowledgeData,
+        event.seq,
+      );
+      const { type, error_code } = knowledgeData.stage;
+      activity.stageType = type;
+      const status = {
+        failed: "error",
+        cancelled: "interrupted",
+        timed_out: "error",
+      }[type];
+      activity.progressText = status ? "" : knowledgeStages[type];
+      if (status) {
+        activity.status = status;
+        activity.statusText = knowledgeStages[type];
+        activity.detail = Object.hasOwn(knowledgeErrors, error_code)
+          ? knowledgeErrors[error_code]
+          : "";
+      }
+      break;
+    }
+    case "knowledge.result": {
+      if (
+        knowledgeActivity &&
+        !["running", "unknown", "complete"].includes(knowledgeActivity.status)
+      )
+        break;
+      const activity = getOrAddKnowledgeActivity(
+        turn,
+        knowledgeData,
+        event.seq,
+      );
+      activity.status = "complete";
+      activity.resultStatus = knowledgeData.status;
+      activity.progressText = "";
+      activity.statusText = knowledgeResults[knowledgeData.status];
+      activity.detail =
+        knowledgeData.status === "partial"
+          ? [
+              ...new Set(
+                (knowledgeData.warnings || [])
+                  .map((warning) =>
+                    Object.hasOwn(knowledgeWarnings, warning)
+                      ? knowledgeWarnings[warning]
+                      : "",
+                  )
+                  .filter(Boolean),
+              ),
+            ].join("\n")
+          : "";
+      break;
+    }
+    case "knowledge.evidence":
+      knowledgeActivity.evidence = knowledgeData.items
+        .filter((item) => item.evidence_id)
+        .map((item) =>
+          item.access === "available"
+            ? item
+            : {
+                evidence_id: item.evidence_id,
+                final_citation_number: item.final_citation_number,
+                access: "unavailable",
+              },
+        );
+      knowledgeActivity.answerMessageId = knowledgeData.answer_message_id;
+      break;
     case "message.delta":
       assistant.content += event.text || "";
       if (event.text) {
@@ -759,7 +908,9 @@ export function applyConversationEvent(conversation, event) {
           id: activityId,
           kind: event.kind || (isTool ? "tool" : "activity"),
           name: isTool ? event.name || "" : "",
-          title: event.title || (isTool ? toolAction(event.name, event.args) : "活动"),
+          title:
+            event.title ||
+            (isTool ? toolAction(event.name, event.args) : "活动"),
           detail: event.detail || "",
           argumentSummary: isTool
             ? toolArgumentSummary(event.name, event.args)
@@ -822,9 +973,13 @@ export function applyConversationEvent(conversation, event) {
             turn.activities.find((item) => item.id === activityId)?.name,
         })
       ) {
-        turn.activities = turn.activities.filter((item) => item.id !== activityId);
+        turn.activities = turn.activities.filter(
+          (item) => item.id !== activityId,
+        );
         turn.groups = turn.groups.filter((group) => {
-          group.activityIds = group.activityIds.filter((id) => id !== activityId);
+          group.activityIds = group.activityIds.filter(
+            (id) => id !== activityId,
+          );
           return group.activityIds.length > 0;
         });
         if (!turn.groups.some((group) => group.id === turn.activeGroupId))
@@ -978,7 +1133,16 @@ export function applyConversationEvent(conversation, event) {
       closeReasoningSegment(turn);
       for (const activity of turn.activities)
         if (["running", "requested"].includes(activity.status)) {
-          activity.status = "unknown";
+          if (
+            activity.kind === "knowledge" &&
+            status === "interrupted" &&
+            activity.stageType !== "completed"
+          ) {
+            activity.status = "interrupted";
+            activity.statusText = knowledgeStages.cancelled;
+          } else {
+            activity.status = "unknown";
+          }
           activity.progressText = "";
         }
       conversation.status = "ready";

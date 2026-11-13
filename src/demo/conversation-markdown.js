@@ -1,10 +1,13 @@
-function inlineTokens(value) {
+function inlineTokens(value, citationsByNumber) {
   const text = String(value || "");
   const tokens = [];
   const pattern =
-    /(!\[([^\]]*)\]\(([^)]+)\)|\*\*([^*]+)\*\*|`([^`]+)`|\[([^\]]+)\]\(([^)]+)\))/g;
+    /(!\[([^\]]*)\]\(([^)]+)\)|\*\*([^*]+)\*\*|`([^`]+)`|\[([^\]]+)\]\(([^)]+)\)|\[(\d+(?:[ \t]*[,，、][ \t]*\d+)*)\])/g;
   let index = 0;
   for (const match of text.matchAll(pattern)) {
+    const numbers = match[8]?.match(/\d+/g).map(Number);
+    if (numbers && !numbers.every((number) => citationsByNumber.has(number)))
+      continue;
     if (match.index > index)
       tokens.push({ type: "text", text: text.slice(index, match.index) });
     if (match[2] !== undefined) {
@@ -19,6 +22,7 @@ function inlineTokens(value) {
       else tokens.push({ type: "text", text: match[0] });
     } else if (match[4]) tokens.push({ type: "strong", text: match[4] });
     else if (match[5]) tokens.push({ type: "code", text: match[5] });
+    else if (numbers) tokens.push({ type: "citation", numbers });
     else if (/^https?:\/\//i.test(match[7]))
       tokens.push({ type: "link", text: match[6], href: match[7] });
     else tokens.push({ type: "text", text: match[0] });
@@ -26,19 +30,63 @@ function inlineTokens(value) {
   }
   if (index < text.length)
     tokens.push({ type: "text", text: text.slice(index) });
-  return tokens;
+  const formatted = [];
+  for (let index = 0; index < tokens.length; index++) {
+    const token = tokens[index];
+    if (token.type !== "citation") {
+      formatted.push(token);
+      continue;
+    }
+    const numbers = [...token.numbers];
+    while (index + 1 < tokens.length) {
+      const next = tokens[index + 1];
+      const offset = next.type === "text" && /^[ \t]+$/.test(next.text) ? 2 : 1;
+      const adjacent = tokens[index + offset];
+      if (adjacent?.type !== "citation") break;
+      numbers.push(...adjacent.numbers);
+      index += offset;
+    }
+    const documents = new Map();
+    for (const number of new Set(numbers)) {
+      for (const document of citationsByNumber.get(number)) {
+        const key = document.id || `unavailable:${number}`;
+        if (!documents.has(key))
+          documents.set(key, {
+            type: "citation",
+            documentId: document.id,
+            title: document.title,
+            text: citationLabel(document.title),
+            numbers: [],
+          });
+        documents.get(key).numbers.push(number);
+      }
+    }
+    formatted.push(...documents.values());
+  }
+  return formatted;
 }
 
-function tableCells(line) {
+function citationLabel(title) {
+  const name = title.replace(/\.[a-z\d]{1,8}$/i, "");
+  const characters = Array.from(name);
+  const shortName = characters.slice(0, 4).join("").trimEnd();
+  return `[${shortName}${characters.length > 4 ? "…" : ""}]`;
+}
+
+function tableCells(line, parseInline) {
   return line
     .trim()
     .replace(/^\|/, "")
     .replace(/\|$/, "")
     .split("|")
-    .map((cell) => inlineTokens(cell.trim()));
+    .map((cell) => parseInline(cell.trim()));
 }
 
-export function parseConversationMarkdown(source) {
+export function parseConversationMarkdown(source, citations = []) {
+  const citationsByNumber = new Map(
+    citations.map(({ number, documents }) => [number, documents]),
+  );
+  const parseInline = (text) => inlineTokens(text, citationsByNumber);
   const lines = String(source || "")
     .replace(/\r\n?/g, "\n")
     .split("\n");
@@ -65,7 +113,7 @@ export function parseConversationMarkdown(source) {
       index + 1 < lines.length &&
       /^\s*\|?[\s:|-]+\|?\s*$/.test(lines[index + 1])
     ) {
-      const headers = tableCells(line);
+      const headers = tableCells(line, parseInline);
       index += 2;
       const rows = [];
       while (
@@ -73,7 +121,7 @@ export function parseConversationMarkdown(source) {
         lines[index].includes("|") &&
         lines[index].trim()
       )
-        rows.push(tableCells(lines[index++]));
+        rows.push(tableCells(lines[index++], parseInline));
       blocks.push({ type: "table", headers, rows });
       continue;
     }
@@ -82,7 +130,7 @@ export function parseConversationMarkdown(source) {
       blocks.push({
         type: "heading",
         level: heading[1].length,
-        tokens: inlineTokens(heading[2]),
+        tokens: parseInline(heading[2]),
       });
       index++;
       continue;
@@ -94,7 +142,7 @@ export function parseConversationMarkdown(source) {
       while (index < lines.length) {
         const item = lines[index].match(/^\s*(?:([-*+])|(\d+)\.)\s+(.+)$/);
         if (!item || Boolean(item[2]) !== ordered) break;
-        items.push(inlineTokens(item[3]));
+        items.push(parseInline(item[3]));
         index++;
       }
       blocks.push({ type: "list", ordered, items });
@@ -112,7 +160,7 @@ export function parseConversationMarkdown(source) {
       paragraph.push(lines[index++]);
     blocks.push({
       type: "paragraph",
-      tokens: inlineTokens(paragraph.join("\n")),
+      tokens: parseInline(paragraph.join("\n")),
     });
   }
   return blocks;

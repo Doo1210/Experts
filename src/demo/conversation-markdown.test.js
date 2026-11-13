@@ -2,6 +2,56 @@ import { describe, expect, it } from "vitest";
 import { parseConversationMarkdown } from "./conversation-markdown";
 
 describe("对话 Markdown 内容", () => {
+  it("只将本条回答已登记的编号渲染为知识引用", () => {
+    const [block] = parseConversationMarkdown(
+      "校准要求。[1] 普通编号 [2] `[1]` [1](https://example.com)",
+      [{ number: 1, documents: [{ id: "manual", title: "校准手册.pdf" }] }],
+    );
+    expect(block.tokens.map((token) => token.type)).toEqual([
+      "text",
+      "citation",
+      "text",
+      "code",
+      "text",
+      "link",
+    ]);
+    expect(block.tokens[1]).toMatchObject({
+      numbers: [1],
+      documentId: "manual",
+      title: "校准手册.pdf",
+      text: "[校准手册]",
+    });
+  });
+  it("同一处引用按文档合并，并保留每份文档的命中编号", () => {
+    const manual = { id: "manual", title: "传感器校准作业规范.md" };
+    const table = { id: "table", title: "校准记录.csv" };
+    const citations = [
+      { number: 1, documents: [manual] },
+      { number: 2, documents: [manual] },
+      { number: 3, documents: [table] },
+    ];
+    for (const text of ["[1][2] [3]", "[1, 2、3]"]) {
+      const [block] = parseConversationMarkdown(`见资料${text}。`, citations);
+      expect(block.tokens.filter((token) => token.type === "citation")).toEqual(
+        [
+          {
+            type: "citation",
+            documentId: "manual",
+            title: manual.title,
+            text: "[传感器校…]",
+            numbers: [1, 2],
+          },
+          {
+            type: "citation",
+            documentId: "table",
+            title: table.title,
+            text: "[校准记录]",
+            numbers: [3],
+          },
+        ],
+      );
+    }
+  });
   it("按段落、代码块和表格分块，长内容不丢失", () => {
     const blocks = parseConversationMarkdown(
       "结论 **重要**\n\n```js\nconst x = 1;\n```\n\n|项目|值|\n|---|---|\n|良率|97%|",

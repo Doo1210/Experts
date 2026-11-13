@@ -56,7 +56,7 @@
         notice.text
       }}</span>
     </div>
-    <div class="pc-body">
+    <div ref="chatBody" class="pc-body">
       <section
         v-if="conversation"
         class="pc-main"
@@ -72,7 +72,7 @@
           <div
             ref="scroller"
             class="pc-messages"
-            @scroll.capture="hideResultPathTooltip"
+            @scroll.capture="onConversationScroll"
           >
             <div v-if="!conversation.messages.length" class="pc-intro">
               <div class="pc-intro-avatar">
@@ -163,6 +163,7 @@
                             activityGroupLabel(block.activities, message)
                           }}</span>
                           <i
+                            aria-hidden="true"
                             :class="
                               expandedActivities.includes(block.id)
                                 ? 'el-icon-arrow-down'
@@ -188,7 +189,7 @@
                               type="button"
                               class="pc-process-step"
                               :class="{
-                                'is-running': step.status === 'running',
+                                'is-running': activitySweeping(step),
                               }"
                               :disabled="!hasActivityDetail(step)"
                               :aria-expanded="
@@ -230,6 +231,7 @@
                               </span>
                               <i
                                 v-if="hasActivityDetail(step)"
+                                aria-hidden="true"
                                 :class="
                                   expandedActivityIds.includes(step.id)
                                     ? 'el-icon-arrow-down'
@@ -245,7 +247,23 @@
                               class="pc-process-detail"
                               :class="{ 'is-process-manage': step.name === 'process_manage' }"
                             >
-                              <template v-if="step.kind === 'subagent'">
+                              <template v-if="step.kind === 'knowledge'">
+                                <div v-if="step.detail">{{ step.detail }}</div>
+                                <ul v-if="knowledgeSources(step).length" class="pc-knowledge-summary">
+                                  <li v-for="source in knowledgeSources(step).slice(0, 3)" :key="source.id">
+                                    {{ source.title }}
+                                  </li>
+                                </ul>
+                                <button
+                                  v-if="knowledgeSources(step).length"
+                                  type="button"
+                                  class="pc-knowledge-link"
+                                  aria-haspopup="dialog"
+                                  data-knowledge-source-trigger
+                                  @click="showKnowledgeSources(message, $event, knowledgeEvidenceKey(step, 0))"
+                                >查看本轮知识来源</button>
+                              </template>
+                              <template v-else-if="step.kind === 'subagent'">
                                 <div v-if="step.argumentSummary">
                                   任务目标：{{ step.argumentSummary }}
                                 </div>
@@ -606,7 +624,13 @@
                   </div>
                 </div>
                 <div v-if="message.content" class="pc-reply">
-                  <ConversationMarkdown :text="message.content" /><span
+                  <ConversationMarkdown
+                    :text="message.content"
+                    :citations="knowledgeCitations(message)"
+                    @citation="openKnowledgeCitation(message, $event)"
+                    @citation-enter="previewKnowledgeCitation(message, $event)"
+                    @citation-leave="scheduleKnowledgePreviewClose"
+                  /><span
                     v-if="message.status === 'streaming'"
                     class="typing-cursor"
                     >▍</span
@@ -1436,10 +1460,11 @@
           </div>
         </div>
         <div
+          ref="inputArea"
           class="pc-input-area"
           :class="{ 'has-session-status': sessionStatusCards.length }"
         >
-          <div class="pc-composer">
+          <div ref="composerBox" class="pc-composer">
             <div
               v-if="pendingFiles.length || pendingReferences.length"
               class="pc-selected-resources"
@@ -2403,6 +2428,28 @@
           @change="uploadWorkspaceFiles"
         />
       </aside>
+      <transition name="pc-knowledge-float">
+        <KnowledgeSourcesPanel
+          v-if="knowledgeSourceView"
+          ref="knowledgeSources"
+          :style="{ '--pc-knowledge-input-height': knowledgeInputHeight + 'px' }"
+          :evidence="roundKnowledgeEvidence(knowledgeSourceView.message)"
+          :target-id="knowledgeSourceView.targetId"
+          @close="closeKnowledgeSources"
+          @preview="previewFile"
+        />
+      </transition>
+      <KnowledgeCitationPreview
+        v-if="knowledgePreview"
+        :key="knowledgePreview.key"
+        ref="knowledgePreview"
+        :style="knowledgePreviewPosition"
+        :document="knowledgePreview.document"
+        :evidence="knowledgePreview.evidence"
+        @mouseenter.native="cancelKnowledgePreviewClose"
+        @mouseleave.native="scheduleKnowledgePreviewClose"
+        @close="closeKnowledgePreview()"
+      />
     </div>
     <el-dialog
       :visible.sync="taskDialogVisible"
@@ -2597,11 +2644,18 @@ import {
 } from "../conversation-turns";
 import { hasToolDetail } from "../conversation-tools";
 import {
+  knowledgeActivityLabel,
+  knowledgeActivitySources,
+  knowledgeCitationDocuments,
+} from "../knowledge-activity";
+import {
   emptySessionPresentation,
   todoProgress,
 } from "../conversation-session-state";
 import ConversationMarkdown from "../components/ConversationMarkdown.vue";
 import ConversationDiff from "../components/ConversationDiff.vue";
+import KnowledgeSourcesPanel from "../components/KnowledgeSourcesPanel.vue";
+import KnowledgeCitationPreview from "../components/KnowledgeCitationPreview.vue";
 function approvalDisplayRequest(request) {
   if (request?.kind !== "approval") return request;
   const legacyTitle = {
@@ -2653,7 +2707,12 @@ function saveBlob(blob, name) {
 }
 export default {
   name: "DemoChatPage",
-  components: { ConversationMarkdown, ConversationDiff },
+  components: {
+    ConversationMarkdown,
+    ConversationDiff,
+    KnowledgeSourcesPanel,
+    KnowledgeCitationPreview,
+  },
   data() {
     return {
       state,
@@ -2661,6 +2720,10 @@ export default {
       draftConversation: emptyConversation(),
       taskActionsPaused: false,
       workspaceOpen: false,
+      knowledgeSourceView: null,
+      knowledgeInputHeight: 0,
+      knowledgePreview: null,
+      knowledgePreviewPosition: { visibility: "hidden" },
       taskListOpen: false,
       taskListCollapsed: false,
       isNarrowViewport:
@@ -3221,7 +3284,7 @@ export default {
         .flatMap((turn) =>
           (turn.activities || []).map(
             (activity) =>
-              `${activity.id}:${activity.status}:${activity.progressText?.length || 0}:${activity.detail?.length || 0}:${activity.outputDetail?.length || 0}:${(activity.outputSections || []).length}`,
+              `${activity.id}:${activity.status}:${activity.progressText || ""}:${activity.detail?.length || 0}:${activity.outputDetail?.length || 0}:${(activity.outputSections || []).length}:${activity.evidence?.length || 0}`,
           ),
         )
         .join("|");
@@ -3230,6 +3293,7 @@ export default {
   mounted() {
     this.model = this.conversation?.model || "gpt-4o";
     window.addEventListener("resize", this.handleViewportResize);
+    document.addEventListener("click", this.dismissKnowledgeSources, true);
     if (typeof ResizeObserver !== "undefined") {
       this._resourceResizeObserver = new ResizeObserver(
         this.updateResourceOverflow,
@@ -3240,6 +3304,9 @@ export default {
       });
       this._questionRailResizeObserver = new ResizeObserver(
         this.updateQuestionRail,
+      );
+      this._knowledgeInputResizeObserver = new ResizeObserver(
+        this.updateKnowledgeInputHeight,
       );
     }
     this.turnClock = setInterval(() => {
@@ -3266,9 +3333,12 @@ export default {
   },
   beforeDestroy() {
     window.removeEventListener("resize", this.handleViewportResize);
+    document.removeEventListener("click", this.dismissKnowledgeSources, true);
+    this.cancelKnowledgePreviewClose();
     this._resourceResizeObserver?.disconnect();
     this._sentResourceResizeObserver?.disconnect();
     this._questionRailResizeObserver?.disconnect();
+    this._knowledgeInputResizeObserver?.disconnect();
     clearInterval(this.turnClock);
     if (this.$route.query.conv) stopDemoStream(this.$route.query.conv);
     this.discardPendingUploads();
@@ -3313,6 +3383,8 @@ export default {
       this.expandedActivities = [];
       this.expandedActivityIds = [];
       this.activityListFollowBottom = {};
+      this.closeKnowledgeSources(false);
+      this.closeKnowledgePreview(false);
       this.referencePickerVisible = false;
       this.cwdPickerVisible = false;
       this.modelPickerVisible = false;
@@ -3607,12 +3679,14 @@ export default {
         .catch(() => {});
     },
     handleViewportResize() {
+      this.closeKnowledgePreview(false);
       const narrow = window.innerWidth <= 900;
       if (narrow !== this.isNarrowViewport) this.taskListOpen = false;
       this.isNarrowViewport = narrow;
       this.$nextTick(() => {
         this.updateResourceOverflow();
         this.updateQuestionRail();
+        this.updateKnowledgeInputHeight();
       });
     },
     observeQuestionRail() {
@@ -4029,11 +4103,9 @@ export default {
       this.$set(this.conversation, "bookmarkedQuestionIds", [...marked]);
       persist();
     },
-    runningActivitiesLabel(activities) {
-      const running = activities.filter((activity) =>
-        ["running", "requested"].includes(activity.status),
-      );
+    runningActivitiesLabel(running) {
       const visible = running.slice(0, 2).map((activity) => {
+        if (activity.kind === "knowledge") return knowledgeActivityLabel(activity);
         const progressOrStatus =
           activity.kind === "tool" && activity.argumentSummary
             ? ""
@@ -4065,10 +4137,13 @@ export default {
     },
     activityGroupLabel(activities, message) {
       const turnStatus = this.turnFor(message)?.status;
-      const running = ["running", "recovering", "waiting"].includes(turnStatus)
-        ? this.runningActivitiesLabel(activities)
-        : "";
-      if (running) return `正在推进：${running}`;
+      if (["running", "recovering", "waiting"].includes(turnStatus)) {
+        const running = activities.filter((activity) =>
+          ["running", "requested"].includes(activity.status),
+        );
+        if (running.length)
+          return `正在推进：${this.runningActivitiesLabel(running)}`;
+      }
       const names = [
         ...new Set(activities.map((item) => item.title).filter(Boolean)),
       ];
@@ -4081,8 +4156,12 @@ export default {
     activityGroupRunning(activities, message) {
       return (
         ["running", "recovering"].includes(this.turnFor(message)?.status) &&
-        activities.some((activity) => activity.status === "running")
+        activities.some(this.activitySweeping)
       );
+    },
+    activitySweeping(activity) {
+      return activity.status === "running" &&
+        !(activity.kind === "knowledge" && activity.stageType === "completed");
     },
     toolActivityValue(activity) {
       return (
@@ -4096,6 +4175,11 @@ export default {
       );
     },
     activityItemTitle(activity) {
+      if (activity.kind === "knowledge") {
+        return activity.status === "unknown"
+          ? `${activity.title} · ${this.activityStatusLabel(activity.status)}`
+          : knowledgeActivityLabel(activity);
+      }
       if (activity.kind === "subagent") {
         const status =
           activity.progressText ||
@@ -4144,6 +4228,8 @@ export default {
       );
     },
     hasActivityDetail(activity) {
+      if (activity.kind === "knowledge")
+        return Boolean(activity.detail || this.knowledgeSources(activity).length);
       if (activity.kind === "tool") {
         if (this.isRoutineProcessCheck(activity)) {
           if (["running", "requested"].includes(activity.status)) return false;
@@ -4165,6 +4251,136 @@ export default {
         return hasToolDetail(activity);
       }
       return true;
+    },
+    knowledgeSources: knowledgeActivitySources,
+    roundKnowledgeActivities(message) {
+      return (this.turnFor(message)?.activities || [])
+        .filter((activity) => activity.kind === "knowledge");
+    },
+    roundKnowledgeEvidence(message) {
+      return this.roundKnowledgeActivities(message).flatMap((activity) =>
+        activity.evidence.map((item, index) => ({
+          ...item,
+          key: this.knowledgeEvidenceKey(activity, index),
+        })),
+      );
+    },
+    knowledgeEvidenceKey(activity, index) {
+      return `${activity.id}:${index}`;
+    },
+    knowledgeCitations(message) {
+      return this.roundKnowledgeActivities(message)
+        .filter((activity) => activity.answerMessageId === message.id)
+        .flatMap((activity) =>
+          activity.evidence.map((evidence, index) => ({
+            number: evidence.final_citation_number,
+            evidence,
+            documents: knowledgeCitationDocuments(evidence),
+            key: this.knowledgeEvidenceKey(activity, index),
+          })),
+        )
+        .filter((citation) => Number.isInteger(citation.number))
+        .sort((a, b) => a.number - b.number);
+    },
+    openKnowledgeCitation(message, { numbers, documentId, event }) {
+      const citation = this.knowledgeCitations(message).find((item) =>
+        numbers.includes(item.number) &&
+        item.documents.some((document) => document.id === documentId),
+      );
+      if (citation) this.showKnowledgeSources(message, event, citation.key);
+    },
+    showKnowledgeSources(message, event, targetId) {
+      this.closeKnowledgePreview(false);
+      this.updateKnowledgeInputHeight();
+      if (this.$refs.inputArea)
+        this._knowledgeInputResizeObserver?.observe(this.$refs.inputArea);
+      this.knowledgeSourceTrigger = event?.currentTarget;
+      const view = { message, targetId };
+      this.knowledgeSourceView = view;
+      this.$nextTick(() => {
+        if (this.knowledgeSourceView !== view) return;
+        this.$refs.knowledgeSources?.showSources("all", true);
+      });
+    },
+    updateKnowledgeInputHeight() {
+      const body = this.$refs.chatBody;
+      const composer = this.$refs.composerBox;
+      if (!body || !composer) return;
+      this.knowledgeInputHeight =
+        body.getBoundingClientRect().bottom - composer.getBoundingClientRect().top;
+    },
+    previewKnowledgeCitation(message, { numbers, documentId, event }) {
+      if (this.previewVisible) return;
+      this.cancelKnowledgePreviewClose();
+      const trigger = event.currentTarget;
+      if (this.knowledgePreviewTrigger === trigger) return;
+      const citations = this.knowledgeCitations(message).filter((item) =>
+        numbers.includes(item.number) &&
+        item.documents.some((document) => document.id === documentId),
+      );
+      if (!citations.length) return;
+      this.knowledgePreviewTrigger = trigger;
+      const view = {
+        key: JSON.stringify([message.id, documentId, numbers]),
+        document: citations[0].documents.find((item) => item.id === documentId),
+        evidence: citations.map((item) => item.evidence),
+      };
+      this.knowledgePreview = view;
+      this.knowledgePreviewPosition = { visibility: "hidden" };
+      this.$nextTick(() => {
+        if (this.knowledgePreview !== view) return;
+        const panel = this.$refs.knowledgePreview;
+        const body = this.$refs.chatBody.getBoundingClientRect();
+        const anchor = trigger.getBoundingClientRect();
+        const { width, height } = panel.$el.getBoundingClientRect();
+        const left = Math.max(8, Math.min(anchor.left - body.left, body.width - width - 8));
+        const below = anchor.bottom - body.top + 6;
+        const above = anchor.top - body.top - 6;
+        const roomBelow = body.height - below - 8;
+        const roomAbove = above - 8;
+        const placeBelow = height <= roomBelow || roomBelow >= roomAbove;
+        const availableHeight = placeBelow ? roomBelow : roomAbove;
+        this.knowledgePreviewPosition = {
+          left: `${left}px`,
+          ...(placeBelow ? { top: `${below}px` } : { bottom: `${body.height - above}px` }),
+          "--pc-citation-available-height": `${availableHeight}px`,
+        };
+      });
+    },
+    cancelKnowledgePreviewClose() {
+      clearTimeout(this.knowledgePreviewCloseTimer);
+    },
+    scheduleKnowledgePreviewClose() {
+      this.cancelKnowledgePreviewClose();
+      if (this.knowledgePreview)
+        this.knowledgePreviewCloseTimer = setTimeout(() => this.closeKnowledgePreview(false), 220);
+    },
+    closeKnowledgePreview(restoreFocus = true) {
+      this.cancelKnowledgePreviewClose();
+      this.knowledgePreview = null;
+      const trigger = this.knowledgePreviewTrigger;
+      this.knowledgePreviewTrigger = null;
+      if (restoreFocus)
+        this.$nextTick(() => trigger?.focus({ preventScroll: true }));
+    },
+    onConversationScroll() {
+      this.hideResultPathTooltip();
+      this.closeKnowledgePreview(false);
+    },
+    dismissKnowledgeSources(event) {
+      if (this.previewVisible || event.target.closest?.("[data-knowledge-source-trigger]")) return;
+      const inPreview = this.$refs.knowledgePreview?.$el.contains(event.target);
+      const inSources = this.$refs.knowledgeSources?.$el.contains(event.target);
+      if (this.knowledgePreview && !inPreview) this.closeKnowledgePreview(false);
+      if (this.knowledgeSourceView && !inSources && !inPreview) this.closeKnowledgeSources(false);
+    },
+    closeKnowledgeSources(restoreFocus = true) {
+      this._knowledgeInputResizeObserver?.disconnect();
+      this.knowledgeSourceView = null;
+      const trigger = this.knowledgeSourceTrigger;
+      this.knowledgeSourceTrigger = null;
+      if (restoreFocus)
+        this.$nextTick(() => trigger?.focus({ preventScroll: true }));
     },
     childConversationFor(activity) {
       if (activity.kind !== "subagent" || !activity.childSessionId) return null;
@@ -4246,6 +4462,8 @@ export default {
     },
     newTask() {
       this.taskListOpen = false;
+      this.closeKnowledgeSources(false);
+      this.closeKnowledgePreview(false);
       this.draftConversation = emptyConversation();
       this.model = this.draftConversation.model;
       this.draft = "";

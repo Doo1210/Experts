@@ -32,6 +32,54 @@ function makeConversation() {
 }
 
 describe("本地回合事件", () => {
+  it("知识阶段按调用关联，旧帧不能回退，回合结束后可补齐结果和证据", () => {
+    const session = makeConversation();
+    const apply = (type, seq, data = {}) =>
+      applyConversationEvent(session, {
+        type,
+        seq,
+        sessionId: session.id,
+        turnId: "turn1",
+        data: { message_id: "u1", knowledge_run_id: "k1", ...data },
+      });
+    const stage = (seq, type, data) =>
+      apply("extension_knowledge_stage", seq, { stage: { type }, ...data });
+
+    expect(stage(1, "reading")).toBe(true);
+    expect(stage(1, "searching")).toBe(false);
+    expect(stage(2, "reading", { message_id: "wrong" })).toBe(false);
+    expect(stage(3, "completed")).toBe(true);
+    expect(stage(4, "reading")).toBe(false);
+    expect(stage(5, "wiki", { knowledge_run_id: "k2" })).toBe(true);
+    expect(apply("message.complete", 6)).toBe(true);
+    expect(apply("knowledge.result", 7, { status: "success" })).toBe(true);
+    expect(
+      apply("knowledge.evidence", 8, {
+        answer_message_id: "a1",
+        items: [
+          {
+            evidence_id: "e1",
+            access: "unavailable",
+            source: { title: "不可查看" },
+          },
+        ],
+      }),
+    ).toBe(true);
+    const restored = JSON.parse(JSON.stringify(session));
+    normalizeConversationTurns(restored);
+    expect(restored.turns[0].activities).toMatchObject([
+      {
+        knowledgeRunId: "k1",
+        status: "complete",
+        resultStatus: "success",
+        answerMessageId: "a1",
+      },
+      { knowledgeRunId: "k2", status: "unknown" },
+    ]);
+    expect(restored.turns[0].activities[0].evidence[0]).not.toHaveProperty(
+      "source",
+    );
+  });
   it("工具产出先保存，最终回复收口后才展示结果卡", () => {
     const session = makeConversation();
     const base = { sessionId: session.id, turnId: "turn1" };
@@ -118,30 +166,72 @@ describe("本地回合事件", () => {
         type,
         ...payload,
       });
-    emit(1, "tool.start", { toolId: "blocked", name: "terminal", args: { command: "echo A" } });
+    emit(1, "tool.start", {
+      toolId: "blocked",
+      name: "terminal",
+      args: { command: "echo A" },
+    });
     emit(2, "tool.complete", {
-      toolId: "blocked", name: "terminal",
-      result: { status: "blocked", output: "", exit_code: -1, error: "安全策略阻止" },
+      toolId: "blocked",
+      name: "terminal",
+      result: {
+        status: "blocked",
+        output: "",
+        exit_code: -1,
+        error: "安全策略阻止",
+      },
     });
-    emit(3, "tool.start", { toolId: "cancelled", name: "terminal", args: { command: "echo B" } });
+    emit(3, "tool.start", {
+      toolId: "cancelled",
+      name: "terminal",
+      args: { command: "echo B" },
+    });
     emit(4, "tool.complete", {
-      toolId: "cancelled", name: "terminal",
-      result: { status: "cancelled", output: "", exit_code: -1, error: "执行被取消" },
+      toolId: "cancelled",
+      name: "terminal",
+      result: {
+        status: "cancelled",
+        output: "",
+        exit_code: -1,
+        error: "执行被取消",
+      },
     });
-    emit(5, "tool.start", { toolId: "approval", name: "terminal", args: { command: "echo C" } });
+    emit(5, "tool.start", {
+      toolId: "approval",
+      name: "terminal",
+      args: { command: "echo C" },
+    });
     emit(6, "tool.complete", {
-      toolId: "approval", name: "terminal",
-      result: { status: "pending_approval", approval_pending: true, exit_code: -1, error: "" },
+      toolId: "approval",
+      name: "terminal",
+      result: {
+        status: "pending_approval",
+        approval_pending: true,
+        exit_code: -1,
+        error: "",
+      },
     });
     emit(7, "request.open", {
-      requestId: "approval1", kind: "approval", prompt: "是否允许运行？",
-      choices: [{ value: "once", label: "允许本次" }, { value: "deny", label: "拒绝" }],
+      requestId: "approval1",
+      kind: "approval",
+      prompt: "是否允许运行？",
+      choices: [
+        { value: "once", label: "允许本次" },
+        { value: "deny", label: "拒绝" },
+      ],
     });
     expect(session.turns[0].activities.map((item) => item.status)).toEqual([
-      "rejected", "interrupted",
+      "rejected",
+      "interrupted",
     ]);
-    expect(session.turns[0].groups[0].activityIds).toEqual(["blocked", "cancelled"]);
-    expect(session.turns[0].requests[0]).toMatchObject({ id: "approval1", status: "waiting" });
+    expect(session.turns[0].groups[0].activityIds).toEqual([
+      "blocked",
+      "cancelled",
+    ]);
+    expect(session.turns[0].requests[0]).toMatchObject({
+      id: "approval1",
+      status: "waiting",
+    });
     expect(session.turns[0].activities[0].outputSections).toEqual([
       { kind: "text", text: "原因：安全策略阻止" },
     ]);
@@ -665,9 +755,9 @@ describe("本地回合事件", () => {
     expect(session.turns[0].activities.map((activity) => activity.id)).toEqual([
       "read",
     ]);
-    expect(conversationProcessBlocks(session.turns[0])[0].activities).toHaveLength(
-      1,
-    );
+    expect(
+      conversationProcessBlocks(session.turns[0])[0].activities,
+    ).toHaveLength(1);
   });
 
   it("大量连续活动仍归入一个按开始顺序排列的活动组", () => {
@@ -772,12 +862,18 @@ describe("本地回合事件", () => {
     emit(8, "tool.complete", {
       toolId: "pending",
       name: "read_file",
-      result: { content: "1|日期,良率\n2|2026-10-08,97.2%", total_lines: 5, truncated: true },
+      result: {
+        content: "1|日期,良率\n2|2026-10-08,97.2%",
+        total_lines: 5,
+        truncated: true,
+      },
     });
     expect(session.turns[0].activities[2]).toMatchObject({
       status: "complete",
       endedSeq: 8,
-      outputSections: [{ kind: "read", range: "第 1–2 行，共 5 行", partial: true }],
+      outputSections: [
+        { kind: "read", range: "第 1–2 行，共 5 行", partial: true },
+      ],
     });
     expect(session.turns[0].status).toBe("complete");
     expect(session.messages[1].content).toBe("已根据可用资料作答");

@@ -27,6 +27,11 @@ import {
   migrateKnowledgeConfig,
 } from "./knowledge-demo";
 import {
+  knowledgeDemoScenes,
+  knowledgeSceneForReferences,
+  processKnowledgeDemo,
+} from "./knowledge-activity-scenes";
+import {
   enrichProjectFixtures,
   PROJECT_EXPERT_FIXTURES,
 } from "./project-fixtures";
@@ -1764,8 +1769,10 @@ export function sendDemoMessage(
       return true;
     });
   const matchedToolScene = findToolActivityScene(originalText);
+  const knowledgeDemo = knowledgeDemoScenes.get(originalText);
   const isDemoTrigger =
-    Boolean(matchedToolScene) || TEXT_DEMO_TRIGGERS.has(originalText);
+    Boolean(matchedToolScene || knowledgeDemo) ||
+    TEXT_DEMO_TRIGGERS.has(originalText);
   text = isDemoTrigger ? originalText : "";
   stopDemoStream(conversationId);
   const userMessage = {
@@ -1854,6 +1861,14 @@ export function sendDemoMessage(
     ? null
     : materializeToolScene(matchedToolScene);
   const processDemo = !toolScene && text.trim() === "演示过程";
+  const referenceKnowledge = !isDemoTrigger || processDemo
+    ? knowledgeSceneForReferences(sourceRefs)
+    : null;
+  const knowledgeScene = canUseKnowledge
+    ? processDemo
+      ? processKnowledgeDemo(referenceKnowledge)
+      : knowledgeDemo || referenceKnowledge
+    : null;
   const largeActivityGroupDemo =
     !toolScene && text.includes("演示活动组：大量活动");
   const crowdedToolsDemo =
@@ -1985,6 +2000,7 @@ export function sendDemoMessage(
   const showDiff = text.includes("文件差异");
   const withTools =
     !memoryToolUnavailable &&
+    !knowledgeDemo &&
     (Boolean(toolScene) ||
       crowdedToolsDemo ||
       recoveryDemo ||
@@ -2040,6 +2056,7 @@ export function sendDemoMessage(
           : ["once", "session", "always"];
   const scriptedScene = Boolean(
     toolScene ||
+    knowledgeScene ||
     withTools ||
     withInterim ||
     activityKind ||
@@ -2187,7 +2204,7 @@ export function sendDemoMessage(
       control,
     });
   }
-  const answer = memoryToolUnavailable
+  const defaultAnswer = memoryToolUnavailable
     ? "当前专家未启用记忆，本次没有调用记忆工具。"
     : runtimeErrorDemo
     ? "已开始整理这次分析，当前已确认任务范围。完整结论尚未生成。"
@@ -2232,6 +2249,11 @@ export function sendDemoMessage(
                         : showDiff
                           ? "这是一次浏览器本地文件修改演示，未调用真实工具。可在上方活动详情中查看差异内容。"
                           : `我已收到你的任务：“${originalText}”。\n\n${withTools ? genericToolSummary : "这是一条无需工具的演示回复。"}\n\n建议核对关键数据，再根据结果推进下一步。`;
+  const answer =
+    knowledgeScene?.answer ||
+    (knowledgeDemo && !canUseKnowledge
+      ? "当前专家未启用知识库。"
+      : defaultAnswer);
   const assistant = {
     id: uid("msg"),
     turnId: uid("turn"),
@@ -2260,6 +2282,86 @@ export function sendDemoMessage(
   const folderToolId = uid("tool");
   const parallelToolId = isParallel ? uid("tool") : null;
   const followupToolId = toolScene?.followup ? uid("tool") : null;
+  const slowKnowledgeDemo =
+    knowledgeScene && originalText === "演示工具：检索知识";
+  const knowledgeResultDelay = slowKnowledgeDemo ? 7560 : 2240;
+  const knowledgeStageTimes = slowKnowledgeDemo
+    ? {
+        understanding: 840,
+        searching: 1960,
+        method: 3360,
+        summarizing: 5040,
+        completed: 6160,
+      }
+    : {
+        understanding: 280,
+        searching: 560,
+        method: 840,
+        summarizing: 1400,
+        completed: 1680,
+      };
+  const knowledgeRuns = (knowledgeScene?.runs || []).map((run, index) => ({
+    ...run,
+    data: {
+      message_id: userMessage.id,
+      knowledge_run_id: uid("knowledge_run"),
+      tool_call_id: uid("tool"),
+    },
+    startsAt: index * 2800,
+    stages: [
+      [0, "accepted"],
+      [knowledgeStageTimes.understanding, "understanding"],
+      [knowledgeStageTimes.searching, "searching"],
+      ...(run.terminal
+        ? [[1540, run.terminal]]
+        : [
+            [knowledgeStageTimes.method, run.method],
+            [knowledgeStageTimes.summarizing, "summarizing"],
+            [knowledgeStageTimes.completed, "completed"],
+          ]),
+    ],
+  }));
+  const emitKnowledgeStage = (run, index) => {
+    const type = run.stages[index][1];
+    emit("extension_knowledge_stage", {
+      data: {
+        ...run.data,
+        seq: String(Math.max(seq, turn.lastSeq) + 1),
+        stage: {
+          type,
+          seq: index + 1,
+          error_code: type === run.terminal ? run.errorCode || null : null,
+        },
+      },
+    });
+  };
+  const shownKnowledgeCitations = new Set();
+  const emitKnowledgeEvidence = (run) => {
+    if (!run.evidence?.length) return;
+    const items = clone(run.evidence).map((item) => ({
+      ...item,
+      final_citation_number: shownKnowledgeCitations.has(item.final_citation_number)
+        ? item.final_citation_number
+        : null,
+    }));
+    emit("knowledge.evidence", {
+      data: {
+        ...run.data,
+        answer_message_id: items.some((item) => item.final_citation_number !== null)
+          ? assistant.id
+          : null,
+        items,
+      },
+    });
+  };
+  const answerCitations = knowledgeRuns.some((run) => run.evidence?.length)
+    ? Array.from(answer.matchAll(/\[\d+\](?:[ \t]*\[\d+\])*/g), (match) => ({
+        start: match.index,
+        end: match.index + match[0].length,
+        numbers: match[0].match(/\d+/g).map(Number),
+      }))
+    : [];
+  let nextAnswerCitation = 0;
   const completeToolScene = (scene, toolId) => {
     if (!scene || scene.skipComplete) return;
     if (scene.name === "todo_list") {
@@ -2562,6 +2664,7 @@ export function sendDemoMessage(
         ),
       });
   }
+  if (knowledgeRuns.length) emitKnowledgeStage(knowledgeRuns[0], 0);
   conversation.status = "running";
   conversation.updatedAt = now();
   persist();
@@ -2571,8 +2674,12 @@ export function sendDemoMessage(
     : 0;
   const answerChunkSize = scriptedScene
     ? processDemo
-      ? 3
-      : Math.max(1, Math.round(answer.length / 36))
+      ? knowledgeScene
+        ? Math.max(7, Math.ceil(answer.length / 14))
+        : 3
+      : knowledgeScene
+        ? Math.ceil(answer.length / 36)
+        : Math.max(1, Math.round(answer.length / 36))
     : 4;
   let offset = 0;
   let phase = withInterim ? "interim" : "answer";
@@ -2580,6 +2687,21 @@ export function sendDemoMessage(
   const interimText = "已确认分析范围，继续整理资料。";
   const timer = setInterval(() => {
     ticks++;
+    for (const run of knowledgeRuns) {
+      const stageIndex = run.stages.findIndex(
+        ([afterMs]) => ticks === Math.ceil((run.startsAt + afterMs) / tickMs),
+      );
+      if (stageIndex >= 0) emitKnowledgeStage(run, stageIndex);
+      if (
+        run.status &&
+        ticks === Math.ceil((run.startsAt + knowledgeResultDelay) / tickMs)
+      ) {
+        emit("knowledge.result", {
+          data: { ...run.data, status: run.status, warnings: run.warnings || [] },
+        });
+        emitKnowledgeEvidence(run);
+      }
+    }
     if (sequencedTools.length)
       sequencedTools.slice(3).forEach((tool, index) => {
         if (ticks === Math.ceil(((index + 1) * sequencedToolIntervalMs) / tickMs))
@@ -2617,9 +2739,14 @@ export function sendDemoMessage(
     if (processDemo) {
       if (ticks === Math.ceil(1400 / tickMs)) {
         emitGenericToolComplete(folderToolId, genericToolScene);
-        emitInterim("已读取资料，接下来核对文件与关键记录。");
       }
-      if (ticks === Math.ceil(1700 / tickMs))
+      if (ticks === Math.ceil((knowledgeRuns.length ? 2380 : 1400) / tickMs))
+        emitInterim(
+          knowledgeRuns.length
+            ? "已检索知识资料并读取工作空间文件，接下来核对关键记录。"
+            : "已读取资料，接下来核对文件与关键记录。",
+        );
+      if (ticks === Math.ceil((knowledgeRuns.length ? 2520 : 1700) / tickMs))
         emit("thinking.delta", { text: "正在等待模型响应" });
       if (ticks === Math.ceil(2900 / tickMs))
         emit("thinking.delta", { text: "" });
@@ -2764,7 +2891,10 @@ export function sendDemoMessage(
     }
     if (
       (crowdedToolsDemo && ticks < Math.ceil(5600 / tickMs)) ||
-      (processDemo && ticks < Math.ceil(10000 / tickMs))
+      (processDemo && ticks < Math.ceil(10000 / tickMs)) ||
+      (!processDemo &&
+        knowledgeRuns.length &&
+        ticks * tickMs <= knowledgeRuns.at(-1).startsAt + knowledgeResultDelay)
     ) {
       persist();
       return;
@@ -2772,7 +2902,24 @@ export function sendDemoMessage(
     const currentText = phase === "interim" ? interimText : answer;
     const chunkSize =
       phase === "interim" && scriptedScene ? 2 : answerChunkSize;
-    const nextOffset = Math.min(currentText.length, offset + chunkSize);
+    let nextOffset = Math.min(currentText.length, offset + chunkSize);
+    if (phase === "answer") {
+      const newCitations = new Set();
+      // Keep adjacent references together so a document label appears in one update.
+      while (answerCitations[nextAnswerCitation]?.start < nextOffset) {
+        const citation = answerCitations[nextAnswerCitation++];
+        nextOffset = Math.max(nextOffset, citation.end);
+        for (const number of citation.numbers) {
+          if (shownKnowledgeCitations.has(number)) continue;
+          shownKnowledgeCitations.add(number);
+          newCitations.add(number);
+        }
+      }
+      if (newCitations.size)
+        for (const run of knowledgeRuns)
+          if (run.evidence?.some((item) => newCitations.has(item.final_citation_number)))
+            emitKnowledgeEvidence(run);
+    }
     const advanced = nextOffset > offset;
     if (advanced)
       emit("message.delta", { text: currentText.slice(offset, nextOffset) });

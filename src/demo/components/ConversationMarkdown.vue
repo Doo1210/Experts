@@ -28,6 +28,31 @@
                     target="_blank"
                     rel="noopener noreferrer"
                     >{{ token.text }}</a
+                  ><button
+                    v-else-if="token.type === 'citation'"
+                    :key="tokenIndex"
+                    type="button"
+                    class="pc-knowledge-citation"
+                    aria-haspopup="dialog"
+                    data-knowledge-source-trigger
+                    @mouseenter="
+                      $emit('citation-enter', {
+                        numbers: token.numbers,
+                        documentId: token.documentId,
+                        event: $event,
+                      })
+                    "
+                    @mouseleave="$emit('citation-leave')"
+                    :aria-label="`查看引用 ${token.title}`"
+                    @click="
+                      $emit('citation', {
+                        numbers: token.numbers,
+                        documentId: token.documentId,
+                        event: $event,
+                      })
+                    "
+                  >
+                    {{ token.text }}</button
                   ><img
                     v-else-if="token.type === 'image'"
                     :key="tokenIndex"
@@ -57,6 +82,31 @@
                     target="_blank"
                     rel="noopener noreferrer"
                     >{{ token.text }}</a
+                  ><button
+                    v-else-if="token.type === 'citation'"
+                    :key="tokenIndex"
+                    type="button"
+                    class="pc-knowledge-citation"
+                    aria-haspopup="dialog"
+                    data-knowledge-source-trigger
+                    @mouseenter="
+                      $emit('citation-enter', {
+                        numbers: token.numbers,
+                        documentId: token.documentId,
+                        event: $event,
+                      })
+                    "
+                    @mouseleave="$emit('citation-leave')"
+                    :aria-label="`查看引用 ${token.title}`"
+                    @click="
+                      $emit('citation', {
+                        numbers: token.numbers,
+                        documentId: token.documentId,
+                        event: $event,
+                      })
+                    "
+                  >
+                    {{ token.text }}</button
                   ><img
                     v-else-if="token.type === 'image'"
                     :key="tokenIndex"
@@ -89,6 +139,31 @@
             target="_blank"
             rel="noopener noreferrer"
             >{{ token.text }}</a
+          ><button
+            v-else-if="token.type === 'citation'"
+            :key="tokenIndex"
+            type="button"
+            class="pc-knowledge-citation"
+            aria-haspopup="dialog"
+            data-knowledge-source-trigger
+            @mouseenter="
+              $emit('citation-enter', {
+                numbers: token.numbers,
+                documentId: token.documentId,
+                event: $event,
+              })
+            "
+            @mouseleave="$emit('citation-leave')"
+            :aria-label="`查看引用 ${token.title}`"
+            @click="
+              $emit('citation', {
+                numbers: token.numbers,
+                documentId: token.documentId,
+                event: $event,
+              })
+            "
+          >
+            {{ token.text }}</button
           ><img
             v-else-if="token.type === 'image'"
             :key="tokenIndex"
@@ -116,6 +191,31 @@
               target="_blank"
               rel="noopener noreferrer"
               >{{ token.text }}</a
+            ><button
+              v-else-if="token.type === 'citation'"
+              :key="tokenIndex"
+              type="button"
+              class="pc-knowledge-citation"
+              aria-haspopup="dialog"
+              data-knowledge-source-trigger
+              @mouseenter="
+                $emit('citation-enter', {
+                  numbers: token.numbers,
+                  documentId: token.documentId,
+                  event: $event,
+                })
+              "
+              @mouseleave="$emit('citation-leave')"
+              :aria-label="`查看引用 ${token.title}`"
+              @click="
+                $emit('citation', {
+                  numbers: token.numbers,
+                  documentId: token.documentId,
+                  event: $event,
+                })
+              "
+            >
+              {{ token.text }}</button
             ><img
               v-else-if="token.type === 'image'"
               :key="tokenIndex"
@@ -140,6 +240,31 @@
             target="_blank"
             rel="noopener noreferrer"
             >{{ token.text }}</a
+          ><button
+            v-else-if="token.type === 'citation'"
+            :key="tokenIndex"
+            type="button"
+            class="pc-knowledge-citation"
+            aria-haspopup="dialog"
+            data-knowledge-source-trigger
+            @mouseenter="
+              $emit('citation-enter', {
+                numbers: token.numbers,
+                documentId: token.documentId,
+                event: $event,
+              })
+            "
+            @mouseleave="$emit('citation-leave')"
+            :aria-label="`查看引用 ${token.title}`"
+            @click="
+              $emit('citation', {
+                numbers: token.numbers,
+                documentId: token.documentId,
+                event: $event,
+              })
+            "
+          >
+            {{ token.text }}</button
           ><img
             v-else-if="token.type === 'image'"
             :key="tokenIndex"
@@ -157,10 +282,13 @@ import { parseConversationMarkdown } from "../conversation-markdown";
 
 export default {
   name: "ConversationMarkdown",
-  props: { text: { type: String, default: "" } },
+  props: {
+    text: { type: String, default: "" },
+    citations: { type: Array, default: () => [] },
+  },
   computed: {
     blocks() {
-      return parseConversationMarkdown(this.text);
+      return parseConversationMarkdown(this.text, this.citations);
     },
   },
 };
