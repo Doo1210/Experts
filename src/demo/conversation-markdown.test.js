@@ -5,7 +5,12 @@ describe("对话 Markdown 内容", () => {
   it("只将本条回答已登记的编号渲染为知识引用", () => {
     const [block] = parseConversationMarkdown(
       "校准要求。[1] 普通编号 [2] `[1]` [1](https://example.com)",
-      [{ number: 1, documents: [{ id: "manual", title: "校准手册.pdf" }] }],
+      [
+        {
+          number: 1,
+          documents: [{ id: "manual", kind: "rag", title: "校准手册.pdf" }],
+        },
+      ],
     );
     expect(block.tokens.map((token) => token.type)).toEqual([
       "text",
@@ -19,16 +24,21 @@ describe("对话 Markdown 内容", () => {
       numbers: [1],
       documentId: "manual",
       title: "校准手册.pdf",
-      text: "[校准手册]",
+      kind: "rag",
+      text: "校准手册",
     });
   });
   it("同一处引用按文档合并，并保留每份文档的命中编号", () => {
-    const manual = { id: "manual", title: "传感器校准作业规范.md" };
-    const table = { id: "table", title: "校准记录.csv" };
+    const manual = {
+      id: "manual",
+      kind: "rag",
+      title: "传感器校准作业规范.md",
+    };
+    const wiki = { id: "wiki", kind: "wiki", title: "校准记录与复核" };
     const citations = [
       { number: 1, documents: [manual] },
       { number: 2, documents: [manual] },
-      { number: 3, documents: [table] },
+      { number: 3, documents: [wiki] },
     ];
     for (const text of ["[1][2] [3]", "[1, 2、3]"]) {
       const [block] = parseConversationMarkdown(`见资料${text}。`, citations);
@@ -37,15 +47,17 @@ describe("对话 Markdown 内容", () => {
           {
             type: "citation",
             documentId: "manual",
+            kind: "rag",
             title: manual.title,
-            text: "[传感器校…]",
+            text: "传感器校准…",
             numbers: [1, 2],
           },
           {
             type: "citation",
-            documentId: "table",
-            title: table.title,
-            text: "[校准记录]",
+            documentId: "wiki",
+            kind: "wiki",
+            title: wiki.title,
+            text: "校准记录与…",
             numbers: [3],
           },
         ],

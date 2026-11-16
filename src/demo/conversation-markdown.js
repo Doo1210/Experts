@@ -54,8 +54,9 @@ function inlineTokens(value, citationsByNumber) {
           documents.set(key, {
             type: "citation",
             documentId: document.id,
+            kind: document.kind,
             title: document.title,
-            text: citationLabel(document.title),
+            text: citationLabel(document),
             numbers: [],
           });
         documents.get(key).numbers.push(number);
@@ -66,11 +67,11 @@ function inlineTokens(value, citationsByNumber) {
   return formatted;
 }
 
-function citationLabel(title) {
-  const name = title.replace(/\.[a-z\d]{1,8}$/i, "");
+function citationLabel({ title, kind }) {
+  const name = kind === "wiki" ? title : title.replace(/\.[a-z\d]{1,8}$/i, "");
   const characters = Array.from(name);
-  const shortName = characters.slice(0, 4).join("").trimEnd();
-  return `[${shortName}${characters.length > 4 ? "…" : ""}]`;
+  const shortName = characters.slice(0, 5).join("").trimEnd();
+  return `${shortName}${characters.length > 5 ? "…" : ""}`;
 }
 
 function tableCells(line, parseInline) {

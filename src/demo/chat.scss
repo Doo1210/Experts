@@ -618,6 +618,29 @@
   color: #c6ced9;
   cursor: default;
 }
+.pc-output-view-all,
+.pc-process .pc-output-view-all {
+  padding: 4px 7px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: #3978d4;
+  font: inherit;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.pc-output-view-all:hover,
+.pc-output-view-all:focus-visible,
+.pc-process .pc-output-view-all:hover,
+.pc-process .pc-output-view-all:focus-visible {
+  background: #edf4ff;
+}
+.pc-result-file-actions .pc-output-view-all {
+  width: auto;
+  padding: 0 6px;
+  color: #3978d4;
+  font-size: 12px;
+}
 .pc-result-diff-popover.el-popover {
   box-sizing: border-box;
   width: min(560px, calc(100vw - 32px));
@@ -879,21 +902,7 @@
   margin-left: 0;
 }
 .pc-activity-list {
-  box-sizing: border-box;
-  max-height: min(360px, 42vh);
   margin-top: 2px;
-  padding: 0;
-  overflow-x: hidden;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  scrollbar-gutter: stable;
-  scrollbar-color: #c6ced8 transparent;
-  scrollbar-width: thin;
-}
-.pc-activity-list:focus-visible {
-  outline: 2px solid #b9cae4;
-  outline-offset: -2px;
-  border-radius: 4px;
 }
 .pc-process-step {
   display: flex;
@@ -958,15 +967,11 @@
 }
 .pc-process-activity .pc-process-detail {
   box-sizing: border-box;
-  max-height: min(240px, 35vh);
   margin: 3px 0 2px 14px;
   padding: 8px 10px;
   border: 1px solid #e1e6ed;
   border-radius: 6px;
   background: #fff;
-  overflow-y: auto;
-  scrollbar-color: #c6ced8 transparent;
-  scrollbar-width: thin;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
@@ -977,12 +982,55 @@
   margin-top: 7px;
 }
 .pc-knowledge-summary {
+  display: grid;
+  gap: 7px;
   margin: 0;
-  padding-left: 16px;
+  padding: 0;
+  list-style: none;
+}
+.pc-knowledge-summary li {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  min-width: 0;
+}
+.pc-knowledge-summary-icon {
+  flex: 0 0 auto;
+  color: #3b6497;
+  font-size: 14px;
+  line-height: 18px;
+}
+.pc-knowledge-summary li[data-kind="wiki"] .pc-knowledge-summary-icon {
+  color: #357052;
+}
+.pc-knowledge-summary-text {
+  min-width: 0;
+}
+.pc-knowledge-summary-title {
+  display: flex;
+  color: #344054;
+  font-weight: 600;
+  line-height: 18px;
+}
+.pc-knowledge-summary-name,
+.pc-knowledge-summary-library {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pc-knowledge-summary-suffix {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+.pc-knowledge-summary-library {
+  display: block;
+  margin-top: 1px;
+  color: #657184;
+  font-size: 11px;
+  line-height: 1.4;
 }
 .pc-knowledge-link,
-.pc-process .pc-knowledge-link,
-.pc-markdown .pc-knowledge-citation {
+.pc-process .pc-knowledge-link {
   padding: 0;
   border: 0;
   background: none;
@@ -991,25 +1039,74 @@
   text-align: left;
 }
 .pc-knowledge-link:hover,
-.pc-process .pc-knowledge-link:hover,
-.pc-markdown .pc-knowledge-citation:hover {
+.pc-process .pc-knowledge-link:hover {
   text-decoration: underline;
 }
 .pc-markdown .pc-knowledge-citation {
-  margin-left: 2px;
-  padding: 0 3px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin: 0 2px;
+  padding: 1px 5px;
+  border: 1px solid;
   border-radius: 4px;
-  background: #eaf2ff;
   font-size: 12px;
+  font-weight: 500;
+  line-height: 1.4;
+  cursor: pointer;
   white-space: nowrap;
 }
+.pc-markdown .pc-knowledge-citation:hover {
+  border-color: #b9cfee;
+  background: #edf3fc;
+}
+.pc-markdown .pc-knowledge-citation[data-kind="wiki"]:hover {
+  border-color: #b5d7c8;
+  background: #eaf5ef;
+}
+.pc-markdown .pc-knowledge-citation:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 2px;
+}
+.pc-knowledge-type {
+  flex: 0 0 auto;
+  margin-left: auto;
+  padding: 1px 5px;
+  border: 1px solid #d5e4fa;
+  border-radius: 4px;
+  background: #edf4ff;
+  color: #315b91;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1.5;
+}
+.pc-knowledge-type[data-kind="wiki"] {
+  border-color: #c8e4d7;
+  background: #eaf7f0;
+  color: #216849;
+}
+.pc-markdown .pc-knowledge-citation,
+.pc-knowledge-sources .pc-knowledge-type,
+.pc-citation-preview .pc-knowledge-type {
+  border-color: #d9e4f3;
+  background: #f5f8fd;
+  color: #3b6497;
+}
+.pc-markdown .pc-knowledge-citation[data-kind="wiki"],
+.pc-knowledge-sources .pc-knowledge-type[data-kind="wiki"],
+.pc-citation-preview .pc-knowledge-type[data-kind="wiki"] {
+  border-color: #d2e5db;
+  background: #f3f9f6;
+  color: #357052;
+}
 .pc-citation-preview {
+  --pc-citation-max-height: 320px;
   position: absolute;
   z-index: 10;
   display: flex;
   flex-direction: column;
   width: min(420px, calc(100% - 16px));
-  max-height: min(320px, var(--pc-citation-available-height, calc(100% - 16px)));
+  max-height: min(var(--pc-citation-max-height), var(--pc-citation-available-height, calc(100% - 16px)));
   overflow: hidden;
   border: 1px solid #dce6f4;
   border-radius: 10px;
@@ -1024,11 +1121,12 @@
   border-bottom: 1px solid #e8edf4;
   background: #f4f8ff;
 }
+.pc-citation-preview[data-kind="wiki"] .pc-citation-preview-head {
+  background: #f1f9f5;
+}
 .pc-citation-preview-list {
   min-height: 0;
-  overflow-y: auto;
-  overscroll-behavior-y: contain;
-  scrollbar-width: thin;
+  overflow: hidden;
   padding: 10px 12px 12px;
   overflow-wrap: anywhere;
 }
@@ -1054,9 +1152,18 @@
   color: #2869cf;
 }
 .pc-citation-preview-list p {
+  display: -webkit-box;
   margin: 0;
+  overflow: hidden;
   line-height: 1.6;
   white-space: pre-wrap;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: var(--pc-citation-lines, 12);
+}
+.pc-citation-preview-footer {
+  flex: 0 0 auto;
+  padding: 7px 12px 8px;
+  border-top: 1px solid #e8edf4;
 }
 .pc-knowledge-sources {
   --pc-knowledge-source-gap: 8px;
@@ -1153,10 +1260,11 @@
 }
 .pc-knowledge-fragment-header {
   display: flex;
-  align-items: baseline;
+  align-items: flex-start;
   gap: 6px;
 }
 .pc-knowledge-fragment-number {
+  align-self: flex-start;
   flex-shrink: 0;
   color: #2869cf;
   font-weight: 600;
@@ -1169,8 +1277,7 @@
 .pc-knowledge-document-heading {
   display: flex;
   align-items: baseline;
-  justify-content: space-between;
-  gap: 5px;
+  gap: 6px;
 }
 .pc-knowledge-document-heading + .pc-knowledge-document-heading {
   margin-top: 3px;
@@ -1193,7 +1300,6 @@
 .pc-knowledge-document-heading small {
   min-width: 0;
   max-width: 45%;
-  text-align: right;
   color: #657184;
   font-size: 11px;
 }
@@ -1216,12 +1322,13 @@
   line-height: 1.6;
 }
 .pc-knowledge-evidence .pc-knowledge-fragment-text {
-  max-height: 96px;
+  display: -webkit-box;
   margin-top: 8px;
-  overflow-y: auto;
-  overscroll-behavior-y: contain;
-  scrollbar-width: thin;
+  overflow: hidden;
+  overflow-wrap: anywhere;
   white-space: pre-wrap;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
 }
 .pc-knowledge-fragment-footer {
   display: flex;
@@ -1238,7 +1345,8 @@
   outline: 1px solid #83adf7;
   outline-offset: 1px;
 }
-.pc-process-detail .pc-tool-code {
+.pc-process-detail .pc-tool-code,
+.pc-output-dialog-content .pc-tool-code {
   max-width: 100%;
   overflow-x: auto;
   padding: 7px 9px;
@@ -1247,6 +1355,12 @@
   color: #707d8e;
   font-size: 12px;
   white-space: pre;
+}
+.pc-process-detail .pc-log-output,
+.pc-output-dialog-content .pc-log-output {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 .pc-process-detail > .pc-activity-file-diff:first-child,
 .pc-process-detail > .pc-tool-output-section:first-child > .pc-activity-file-diff {
@@ -3803,6 +3917,85 @@
 .pc-preview-dialog .el-dialog__body {
   max-height: 60vh;
   overflow: auto;
+}
+.pc-knowledge-original-dialog.el-dialog {
+  max-width: calc(100% - 24px);
+}
+.pc-knowledge-original-dialog .pc-dialog-head {
+  min-height: 76px;
+  padding: 14px 55px 14px 20px;
+}
+.pc-knowledge-original-dialog .pc-dialog-icon[data-kind="wiki"] {
+  border-color: #c8e4d7;
+  color: #216849;
+}
+.pc-knowledge-original-heading {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+.pc-knowledge-original-titles {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.pc-knowledge-original-titles strong,
+.pc-knowledge-original-titles small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pc-knowledge-original-titles strong {
+  line-height: 1.35;
+}
+.pc-dialog-head .pc-knowledge-original-titles small {
+  margin-top: 0;
+  color: #657184;
+  font-size: 12px;
+  line-height: 1.4;
+}
+.pc-dialog-head .pc-knowledge-original-heading .pc-knowledge-type {
+  margin-top: 0;
+  color: #315b91;
+  font-size: 10px;
+}
+.pc-dialog-head .pc-knowledge-original-heading .pc-knowledge-type[data-kind="wiki"] {
+  color: #216849;
+}
+.pc-knowledge-original-dialog .pc-markdown {
+  color: #344054;
+  font-size: 14px;
+  line-height: 1.75;
+}
+.pc-output-dialog.el-dialog {
+  margin-bottom: 0;
+}
+.pc-output-dialog .el-dialog__header {
+  padding: 14px 48px 14px 16px;
+}
+.pc-output-dialog .el-dialog__headerbtn {
+  top: 16px;
+  right: 16px;
+}
+.pc-output-dialog-content {
+  max-height: min(620px, 70vh);
+  max-height: min(620px, 70dvh);
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+.pc-output-dialog-content:focus-visible {
+  outline: 2px solid #b9cae4;
+  outline-offset: -2px;
+}
+.pc-output-dialog-content .pc-log-output {
+  padding: 12px 16px;
+  border-radius: 0;
+  background: #fff;
+  color: #58677a;
 }
 .pc-preview-body {
   min-height: 180px;

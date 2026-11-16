@@ -7,11 +7,11 @@
   >
     <div class="pc-panel-head">
       <span class="pc-panel-icon"><i class="el-icon-document" /></span>
-      <strong id="pc-knowledge-sources-title">本轮知识来源</strong>
+      <strong id="pc-knowledge-sources-title">本轮引用知识</strong>
       <button
         ref="close"
         type="button"
-        aria-label="关闭本轮知识来源"
+        aria-label="关闭本轮引用知识"
         @click="$emit('close')"
       >
         <i class="el-icon-close" />
@@ -56,6 +56,13 @@
               }}</small>
             </div>
           </div>
+          <span
+            v-if="fragment.sources[0].kind"
+            class="pc-knowledge-type"
+            :data-kind="fragment.sources[0].kind"
+          >
+            {{ fragment.sources[0].kind === "wiki" ? "Wiki" : "RAG" }}
+          </span>
         </header>
         <p v-if="fragment.text" class="pc-knowledge-fragment-text">
           {{ fragment.text }}
@@ -70,12 +77,12 @@
               :key="source.key"
               type="button"
               class="pc-knowledge-link"
-              @click="previewOriginal(source.original)"
+              @click="$emit('preview', source)"
             >
               {{
                 fragment.originals.length === 1
-                  ? "查看原文"
-                  : `查看原文 · ${source.title}`
+                  ? "查看"
+                  : `查看 · ${source.title}`
               }}
             </button>
           </div>
@@ -95,7 +102,6 @@ import {
   knowledgeEvidenceSources,
   knowledgeSourceDocument,
 } from "../knowledge-activity";
-import { knowledgeDemoOriginals } from "../knowledge-activity-scenes";
 
 export default {
   props: {
@@ -128,16 +134,10 @@ export default {
           text: available
             ? item.calculation?.summary || item.hit?.text || ""
             : "当前无法访问此资料",
-          sources: sources.map((source, index) => {
-            const document = knowledgeSourceDocument(source);
-            return {
-              ...document,
-              key: `${source.id}:${index}`,
-              original:
-                knowledgeDemoOriginals[document.id] ||
-                knowledgeDemoOriginals[source.id],
-            };
-          }),
+          sources: sources.map((source, index) => ({
+            ...knowledgeSourceDocument(source),
+            key: `${source.id}:${index}`,
+          })),
         };
         if (!fragment.sources.length)
           fragment.sources.push({
@@ -164,9 +164,6 @@ export default {
     },
   },
   methods: {
-    previewOriginal({ name, content }) {
-      this.$emit("preview", { name, snapshotContent: content });
-    },
     selectFilter(filter) {
       if (filter === this.filter) return;
       this.filter = filter;

@@ -1,9 +1,10 @@
 import { KNOWLEDGE_CATALOG, KNOWLEDGE_DOCUMENTS } from "./knowledge-demo";
+import { knowledgeDemoOriginals } from "./knowledge-activity-scenes";
 
 const legacyDemoDocuments = {
   "zx42-maintenance": ["生产工艺手册", "ZX-42 维护手册.md"],
   "sensor-calibration": ["质量标准与规范", "传感器校准作业规范.md"],
-  "zx42-wiki": ["生产工艺手册", "ZX-42 校准记录.md"],
+  "zx42-wiki": ["生产工艺手册", "校准记录与复核"],
   "zx42-calibration-log": ["历史整改案例", "ZX-42 校准记录表.csv"],
 };
 
@@ -59,7 +60,13 @@ export function knowledgeCitationDocuments(evidence) {
 }
 
 export function knowledgeSourceDocument(source) {
-  const id = source.document_id || source.locator?.document_id || source.id;
+  const isWiki =
+    source.kind === "wiki" ||
+    source.locator?.source_type === "wiki" ||
+    source.id === "zx42-wiki";
+  const id = isWiki
+    ? source.locator?.wiki_page_id || source.id
+    : source.document_id || source.locator?.document_id || source.id;
   const document = KNOWLEDGE_DOCUMENTS.find((entry) => entry.id === id);
   const library = KNOWLEDGE_CATALOG.find(
     (entry) => entry.id === (document?.libraryId || source.library_id),
@@ -67,17 +74,34 @@ export function knowledgeSourceDocument(source) {
   const [demoLibrary, demoTitle] = legacyDemoDocuments[id] || [];
   return {
     id,
-    title: document?.name || demoTitle || source.title || "引用文档",
+    kind: isWiki ? "wiki" : "rag",
+    title: isWiki
+      ? source.title || demoTitle || "Wiki 页面"
+      : document?.name || demoTitle || source.title || "引用文档",
     library: library?.name || source.library_name || demoLibrary,
+    original: knowledgeDemoOriginals[id] || knowledgeDemoOriginals[source.id],
   };
 }
 
 export function knowledgeActivitySources(activity) {
   if (!["success", "partial"].includes(activity.resultStatus)) return [];
   const sources = new Map();
-  for (const evidence of activity.evidence)
-    for (const source of knowledgeEvidenceSources(evidence))
-      if (source.title && !sources.has(source.id))
-        sources.set(source.id, source);
+  for (const evidence of activity.evidence) {
+    for (const source of knowledgeEvidenceSources(evidence)) {
+      if (!source.title) continue;
+      const { id, kind, title, library } = knowledgeSourceDocument(source);
+      if (!id || sources.has(id)) continue;
+      const suffix =
+        kind === "rag" ? title.match(/\.[a-z\d]{1,8}$/i)?.[0] || "" : "";
+      sources.set(id, {
+        id,
+        kind,
+        title,
+        library,
+        name: suffix ? title.slice(0, -suffix.length) : title,
+        suffix,
+      });
+    }
+  }
   return [...sources.values()];
 }

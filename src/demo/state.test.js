@@ -1483,7 +1483,8 @@ describe("演示状态", () => {
       expect(success.messages[1].content).toContain("再开始校准。[1][2][3]");
       expect(new Set(activity.evidence.flatMap((item) =>
         item.source ? [item.source.id] : item.calculation_sources.map((source) => source.id),
-      )).size).toBe(4);
+      )).size).toBe(5);
+      expect(activity.evidence[5]).toMatchObject({ kind: "source", source: { kind: "wiki" } });
       expect(activity.evidence.map((item) => item.final_citation_number)).toEqual([
         1, 2, 3, 4, 5, 6, 7, null,
       ]);

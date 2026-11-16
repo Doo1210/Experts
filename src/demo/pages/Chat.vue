@@ -109,7 +109,7 @@
                     type="button"
                     :aria-expanded="processExpanded(message)"
                     :disabled="processLocked(message)"
-                    @click="toggleProcess(message.id)"
+                    @click="toggleProcess(message, $event)"
                   >
                     {{ turnStatusLabel(message) }}
                     <span v-if="turnDurationLabel(message)">{{
@@ -151,13 +151,7 @@
                             ),
                           }"
                           :aria-expanded="expandedActivities.includes(block.id)"
-                          @click="
-                            toggleActivityGroup(
-                              block.id,
-                              block.activities,
-                              message,
-                            )
-                          "
+                          @click="toggleActivityGroup(block.id, $event)"
                         >
                           <span class="pc-activity-title-text">{{
                             activityGroupLabel(block.activities, message)
@@ -173,12 +167,7 @@
                         </button>
                         <div
                           v-if="expandedActivities.includes(block.id)"
-                          ref="activityLists"
                           class="pc-activity-list"
-                          :data-group-id="block.id"
-                          tabindex="0"
-                          aria-label="活动行及详情"
-                          @scroll="trackActivityListScroll(block.id, $event)"
                         >
                           <div
                             v-for="step in block.activities"
@@ -199,7 +188,7 @@
                               "
                               @click="
                                 hasActivityDetail(step) &&
-                                toggleActivityDetail(step.id, block.id)
+                                toggleActivityDetail(step.id, $event)
                               "
                             >
                               <span
@@ -250,8 +239,29 @@
                               <template v-if="step.kind === 'knowledge'">
                                 <div v-if="step.detail">{{ step.detail }}</div>
                                 <ul v-if="knowledgeSources(step).length" class="pc-knowledge-summary">
-                                  <li v-for="source in knowledgeSources(step).slice(0, 3)" :key="source.id">
-                                    {{ source.title }}
+                                  <li
+                                    v-for="source in knowledgeSources(step).slice(0, 3)"
+                                    :key="source.id"
+                                    :data-kind="source.kind"
+                                  >
+                                    <i
+                                      class="pc-knowledge-summary-icon"
+                                      :class="source.kind === 'wiki' ? 'el-icon-reading' : 'el-icon-document'"
+                                      aria-hidden="true"
+                                    />
+                                    <div class="pc-knowledge-summary-text">
+                                      <div class="pc-knowledge-summary-title" :title="source.title">
+                                        <span class="pc-knowledge-summary-name">{{ source.name }}</span><span
+                                          v-if="source.suffix"
+                                          class="pc-knowledge-summary-suffix"
+                                        >{{ source.suffix }}</span>
+                                      </div>
+                                      <small
+                                        v-if="source.library"
+                                        class="pc-knowledge-summary-library"
+                                        :title="source.library"
+                                      >{{ source.library }}</small>
+                                    </div>
                                   </li>
                                 </ul>
                                 <button
@@ -261,7 +271,7 @@
                                   aria-haspopup="dialog"
                                   data-knowledge-source-trigger
                                   @click="showKnowledgeSources(message, $event, knowledgeEvidenceKey(step, 0))"
-                                >查看本轮知识来源</button>
+                                >查看本轮引用知识</button>
                               </template>
                               <template v-else-if="step.kind === 'subagent'">
                                 <div v-if="step.argumentSummary">
@@ -350,16 +360,20 @@
                                     >
                                       {{ section.label }}
                                     </div>
-                                    <pre
+                                    <ConversationLog
                                       v-if="section.kind === 'code'"
-                                      class="pc-tool-code"
-                                      >{{ section.text }}</pre>
+                                      :text="section.text"
+                                      :title="section.label || '执行结果'"
+                                      @view-all="openOutputDialog"
+                                    />
                                     <ConversationDiff
                                       v-else-if="section.kind === 'diff'"
                                       class="pc-activity-file-diff"
                                       :text="section.text"
                                       :path="step.argumentSummary"
                                       title="本次改动"
+                                      preview
+                                      @view-all="openOutputDialog"
                                     />
                                     <div
                                       v-else-if="section.kind === 'read'"
@@ -471,6 +485,17 @@
                                   :text="step.outputDetail"
                                   :path="step.argumentSummary"
                                   title="本次改动"
+                                  preview
+                                  @view-all="openOutputDialog"
+                                />
+                                <ConversationLog
+                                  v-else-if="
+                                    step.outputDetail &&
+                                    ['terminal', 'execute_code', 'process_manage'].includes(step.name)
+                                  "
+                                  :text="step.outputDetail"
+                                  :title="step.name === 'process_manage' ? '进程输出' : '执行结果'"
+                                  @view-all="openOutputDialog"
                                 />
                                 <div v-else-if="step.outputDetail">
                                   <div
@@ -658,13 +683,14 @@
                       placement="top"
                       popper-class="pc-result-diff-popover"
                       :open-delay="80"
-                      :disabled="!item.roundDiff"
+                      :disabled="!item.roundDiff || outputDialogVisible"
                     >
                       <ConversationDiff
                         v-if="item.roundDiff"
                         :text="item.roundDiff"
                         :path="item.path || item.name"
                         title="本轮改动"
+                        preview
                       />
                       <div
                         slot="reference"
@@ -701,6 +727,16 @@
                         >
                       </span>
                       <span class="pc-result-file-actions">
+                        <button
+                          v-if="item.roundDiff"
+                          type="button"
+                          class="pc-output-view-all"
+                          :aria-label="`查看全部改动 ${item.name}`"
+                          aria-haspopup="dialog"
+                          @click="openRoundDiff(item, $event)"
+                        >
+                          查看全部
+                        </button>
                         <el-tooltip
                           content="预览"
                           placement="top"
@@ -2436,7 +2472,7 @@
           :evidence="roundKnowledgeEvidence(knowledgeSourceView.message)"
           :target-id="knowledgeSourceView.targetId"
           @close="closeKnowledgeSources"
-          @preview="previewFile"
+          @preview="previewKnowledgeOriginal"
         />
       </transition>
       <KnowledgeCitationPreview
@@ -2449,6 +2485,7 @@
         @mouseenter.native="cancelKnowledgePreviewClose"
         @mouseleave.native="scheduleKnowledgePreviewClose"
         @close="closeKnowledgePreview()"
+        @preview="previewKnowledgeOriginal"
       />
     </div>
     <el-dialog
@@ -2568,24 +2605,65 @@
       {{ resultPathTooltip.text }}
     </div>
     <el-dialog
+      :visible.sync="outputDialogVisible"
+      :title="outputDialog ? outputDialog.title : ''"
+      width="720px"
+      top="min(8vh, 56px)"
+      custom-class="pc-dialog pc-output-dialog"
+      append-to-body
+      @open="focusOutputDialog"
+      @closed="clearOutputDialog"
+    >
+      <div
+        v-if="outputDialog"
+        ref="outputDialogContent"
+        class="pc-output-dialog-content"
+        tabindex="0"
+        role="region"
+        :aria-label="outputDialog.title"
+      >
+        <ConversationDiff
+          v-if="outputDialog.kind === 'diff'"
+          :text="outputDialog.text"
+          :path="outputDialog.path"
+          :title="outputDialog.title"
+        />
+        <pre v-else class="pc-tool-code pc-log-output">{{ outputDialog.text }}</pre>
+      </div>
+    </el-dialog>
+    <el-dialog
       :visible.sync="previewVisible"
       width="720px"
-      custom-class="pc-dialog pc-preview-dialog"
+      :custom-class="`pc-dialog pc-preview-dialog${previewKnowledgeSource ? ' pc-knowledge-original-dialog' : ''}`"
       append-to-body
       @closed="clearPreview"
       ><div slot="title" class="pc-dialog-head">
-        <div
-          class="pc-dialog-icon"
-        >
+        <div class="pc-dialog-icon" :data-kind="previewKnowledgeSource && previewKnowledgeSource.kind">
           <i
             :class="
-              previewItem && previewItem.operation === 'modified'
-                ? 'el-icon-edit-outline'
-                : 'el-icon-document'
+              previewKnowledgeSource && previewKnowledgeSource.kind === 'wiki'
+                ? 'el-icon-reading'
+                : previewItem && previewItem.operation === 'modified'
+                  ? 'el-icon-edit-outline'
+                  : 'el-icon-document'
             "
           />
         </div>
-        <div>
+        <div v-if="previewKnowledgeSource" class="pc-knowledge-original-heading">
+          <div class="pc-knowledge-original-titles">
+            <strong :title="previewKnowledgeSource.title">{{
+              previewKnowledgeSource.title
+            }}</strong>
+            <small
+              v-if="previewKnowledgeSource.library"
+              :title="previewKnowledgeSource.library"
+            >{{ previewKnowledgeSource.library }}</small>
+          </div>
+          <span class="pc-knowledge-type" :data-kind="previewKnowledgeSource.kind">
+            {{ previewKnowledgeSource.kind === "wiki" ? "Wiki" : "RAG" }}
+          </span>
+        </div>
+        <div v-else>
           <strong>{{ previewItem && previewItem.name }}</strong>
           <small v-if="previewItem && previewItem.operation">
             {{ resultOperationLabel(previewItem.operation) }} ·
@@ -2603,6 +2681,10 @@
           v-if="previewUrl"
           :src="previewUrl"
           :alt="previewItem && previewItem.name"
+        />
+        <ConversationMarkdown
+          v-else-if="previewKnowledgeSource && previewKnowledgeSource.kind === 'wiki'"
+          :text="previewText"
         />
         <pre v-else>{{ previewText }}</pre>
       </div>
@@ -2654,6 +2736,7 @@ import {
 } from "../conversation-session-state";
 import ConversationMarkdown from "../components/ConversationMarkdown.vue";
 import ConversationDiff from "../components/ConversationDiff.vue";
+import ConversationLog from "../components/ConversationLog.vue";
 import KnowledgeSourcesPanel from "../components/KnowledgeSourcesPanel.vue";
 import KnowledgeCitationPreview from "../components/KnowledgeCitationPreview.vue";
 function approvalDisplayRequest(request) {
@@ -2710,6 +2793,7 @@ export default {
   components: {
     ConversationMarkdown,
     ConversationDiff,
+    ConversationLog,
     KnowledgeSourcesPanel,
     KnowledgeCitationPreview,
   },
@@ -2781,7 +2865,8 @@ export default {
       expandedProcess: [],
       expandedActivities: [],
       expandedActivityIds: [],
-      activityListFollowBottom: {},
+      outputDialogVisible: false,
+      outputDialog: null,
       clockNow: Date.now(),
       taskDialogVisible: false,
       taskDialogMode: "rename",
@@ -2797,6 +2882,9 @@ export default {
     };
   },
   computed: {
+    previewKnowledgeSource() {
+      return this.previewItem?.knowledgeSource || null;
+    },
     knowledgeReferenceEnabled() {
       return this.expert?.knowledge?.scope !== "none";
     },
@@ -3279,7 +3367,7 @@ export default {
       const last = messages[messages.length - 1];
       return last?.role === "assistant" ? last.content.length : 0;
     },
-    activityListContentSignature() {
+    activityContentSignature() {
       return (this.conversation?.turns || [])
         .flatMap((turn) =>
           (turn.activities || []).map(
@@ -3382,7 +3470,7 @@ export default {
       this.expandedProcess = [];
       this.expandedActivities = [];
       this.expandedActivityIds = [];
-      this.activityListFollowBottom = {};
+      this.outputDialogVisible = false;
       this.closeKnowledgeSources(false);
       this.closeKnowledgePreview(false);
       this.referencePickerVisible = false;
@@ -3409,23 +3497,11 @@ export default {
       this.$nextTick(this.observeQuestionRail);
     },
     "conversation.messages.length"() {
-      this.$nextTick(() => {
-        this.syncSentResourceStrips();
-        this.scrollBottom();
-      });
+      this.$nextTick(this.syncSentResourceStrips);
+      this.followConversationIfNearBottom();
     },
-    lastAssistantContentLength() {
-      const scroller = this.$refs.scroller;
-      if (
-        !scroller ||
-        scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight > 120
-      )
-        return;
-      this.$nextTick(this.scrollBottom);
-    },
-    activityListContentSignature() {
-      this.$nextTick(this.followActivityLists);
-    },
+    lastAssistantContentLength: "followConversationIfNearBottom",
+    activityContentSignature: "followConversationIfNearBottom",
   },
   methods: {
     hasUserResources(message) {
@@ -4042,6 +4118,34 @@ export default {
       this.resultPathTooltip.text = "";
       this.resultPathTooltip.visible = false;
     },
+    openRoundDiff(item, event) {
+      this.openOutputDialog({
+        kind: "diff",
+        text: item.roundDiff,
+        path: item.path || item.name,
+        title: "本轮改动",
+      }, event);
+    },
+    openOutputDialog(output, event) {
+      this.hideResultPathTooltip();
+      this._outputDialogTrigger = event.currentTarget;
+      this.outputDialog = output;
+      this.outputDialogVisible = true;
+    },
+    focusOutputDialog() {
+      this.$nextTick(() => {
+        const content = this.$refs.outputDialogContent;
+        if (!content) return;
+        content.scrollTop = 0;
+        content.focus({ preventScroll: true });
+      });
+    },
+    clearOutputDialog() {
+      if (this.outputDialogVisible) return;
+      this.outputDialog = null;
+      this._outputDialogTrigger?.focus({ preventScroll: true });
+      this._outputDialogTrigger = null;
+    },
     resultOperationLabel(operation) {
       return (
         {
@@ -4289,6 +4393,16 @@ export default {
       );
       if (citation) this.showKnowledgeSources(message, event, citation.key);
     },
+    previewKnowledgeOriginal(document) {
+      const { original } = document;
+      if (!original) return;
+      this.closeKnowledgePreview(false);
+      this.previewFile({
+        name: original.name,
+        snapshotContent: original.content,
+        knowledgeSource: document,
+      });
+    },
     showKnowledgeSources(message, event, targetId) {
       this.closeKnowledgePreview(false);
       this.updateKnowledgeInputHeight();
@@ -4344,6 +4458,7 @@ export default {
           left: `${left}px`,
           ...(placeBelow ? { top: `${below}px` } : { bottom: `${body.height - above}px` }),
           "--pc-citation-available-height": `${availableHeight}px`,
+          "--pc-citation-lines": panel.visibleLineCount(availableHeight),
         };
       });
     },
@@ -4424,28 +4539,18 @@ export default {
       const el = this.$refs.scroller;
       if (el) el.scrollTop = el.scrollHeight;
     },
-    activityListElement(groupId) {
-      const lists = this.$refs.activityLists || [];
-      return (Array.isArray(lists) ? lists : [lists]).find(
-        (list) => list.dataset.groupId === groupId,
-      );
+    followConversationIfNearBottom() {
+      const scroller = this.$refs.scroller;
+      if (scroller && scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight <= 24)
+        this.$nextTick(this.scrollBottom);
     },
-    trackActivityListScroll(groupId, event) {
-      const list = event.target;
-      this.$set(
-        this.activityListFollowBottom,
-        groupId,
-        list.scrollHeight - list.scrollTop - list.clientHeight <= 24,
-      );
-    },
-    followActivityLists() {
-      for (const [groupId, follow] of Object.entries(
-        this.activityListFollowBottom,
-      )) {
-        if (!follow) continue;
-        const list = this.activityListElement(groupId);
-        if (list) list.scrollTop = list.scrollHeight;
-      }
+    keepTogglePosition(trigger) {
+      const scroller = this.$refs.scroller;
+      const top = trigger.getBoundingClientRect().top;
+      this.$nextTick(() => {
+        if (scroller?.contains(trigger))
+          scroller.scrollTop += trigger.getBoundingClientRect().top - top;
+      });
     },
     focusComposer() {
       this.$nextTick(() => this.$refs.composer?.focus());
@@ -4722,44 +4827,33 @@ export default {
       }
       this.$message.success("已归档，可在专家管理的「已归档」中恢复");
     },
-    toggleProcess(id) {
-      const message = this.conversation?.messages.find(
-        (item) => item.id === id,
-      );
-      if (
-        !message ||
-        !this.hasProcessContent(message) ||
-        this.processLocked(message)
-      )
-        return;
+    toggleProcess(message, event) {
+      if (this.processLocked(message)) return;
       const key = this.processExpansionKey(message);
-      this.expandedProcess = this.expandedProcess.includes(key)
-        ? this.expandedProcess.filter((value) => value !== key)
-        : [...this.expandedProcess, key];
+      if (this.expandedProcess.includes(key)) {
+        this.keepTogglePosition(event.currentTarget);
+        this.expandedProcess = this.expandedProcess.filter((value) => value !== key);
+      } else {
+        this.expandedProcess = [...this.expandedProcess, key];
+      }
     },
-    toggleActivityGroup(id, activities, message) {
+    toggleActivityGroup(id, event) {
       if (this.expandedActivities.includes(id)) {
+        this.keepTogglePosition(event.currentTarget);
         this.expandedActivities = this.expandedActivities.filter(
           (value) => value !== id,
         );
-        this.$delete(this.activityListFollowBottom, id);
-        return;
+      } else {
+        this.expandedActivities = [...this.expandedActivities, id];
       }
-      const running =
-        ["running", "recovering"].includes(this.turnFor(message)?.status) &&
-        activities.some((activity) =>
-          ["running", "requested"].includes(activity.status),
-        );
-      this.$set(this.activityListFollowBottom, id, running);
-      this.expandedActivities = [...this.expandedActivities, id];
-      if (running) this.$nextTick(this.followActivityLists);
     },
-    toggleActivityDetail(id, groupId) {
-      const opening = !this.expandedActivityIds.includes(id);
-      if (opening) this.$set(this.activityListFollowBottom, groupId, false);
-      this.expandedActivityIds = opening
-        ? [...this.expandedActivityIds, id]
-        : this.expandedActivityIds.filter((value) => value !== id);
+    toggleActivityDetail(id, event) {
+      if (this.expandedActivityIds.includes(id)) {
+        this.keepTogglePosition(event.currentTarget);
+        this.expandedActivityIds = this.expandedActivityIds.filter((value) => value !== id);
+      } else {
+        this.expandedActivityIds = [...this.expandedActivityIds, id];
+      }
     },
     jumpTo(id) {
       document

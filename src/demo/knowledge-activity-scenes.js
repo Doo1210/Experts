@@ -13,8 +13,14 @@ const sources = {
   },
   wiki: {
     id: "zx42-wiki",
-    title: "设备 Wiki · ZX-42 校准记录",
-    locator: { text_anchor: "记录要求" },
+    kind: "wiki",
+    title: "校准记录与复核",
+    library_name: "生产工艺手册",
+    locator: {
+      source_type: "wiki",
+      wiki_page_id: "zx42-wiki",
+      wiki_slug: "calibration-review",
+    },
   },
   handoff: {
     id: "calibration-handoff",
@@ -78,8 +84,8 @@ export const knowledgeDemoOriginals = {
     content: `# 传感器校准作业规范\n\n## 零点与量程复核\n\n${procedureExcerpt}\n\n## 测点登记\n\n${procedureRecordExcerpt}\n`,
   },
   [sources.wiki.id]: {
-    name: "ZX-42 校准记录.md",
-    content: `# ZX-42 校准记录\n\n## 记录要求\n\n${wikiExcerpt}\n\n复核结果由当班人员确认后归档。\n`,
+    name: "校准记录与复核.md",
+    content: `## 记录要求\n\n${wikiExcerpt}\n\n| 记录项 | 填写要求 |\n| --- | --- |\n| 设备编号 | 与现场设备铭牌一致 |\n| 测点与偏差 | 同时保留初测与复测结果 |\n| 复核信息 | 填写复核人、复核时间和结论 |\n\n## 待复核项目\n\n${handoffDetail}\n\n复核结果由当班人员确认后归档。\n`,
   },
   [sources.handoff.id]: {
     name: sources.handoff.title,
@@ -119,6 +125,13 @@ const documentRun = {
   status: "success",
   evidence: documentEvidence,
 };
+const wikiEvidence = {
+  evidence_id: "wiki-page",
+  kind: "source",
+  source: sources.wiki,
+  access: "available",
+  final_citation_number: 1,
+};
 const calibrationEvidence = [
   { ...documentEvidence[0], hit: { text: manualInspectionDetail } },
   {
@@ -144,11 +157,7 @@ const calibrationEvidence = [
     final_citation_number: 5,
   },
   {
-    evidence_id: "handoff-hit",
-    kind: "hit",
-    source: sources.handoff,
-    hit: { text: wikiExcerpt },
-    access: "available",
+    ...wikiEvidence,
     final_citation_number: 6,
   },
   {
@@ -238,16 +247,7 @@ export const knowledgeDemoScenes = new Map([
         {
           method: "wiki",
           status: "success",
-          evidence: [
-            {
-              evidence_id: "wiki-hit",
-              kind: "hit",
-              source: sources.wiki,
-              hit: { text: wikiExcerpt },
-              access: "available",
-              final_citation_number: 1,
-            },
-          ],
+          evidence: [wikiEvidence],
         },
         {
           method: "table_analysis",
