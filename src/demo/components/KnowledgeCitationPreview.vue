@@ -16,7 +16,7 @@
         class="pc-knowledge-type"
         :data-kind="document.kind"
       >
-        {{ document.kind === "wiki" ? "Wiki" : "RAG" }}
+        {{ document.kind === "wiki" ? "Wiki" : "文档片段" }}
       </span>
     </header>
     <div

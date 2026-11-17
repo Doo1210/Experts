@@ -61,7 +61,7 @@
             class="pc-knowledge-type"
             :data-kind="fragment.sources[0].kind"
           >
-            {{ fragment.sources[0].kind === "wiki" ? "Wiki" : "RAG" }}
+            {{ fragment.sources[0].kind === "wiki" ? "Wiki" : "文档片段" }}
           </span>
         </header>
         <p v-if="fragment.text" class="pc-knowledge-fragment-text">
