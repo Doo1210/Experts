@@ -2689,10 +2689,12 @@
         <pre v-else>{{ previewText }}</pre>
       </div>
       <div slot="footer" class="pc-dialog-footer">
-        <el-button @click="previewVisible = false">关闭</el-button
-        ><el-button type="primary" @click="downloadFile(previewItem)"
-          >下载文件</el-button
-        >
+        <el-button @click="previewVisible = false">关闭</el-button>
+        <el-button
+          v-if="!previewKnowledgeSource"
+          type="primary"
+          @click="downloadFile(previewItem)"
+        >下载文件</el-button>
       </div></el-dialog
     >
   </div>
