@@ -2660,7 +2660,7 @@
             >{{ previewKnowledgeSource.library }}</small>
           </div>
           <span class="pc-knowledge-type" :data-kind="previewKnowledgeSource.kind">
-            {{ previewKnowledgeSource.kind === "wiki" ? "Wiki" : "RAG" }}
+            {{ previewKnowledgeSource.kind === "wiki" ? "Wiki" : "chunk" }}
           </span>
         </div>
         <div v-else>
