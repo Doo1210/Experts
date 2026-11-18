@@ -13,9 +13,9 @@ export const knowledgeAction = "检索知识";
 export const knowledgeStages = {
   accepted: "",
   understanding: "理解问题",
-  searching: "检索资料",
-  reading: "阅读资料",
-  wiki: "查询 Wiki",
+  searching: "检索片段",
+  reading: "阅读文档",
+  wiki: "检索 Wiki",
   table_analysis: "分析表格",
   summarizing: "整理结果",
   completed: "正在读取结果",
@@ -28,6 +28,24 @@ export const knowledgeResults = {
   success: "",
   partial: "部分完成",
   empty: "未找到可用资料",
+};
+
+export const knowledgeProcessActions = {
+  query_understand: "理解问题",
+  search_knowledge: "检索片段",
+  read_document: "阅读文档",
+  wiki_search: "检索 Wiki",
+  wiki_read_page: "阅读 Wiki",
+  data_analysis: "分析表格",
+};
+
+export const knowledgeProcessStages = {
+  query_understand: "understanding",
+  search_knowledge: "searching",
+  read_document: "reading",
+  wiki_search: "wiki",
+  wiki_read_page: "wiki",
+  data_analysis: "table_analysis",
 };
 
 export const knowledgeErrors = {
@@ -83,25 +101,35 @@ export function knowledgeSourceDocument(source) {
   };
 }
 
-export function knowledgeActivitySources(activity) {
-  if (!["success", "partial"].includes(activity.resultStatus)) return [];
-  const sources = new Map();
-  for (const evidence of activity.evidence) {
-    for (const source of knowledgeEvidenceSources(evidence)) {
-      if (!source.title) continue;
-      const { id, kind, title, library } = knowledgeSourceDocument(source);
-      if (!id || sources.has(id)) continue;
-      const suffix =
-        kind === "rag" ? title.match(/\.[a-z\d]{1,8}$/i)?.[0] || "" : "";
-      sources.set(id, {
-        id,
-        kind,
-        title,
-        library,
-        name: suffix ? title.slice(0, -suffix.length) : title,
-        suffix,
-      });
+export function knowledgeEvidenceSummary(evidence = []) {
+  const chunks = new Set();
+  const pages = new Set();
+  const calculations = new Set();
+  for (const item of evidence) {
+    if (item.access !== "available") continue;
+    if (item.kind === "hit" && item.hit) {
+      chunks.add(item.hit.id || item.evidence_id);
+    }
+    if (item.kind === "calculation" && item.calculation) {
+      calculations.add(item.calculation.id || item.evidence_id);
+    }
+    if (item.kind === "source" && item.source?.kind === "wiki") {
+      const source = item.source;
+      pages.add(
+        JSON.stringify([
+          source.resource || source.library_id || source.library_name || "",
+          source.locator?.wiki_page_id ||
+            source.locator?.wiki_slug ||
+            source.id,
+        ]),
+      );
     }
   }
-  return [...sources.values()];
+  return [
+    chunks.size ? `${chunks.size} 个文档片段` : "",
+    pages.size ? `${pages.size} 个 Wiki 页面` : "",
+    calculations.size ? `${calculations.size} 项计算结果` : "",
+  ]
+    .filter(Boolean)
+    .join("、");
 }

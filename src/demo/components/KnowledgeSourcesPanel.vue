@@ -1,5 +1,6 @@
 <template>
   <section
+    id="pc-knowledge-sources"
     class="pc-knowledge-sources"
     role="dialog"
     aria-labelledby="pc-knowledge-sources-title"
@@ -34,6 +35,7 @@
       <article
         v-for="fragment in visibleFragments"
         :key="fragment.key"
+        :data-evidence-key="fragment.key"
         :class="{ 'is-selected': fragment.key === targetId }"
         tabindex="-1"
       >
@@ -102,6 +104,7 @@ import {
   knowledgeEvidenceSources,
   knowledgeSourceDocument,
 } from "../knowledge-activity";
+import { wikiPageExcerpt } from "../knowledge-citation-content";
 
 export default {
   props: {
@@ -147,6 +150,17 @@ export default {
         fragment.originals = fragment.sources.filter(
           (source) => source.original,
         );
+        if (available && !fragment.text)
+          fragment.text = fragment.sources
+            .map((source) => wikiPageExcerpt(source, [item]))
+            .filter(Boolean)
+            .join("\n\n");
+        if (!fragment.text)
+          fragment.text = fragment.sources.some(
+            (source) => source.kind === "wiki",
+          )
+            ? "暂无可预览的页面内容"
+            : "暂无可预览内容";
         (number === null ? uncited : cited).push(fragment);
       }
       cited.sort((a, b) => a.number - b.number);
@@ -175,7 +189,7 @@ export default {
         const list = this.$refs.list;
         if (!list) return;
         const card = list.querySelector("article.is-selected");
-        list.scrollTop = card?.offsetTop || 0;
+        list.scrollTop = Math.max(0, (card?.offsetTop || 0) - 4);
         if (focus) (card || this.$refs.close)?.focus({ preventScroll: true });
       });
     },

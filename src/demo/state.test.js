@@ -1390,32 +1390,49 @@ describe("演示状态", () => {
     try {
       const conversation = demo.createConversation("exp_quality", "常见处理过程");
       demo.sendDemoMessage(conversation.id, "演示过程");
-      await vi.advanceTimersByTimeAsync(1000);
+      await vi.advanceTimersByTimeAsync(5000);
       const turn = conversation.turns[0];
       expect(conversationProcessBlocks(turn)[0].activities).toMatchObject([
         { name: "read_file", status: "running", argumentSummary: expect.stringContaining("良率样例.csv") },
-        { name: "use_knowledge", stageType: "reading", progressText: "阅读资料" },
+        { name: "use_knowledge", stageType: "reading", progressText: "阅读文档" },
       ]);
-      await vi.advanceTimersByTimeAsync(1750);
+      await vi.advanceTimersByTimeAsync(6500);
       expect(conversation.turns[0].stages).toMatchObject([
         { kind: "model_wait", state: "running" },
       ]);
-      await vi.advanceTimersByTimeAsync(2550);
+      await vi.advanceTimersByTimeAsync(8500);
+      expect(turn.activities.slice(2)).toMatchObject([
+        { name: "search_files", status: "running" },
+        { name: "terminal", status: "running", outputSections: [] },
+      ]);
+      expect(hasToolDetail(turn.activities[3])).toBe(true);
+      await vi.advanceTimersByTimeAsync(3500);
       expect(conversation.turns[0].stages).toMatchObject([
         { kind: "model_wait", state: "complete" },
         { kind: "compression", state: "running" },
       ]);
-      await vi.advanceTimersByTimeAsync(1400);
+      await vi.advanceTimersByTimeAsync(6500);
       expect(conversation.turns[0].stages[1]).toMatchObject({
         kind: "compression",
         state: "complete",
       });
-      await vi.advanceTimersByTimeAsync(3100);
+      const codeActivity = turn.activities.find((item) => item.name === "execute_code");
+      expect(codeActivity).toMatchObject({ status: "running", outputSections: [] });
+      expect(hasToolDetail(codeActivity)).toBe(true);
+      await vi.advanceTimersByTimeAsync(4500);
+      expect(codeActivity.status).toBe("running");
+      await vi.advanceTimersByTimeAsync(5500);
+      expect(turn.activities.at(-1)).toMatchObject({ name: "write_file", status: "running" });
+      expect(turn.results).toEqual([]);
+      await vi.advanceTimersByTimeAsync(10000);
+      expect(turn.activities.at(-1)).toMatchObject({ name: "patch", status: "running" });
+      expect(turn.results.map((item) => item.operation)).toEqual(["created"]);
+      await vi.advanceTimersByTimeAsync(6500);
       expect(conversation.turns[0].results.map((item) => item.operation)).toEqual([
         "created", "modified",
       ]);
       expect(turnResultsVisible(conversation.turns[0])).toBe(false);
-      await vi.advanceTimersByTimeAsync(2200);
+      await vi.advanceTimersByTimeAsync(3500);
       expect(turn.status).toBe("complete");
       expect(turnResultsVisible(turn)).toBe(true);
       expect(turn.activities.map((item) => item.name)).toEqual([
@@ -1452,23 +1469,42 @@ describe("演示状态", () => {
       const [turn] = success.turns;
       const [activity] = turn.activities;
       expect(activity.stageType).toBe("accepted");
-      for (const [elapsed, stage] of [
+      let elapsed = 0;
+      for (const [at, stage] of [
         [1000, "understanding"],
-        [1200, "searching"],
-        [1500, "reading"],
-        [1600, "summarizing"],
+        [2200, "searching"],
+        [4000, "reading"],
+        [7500, "wiki"],
+        [9900, "searching"],
+        [14100, "table_analysis"],
+        [15800, "summarizing"],
       ]) {
-        await vi.advanceTimersByTimeAsync(elapsed);
+        await vi.advanceTimersByTimeAsync(at - elapsed);
+        elapsed = at;
         expect(activity.stageType).toBe(stage);
         expect(success.messages[1].content).toBe("");
+        expect(activity.summary).toBe("");
+        expect(activity.processSteps.length).toBeGreaterThan(0);
+        if (stage !== "summarizing") {
+          expect(activity.processSteps.at(-1)).toMatchObject({ status: "running", result: "" });
+          expect(activity.processSteps.slice(0, -1).every((step) => step.status === "complete")).toBe(true);
+        }
       }
-      await vi.advanceTimersByTimeAsync(1500);
+      await vi.advanceTimersByTimeAsync(1000);
       expect(turn.activities).toEqual([activity]);
       expect(activity).toMatchObject({
         stageType: "completed", status: "running", progressText: "正在读取结果", evidence: [],
       });
-      await vi.advanceTimersByTimeAsync(760);
+      expect(activity.processSteps).toHaveLength(9);
+      expect(activity.processSteps.map((step) => step.tool)).toEqual([
+        "query_understand", "search_knowledge", "read_document", "wiki_search",
+        "wiki_read_page", "search_knowledge", "read_document", "read_document", "data_analysis",
+      ]);
+      expect(activity.processSteps.every((step) => step.status === "complete")).toBe(true);
+      expect(activity.processSteps[5].result).toBe("无匹配");
+      await vi.advanceTimersByTimeAsync(1120);
       expect(success.messages[1].content).toBe("");
+      expect(activity.summary).toContain("高量程偏差");
       expect(activity.evidence.every((item) => item.final_citation_number === null)).toBe(true);
       await vi.advanceTimersByTimeAsync(1700);
       expect(success.messages[1].status).toBe("streaming");
@@ -1850,7 +1886,7 @@ describe("演示状态", () => {
         expect(Boolean(first.progressText)).toBe(Boolean(second.progressText));
         if (name === "read_file")
           expect(first.progressText).toBe(second.progressText);
-        await vi.advanceTimersByTimeAsync(8000);
+        await vi.advanceTimersByTimeAsync(generic === "演示过程" ? 56000 : 8000);
         expect(first.status).toBe("complete");
         expect(second.status).toBe("complete");
         expect(hasToolDetail(first)).toBe(true);
@@ -2231,12 +2267,12 @@ describe("演示状态", () => {
       demo.sendDemoMessage(conversation.id, "演示过程", [], [
         { kind: "knowledge_document", id: "doc_case_tracking" },
       ]);
-      await vi.advanceTimersByTimeAsync(1000);
+      await vi.advanceTimersByTimeAsync(5000);
       expect(conversationProcessBlocks(conversation.turns[0])[0].activities).toMatchObject([
         { name: "read_file" },
         { name: "use_knowledge", stageType: "table_analysis" },
       ]);
-      await vi.advanceTimersByTimeAsync(13000);
+      await vi.advanceTimersByTimeAsync(55000);
       expect(conversation.turns[0].activities[1].evidence).toMatchObject([
         {
           kind: "calculation",

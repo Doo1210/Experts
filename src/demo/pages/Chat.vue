@@ -236,43 +236,12 @@
                               class="pc-process-detail"
                               :class="{ 'is-process-manage': step.name === 'process_manage' }"
                             >
-                              <template v-if="step.kind === 'knowledge'">
-                                <div v-if="step.detail">{{ step.detail }}</div>
-                                <ul v-if="knowledgeSources(step).length" class="pc-knowledge-summary">
-                                  <li
-                                    v-for="source in knowledgeSources(step).slice(0, 3)"
-                                    :key="source.id"
-                                    :data-kind="source.kind"
-                                  >
-                                    <i
-                                      class="pc-knowledge-summary-icon"
-                                      :class="source.kind === 'wiki' ? 'el-icon-reading' : 'el-icon-document'"
-                                      aria-hidden="true"
-                                    />
-                                    <div class="pc-knowledge-summary-text">
-                                      <div class="pc-knowledge-summary-title" :title="source.title">
-                                        <span class="pc-knowledge-summary-name">{{ source.name }}</span><span
-                                          v-if="source.suffix"
-                                          class="pc-knowledge-summary-suffix"
-                                        >{{ source.suffix }}</span>
-                                      </div>
-                                      <small
-                                        v-if="source.library"
-                                        class="pc-knowledge-summary-library"
-                                        :title="source.library"
-                                      >{{ source.library }}</small>
-                                    </div>
-                                  </li>
-                                </ul>
-                                <button
-                                  v-if="knowledgeSources(step).length"
-                                  type="button"
-                                  class="pc-knowledge-link"
-                                  aria-haspopup="dialog"
-                                  data-knowledge-source-trigger
-                                  @click="showKnowledgeSources(message, $event, knowledgeEvidenceKey(step, 0))"
-                                >查看本轮引用知识</button>
-                              </template>
+                              <KnowledgeActivityDetail
+                                v-if="step.kind === 'knowledge'"
+                                :activity="step"
+                                :evidence="roundKnowledgeEvidence(message)"
+                                @sources="showKnowledgeSources(message, $event)"
+                              />
                               <template v-else-if="step.kind === 'subagent'">
                                 <div v-if="step.argumentSummary">
                                   任务目标：{{ step.argumentSummary }}
@@ -2729,7 +2698,6 @@ import {
 import { hasToolDetail } from "../conversation-tools";
 import {
   knowledgeActivityLabel,
-  knowledgeActivitySources,
   knowledgeCitationDocuments,
 } from "../knowledge-activity";
 import {
@@ -2739,8 +2707,9 @@ import {
 import ConversationMarkdown from "../components/ConversationMarkdown.vue";
 import ConversationDiff from "../components/ConversationDiff.vue";
 import ConversationLog from "../components/ConversationLog.vue";
-import KnowledgeSourcesPanel from "../components/KnowledgeSourcesPanel.vue";
+import KnowledgeActivityDetail from "../components/KnowledgeActivityDetail.vue";
 import KnowledgeCitationPreview from "../components/KnowledgeCitationPreview.vue";
+import KnowledgeSourcesPanel from "../components/KnowledgeSourcesPanel.vue";
 function approvalDisplayRequest(request) {
   if (request?.kind !== "approval") return request;
   const legacyTitle = {
@@ -2796,8 +2765,9 @@ export default {
     ConversationMarkdown,
     ConversationDiff,
     ConversationLog,
-    KnowledgeSourcesPanel,
+    KnowledgeActivityDetail,
     KnowledgeCitationPreview,
+    KnowledgeSourcesPanel,
   },
   data() {
     return {
@@ -2806,10 +2776,10 @@ export default {
       draftConversation: emptyConversation(),
       taskActionsPaused: false,
       workspaceOpen: false,
-      knowledgeSourceView: null,
-      knowledgeInputHeight: 0,
       knowledgePreview: null,
       knowledgePreviewPosition: { visibility: "hidden" },
+      knowledgeSourceView: null,
+      knowledgeInputHeight: 0,
       taskListOpen: false,
       taskListCollapsed: false,
       isNarrowViewport:
@@ -3374,7 +3344,7 @@ export default {
         .flatMap((turn) =>
           (turn.activities || []).map(
             (activity) =>
-              `${activity.id}:${activity.status}:${activity.progressText || ""}:${activity.detail?.length || 0}:${activity.outputDetail?.length || 0}:${(activity.outputSections || []).length}:${activity.evidence?.length || 0}`,
+              `${activity.id}:${activity.status}:${activity.progressText || ""}:${activity.detail?.length || 0}:${activity.outputDetail?.length || 0}:${(activity.outputSections || []).length}:${activity.evidence?.length || 0}:${activity.summary?.length || 0}:${(activity.processSteps || []).map((step) => step.id + step.status + step.result).join(",")}`,
           ),
         )
         .join("|");
@@ -3383,7 +3353,7 @@ export default {
   mounted() {
     this.model = this.conversation?.model || "gpt-4o";
     window.addEventListener("resize", this.handleViewportResize);
-    document.addEventListener("click", this.dismissKnowledgeSources, true);
+    document.addEventListener("click", this.dismissKnowledgePreview, true);
     if (typeof ResizeObserver !== "undefined") {
       this._resourceResizeObserver = new ResizeObserver(
         this.updateResourceOverflow,
@@ -3423,7 +3393,7 @@ export default {
   },
   beforeDestroy() {
     window.removeEventListener("resize", this.handleViewportResize);
-    document.removeEventListener("click", this.dismissKnowledgeSources, true);
+    document.removeEventListener("click", this.dismissKnowledgePreview, true);
     this.cancelKnowledgePreviewClose();
     this._resourceResizeObserver?.disconnect();
     this._sentResourceResizeObserver?.disconnect();
@@ -3473,8 +3443,8 @@ export default {
       this.expandedActivities = [];
       this.expandedActivityIds = [];
       this.outputDialogVisible = false;
-      this.closeKnowledgeSources(false);
       this.closeKnowledgePreview(false);
+      this.closeKnowledgeSources(false);
       this.referencePickerVisible = false;
       this.cwdPickerVisible = false;
       this.modelPickerVisible = false;
@@ -4335,7 +4305,7 @@ export default {
     },
     hasActivityDetail(activity) {
       if (activity.kind === "knowledge")
-        return Boolean(activity.detail || this.knowledgeSources(activity).length);
+        return Boolean(activity.detail || activity.processSteps?.length || activity.resultStatus || activity.evidence?.length);
       if (activity.kind === "tool") {
         if (this.isRoutineProcessCheck(activity)) {
           if (["running", "requested"].includes(activity.status)) return false;
@@ -4358,21 +4328,20 @@ export default {
       }
       return true;
     },
-    knowledgeSources: knowledgeActivitySources,
     roundKnowledgeActivities(message) {
       return (this.turnFor(message)?.activities || [])
         .filter((activity) => activity.kind === "knowledge");
     },
     roundKnowledgeEvidence(message) {
       return this.roundKnowledgeActivities(message).flatMap((activity) =>
-        activity.evidence.map((item, index) => ({
+        (activity.evidence || []).map((item, index) => ({
           ...item,
-          key: this.knowledgeEvidenceKey(activity, index),
+          key: this.knowledgeEvidenceKey(activity, item, index),
         })),
       );
     },
-    knowledgeEvidenceKey(activity, index) {
-      return `${activity.id}:${index}`;
+    knowledgeEvidenceKey(activity, item, index) {
+      return `${activity.knowledgeRunId || activity.id}:${item.evidence_id || index}`;
     },
     knowledgeCitations(message) {
       return this.roundKnowledgeActivities(message)
@@ -4382,7 +4351,7 @@ export default {
             number: evidence.final_citation_number,
             evidence,
             documents: knowledgeCitationDocuments(evidence),
-            key: this.knowledgeEvidenceKey(activity, index),
+            key: this.knowledgeEvidenceKey(activity, evidence, index),
           })),
         )
         .filter((citation) => Number.isInteger(citation.number))
@@ -4395,21 +4364,13 @@ export default {
       );
       if (citation) this.showKnowledgeSources(message, event, citation.key);
     },
-    previewKnowledgeOriginal(document) {
-      const { original } = document;
-      if (!original) return;
-      this.closeKnowledgePreview(false);
-      this.previewFile({
-        name: original.name,
-        snapshotContent: original.content,
-        knowledgeSource: document,
-      });
-    },
-    showKnowledgeSources(message, event, targetId) {
+    showKnowledgeSources(message, event, targetId = "") {
       this.closeKnowledgePreview(false);
       this.updateKnowledgeInputHeight();
       if (this.$refs.inputArea)
         this._knowledgeInputResizeObserver?.observe(this.$refs.inputArea);
+      if (this.$refs.chatBody)
+        this._knowledgeInputResizeObserver?.observe(this.$refs.chatBody);
       this.knowledgeSourceTrigger = event?.currentTarget;
       const view = { message, targetId };
       this.knowledgeSourceView = view;
@@ -4422,8 +4383,28 @@ export default {
       const body = this.$refs.chatBody;
       const composer = this.$refs.composerBox;
       if (!body || !composer) return;
-      this.knowledgeInputHeight =
-        body.getBoundingClientRect().bottom - composer.getBoundingClientRect().top;
+      this.knowledgeInputHeight = Math.max(
+        0,
+        body.getBoundingClientRect().bottom - composer.getBoundingClientRect().top,
+      );
+    },
+    closeKnowledgeSources(restoreFocus = true) {
+      this._knowledgeInputResizeObserver?.disconnect();
+      this.knowledgeSourceView = null;
+      const trigger = this.knowledgeSourceTrigger;
+      this.knowledgeSourceTrigger = null;
+      if (restoreFocus)
+        this.$nextTick(() => trigger?.focus({ preventScroll: true }));
+    },
+    previewKnowledgeOriginal(document) {
+      const { original } = document;
+      if (!original) return;
+      this.closeKnowledgePreview(false);
+      this.previewFile({
+        name: original.name,
+        snapshotContent: original.content,
+        knowledgeSource: document,
+      });
     },
     previewKnowledgeCitation(message, { numbers, documentId, event }) {
       if (this.previewVisible) return;
@@ -4484,20 +4465,13 @@ export default {
       this.hideResultPathTooltip();
       this.closeKnowledgePreview(false);
     },
-    dismissKnowledgeSources(event) {
+    dismissKnowledgePreview(event) {
       if (this.previewVisible || event.target.closest?.("[data-knowledge-source-trigger]")) return;
       const inPreview = this.$refs.knowledgePreview?.$el.contains(event.target);
       const inSources = this.$refs.knowledgeSources?.$el.contains(event.target);
       if (this.knowledgePreview && !inPreview) this.closeKnowledgePreview(false);
-      if (this.knowledgeSourceView && !inSources && !inPreview) this.closeKnowledgeSources(false);
-    },
-    closeKnowledgeSources(restoreFocus = true) {
-      this._knowledgeInputResizeObserver?.disconnect();
-      this.knowledgeSourceView = null;
-      const trigger = this.knowledgeSourceTrigger;
-      this.knowledgeSourceTrigger = null;
-      if (restoreFocus)
-        this.$nextTick(() => trigger?.focus({ preventScroll: true }));
+      if (this.knowledgeSourceView && !inSources && !inPreview)
+        this.closeKnowledgeSources(false);
     },
     childConversationFor(activity) {
       if (activity.kind !== "subagent" || !activity.childSessionId) return null;
@@ -4569,8 +4543,8 @@ export default {
     },
     newTask() {
       this.taskListOpen = false;
-      this.closeKnowledgeSources(false);
       this.closeKnowledgePreview(false);
+      this.closeKnowledgeSources(false);
       this.draftConversation = emptyConversation();
       this.model = this.draftConversation.model;
       this.draft = "";

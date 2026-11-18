@@ -180,11 +180,63 @@ const calibrationEvidence = [
 const successfulReply =
   "校准 ZX-42 前，先检查接线和传感器外观，再进行零点校验。[1]";
 
+const calibrationProcess = [
+  {
+    tool: "query_understand",
+    queries: ["ZX-42 校准要求"],
+    result: "已完成问题理解",
+  },
+  {
+    tool: "search_knowledge",
+    queries: ["ZX-42 校准与零点校验要求"],
+    result: "命中 6 个片段，来自 3 份文档",
+  },
+  {
+    tool: "read_document",
+    sources: [sources.manual],
+    result: "已读取 3 个片段",
+  },
+  {
+    tool: "wiki_search",
+    queries: ["校准记录", "复核要求"],
+    result: "找到 1 个 Wiki 页面",
+  },
+  { tool: "wiki_read_page", sources: [sources.wiki], result: "已读取页面" },
+  {
+    tool: "search_knowledge",
+    queries: ["ZX-42 高量程偏差处理"],
+    result: "无匹配",
+  },
+  {
+    tool: "read_document",
+    sources: [sources.procedure],
+    result: "已读取 2 个片段",
+  },
+  {
+    tool: "read_document",
+    sources: [sources.handoff],
+    result: "已读取 1 个片段",
+  },
+  {
+    tool: "data_analysis",
+    sources: [sources.inspection],
+    result: "已完成分析，返回 4 条结果",
+  },
+];
+
 export const knowledgeDemoScenes = new Map([
   [
     "演示工具：检索知识",
     {
-      runs: [{ ...documentRun, evidence: calibrationEvidence }],
+      runs: [
+        {
+          ...documentRun,
+          evidence: calibrationEvidence,
+          process: calibrationProcess,
+          summary:
+            "已查到 ZX-42 的设备检查、零点校验和测点登记要求。校准记录需保留示值偏差、复核人及复核时间。本周抽检中有 1 条待复核，高量程偏差的处理要求仍需进一步核对。",
+        },
+      ],
       answer: [
         "## ZX-42 校准与复核",
         "本轮核对覆盖设备准备、测点验证和结果交接。开工前先确认设备和接线状态，再校验零点、逐项记录各测点结果。发现异常时保留原始记录，交给复核人员确认后再继续。[1][2][3][4][5]",
@@ -248,6 +300,7 @@ export const knowledgeDemoScenes = new Map([
           method: "wiki",
           status: "success",
           evidence: [wikiEvidence],
+          summary: wikiExcerpt,
         },
         {
           method: "table_analysis",
@@ -269,6 +322,103 @@ export const knowledgeDemoScenes = new Map([
     },
   ],
 ]);
+
+export function knowledgeProcessForRun(run, query) {
+  if (run.process) return run.process;
+  const understanding = {
+    tool: "query_understand",
+    queries: [query],
+    result: "已完成问题理解",
+  };
+  if (run.terminal) {
+    return [
+      understanding,
+      {
+        tool: "search_knowledge",
+        queries: [query],
+        result: {
+          failed: "当前没有访问所选资料的权限",
+          cancelled: "检索已取消",
+          timed_out: "检索超时",
+        }[run.terminal],
+        status: run.terminal === "cancelled" ? "interrupted" : "error",
+      },
+    ];
+  }
+  const evidence = (run.evidence || []).filter(
+    (item) => item.access === "available",
+  );
+  const documents = new Map();
+  const pages = new Map();
+  const process = [understanding];
+  for (const item of evidence) {
+    if (item.kind === "hit" && item.source && item.hit) {
+      const source = item.source;
+      const id = source.document_id || source.locator?.document_id || source.id;
+      if (!documents.has(id)) documents.set(id, { source, hits: new Set() });
+      documents.get(id).hits.add(item.hit.id || item.evidence_id);
+    }
+    if (item.kind === "source" && item.source?.kind === "wiki") {
+      pages.set(item.source.id, item.source);
+    }
+  }
+  if (
+    documents.size ||
+    (!pages.size && !evidence.some((item) => item.kind === "calculation"))
+  ) {
+    const count = [...documents.values()].reduce(
+      (total, document) => total + document.hits.size,
+      0,
+    );
+    process.push({
+      tool: "search_knowledge",
+      queries: [query],
+      result: count
+        ? `命中 ${count} 个片段，来自 ${documents.size} 份文档`
+        : "无匹配",
+    });
+  }
+  for (const { source, hits } of documents.values()) {
+    process.push({
+      tool: "read_document",
+      sources: [source],
+      result: `已读取 ${hits.size} 个片段`,
+    });
+  }
+  if (pages.size) {
+    process.push({
+      tool: "wiki_search",
+      queries: [query],
+      result: `找到 ${pages.size} 个 Wiki 页面`,
+    });
+    process.push({
+      tool: "wiki_read_page",
+      sources: [...pages.values()],
+      result: "已读取页面",
+    });
+  }
+  for (const item of evidence.filter((entry) => entry.kind === "calculation")) {
+    process.push({
+      tool: "data_analysis",
+      sources: item.calculation_sources,
+      result: item.calculation.summary,
+    });
+  }
+  return process;
+}
+
+export function knowledgeSummaryForRun(run) {
+  if (run.summary) return run.summary;
+  const evidence = (run.evidence || []).filter(
+    (item) => item.access === "available",
+  );
+  const excerpts = evidence
+    .map((item) => item.hit?.text || item.calculation?.summary)
+    .filter(Boolean);
+  return excerpts.length
+    ? [...new Set(excerpts)].slice(0, 2).join("\n\n")
+    : "本次检索范围内未找到可用资料。";
+}
 
 export function processKnowledgeDemo(referenceScene) {
   return {

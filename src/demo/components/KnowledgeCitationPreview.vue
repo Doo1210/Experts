@@ -37,11 +37,12 @@
     </div>
     <div ref="excerpt" class="pc-citation-preview-list">
       <p v-if="fragments.length">{{ fragments[activeIndex] }}</p>
+      <p v-else-if="wikiExcerpt">{{ wikiExcerpt }}</p>
       <p v-else-if="document.kind === 'wiki'">
         {{
           document.original
-            ? "点击「查看」阅读完整页面"
-            : "点击引用标签定位 Wiki 页面"
+            ? "暂无可预览内容，点击「查看」阅读完整页面"
+            : "暂未取得 Wiki 页面内容"
         }}
       </p>
       <p v-else>{{ document.id ? "暂无命中片段" : "当前无法访问此资料" }}</p>
@@ -59,6 +60,8 @@
 </template>
 
 <script>
+import { wikiPageExcerpt } from "../knowledge-citation-content";
+
 export default {
   props: {
     document: { type: Object, required: true },
@@ -68,6 +71,9 @@ export default {
     return { activeIndex: 0 };
   },
   computed: {
+    wikiExcerpt() {
+      return wikiPageExcerpt(this.document, this.evidence);
+    },
     fragments() {
       return [
         ...new Set(

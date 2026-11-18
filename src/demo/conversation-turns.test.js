@@ -32,6 +32,56 @@ function makeConversation() {
 }
 
 describe("本地回合事件", () => {
+  it("知识过程在同一次调用内追加和完成，隔离消息并恢复历史", () => {
+    const session = makeConversation();
+    const emit = (type, seq, data) =>
+      applyConversationEvent(session, {
+        type,
+        seq,
+        sessionId: session.id,
+        turnId: "turn1",
+        data: { message_id: "u1", knowledge_run_id: "k1", ...data },
+      });
+    emit("extension_knowledge_stage", 1, { stage: { type: "searching" } });
+    const step = {
+      id: "s1",
+      tool: "search_knowledge",
+      queries: ["校准要求"],
+      status: "running",
+      result: "",
+    };
+    expect(emit("knowledge.process", 2, { step })).toBe(true);
+    expect(emit("knowledge.process", 3, { message_id: "other", step })).toBe(
+      false,
+    );
+    expect(
+      emit("knowledge.process", 3, {
+        step: { ...step, status: "complete", result: "无匹配" },
+      }),
+    ).toBe(true);
+    expect(emit("knowledge.process", 2, { step })).toBe(false);
+    emit("knowledge.process", 4, {
+      step: { ...step, id: "s2", queries: ["零点校验"] },
+    });
+    emit("knowledge.process", 5, {
+      step: { ...step, id: "s2", status: "complete", result: "命中 1 个片段" },
+    });
+    emit("knowledge.result", 6, {
+      status: "success",
+      summary: "已查到零点校验要求。",
+    });
+    expect(emit("knowledge.process", 7, { step })).toBe(false);
+    const restored = JSON.parse(JSON.stringify(session));
+    normalizeConversationTurns(restored);
+    const [activity] = restored.turns[0].activities;
+    expect(
+      activity.processSteps.map((item) => [item.id, item.status, item.result]),
+    ).toEqual([
+      ["s1", "complete", "无匹配"],
+      ["s2", "complete", "命中 1 个片段"],
+    ]);
+    expect(activity.summary).toBe("已查到零点校验要求。");
+  });
   it("知识阶段按调用关联，旧帧不能回退，回合结束后可补齐结果和证据", () => {
     const session = makeConversation();
     const apply = (type, seq, data = {}) =>

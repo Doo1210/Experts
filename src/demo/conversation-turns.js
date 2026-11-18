@@ -12,6 +12,8 @@ import {
   knowledgeAction,
   knowledgeErrors,
   knowledgeResults,
+  knowledgeProcessActions,
+  knowledgeProcessStages,
   knowledgeStages,
   knowledgeWarnings,
 } from "./knowledge-activity";
@@ -133,6 +135,8 @@ function getOrAddKnowledgeActivity(turn, data, seq) {
     progressText: "",
     statusText: "",
     detail: "",
+    processSteps: [],
+    summary: "",
     evidence: [],
     answerMessageId: null,
     startedSeq: seq,
@@ -415,6 +419,16 @@ export function normalizeConversationTurns(conversation) {
       }
     }
     for (const activity of turn.activities || []) {
+      if (activity.kind === "knowledge") {
+        if (!Array.isArray(activity.processSteps)) {
+          activity.processSteps = [];
+          changed = true;
+        }
+        if (typeof activity.summary !== "string") {
+          activity.summary = "";
+          changed = true;
+        }
+      }
       if (activity.kind === "tool") {
         if (!Array.isArray(activity.outputSections)) {
           activity.outputSections = [];
@@ -491,6 +505,7 @@ export function applyConversationEvent(conversation, event) {
     "extension_knowledge_stage",
     "knowledge.result",
     "knowledge.evidence",
+    "knowledge.process",
   ].includes(event.type);
   const knowledgeData = knowledgeEvent ? event.data : null;
   const knowledgeActivity = knowledgeData
@@ -525,6 +540,7 @@ export function applyConversationEvent(conversation, event) {
       "extension_knowledge_stage",
       "knowledge.result",
       "knowledge.evidence",
+      "knowledge.process",
       "activity.start",
       "activity.progress",
       "activity.delta",
@@ -588,6 +604,17 @@ export function applyConversationEvent(conversation, event) {
       return false;
   }
   if (
+    event.type === "knowledge.process" &&
+    (!knowledgeActivity ||
+      knowledgeActivity.status !== "running" ||
+      !knowledgeData.step?.id ||
+      !Object.hasOwn(knowledgeProcessActions, knowledgeData.step.tool) ||
+      !["running", "complete", "error", "interrupted"].includes(
+        knowledgeData.step.status,
+      ))
+  )
+    return false;
+  if (
     event.type === "knowledge.result" &&
     !Object.hasOwn(knowledgeResults, knowledgeData.status)
   )
@@ -599,6 +626,16 @@ export function applyConversationEvent(conversation, event) {
     return false;
   turn.lastSeq = event.seq;
   switch (event.type) {
+    case "knowledge.process": {
+      const steps = knowledgeActivity.processSteps;
+      const step = knowledgeData.step;
+      const index = steps.findIndex((item) => item.id === step.id);
+      if (index >= 0 && steps[index].status !== "running") break;
+      const snapshot = JSON.parse(JSON.stringify(step));
+      if (index >= 0) steps.splice(index, 1, snapshot);
+      else steps.push(snapshot);
+      break;
+    }
     case "extension_knowledge_stage": {
       const activity = getOrAddKnowledgeActivity(
         turn,
@@ -612,7 +649,14 @@ export function applyConversationEvent(conversation, event) {
         cancelled: "interrupted",
         timed_out: "error",
       }[type];
-      activity.progressText = status ? "" : knowledgeStages[type];
+      const currentStep = activity.processSteps.find(
+        (step) => step.status === "running",
+      );
+      const progressText =
+        currentStep && knowledgeProcessStages[currentStep.tool] === type
+          ? knowledgeProcessActions[currentStep.tool]
+          : knowledgeStages[type];
+      activity.progressText = status ? "" : progressText;
       if (status) {
         activity.status = status;
         activity.statusText = knowledgeStages[type];
@@ -635,6 +679,8 @@ export function applyConversationEvent(conversation, event) {
       );
       activity.status = "complete";
       activity.resultStatus = knowledgeData.status;
+      activity.summary =
+        typeof knowledgeData.summary === "string" ? knowledgeData.summary : "";
       activity.progressText = "";
       activity.statusText = knowledgeResults[knowledgeData.status];
       activity.detail =
@@ -1144,6 +1190,11 @@ export function applyConversationEvent(conversation, event) {
             activity.status = "unknown";
           }
           activity.progressText = "";
+          for (const step of activity.processSteps || []) {
+            if (step.status !== "running") continue;
+            step.status = status === "interrupted" ? "interrupted" : "unknown";
+            step.result = status === "interrupted" ? "已取消" : "结果未确认";
+          }
         }
       conversation.status = "ready";
       break;
