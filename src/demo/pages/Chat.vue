@@ -3551,6 +3551,10 @@ export default {
     composerConfigSignature() {
       this.$nextTick(this.updateComposerConfigLayout);
     },
+    "reader.tabs.length"(count, previous) {
+      if (Boolean(count) !== Boolean(previous))
+        this.$nextTick(this.updateReaderBounds);
+    },
     taskPanelWidth() {
       this.$nextTick(this.updateReaderBounds);
     },

@@ -69,22 +69,6 @@
         <div class="pc-knowledge-step-content">
           <strong class="pc-knowledge-step-action">完成检索</strong>
           <p class="pc-knowledge-result-counts">{{ returnedSummary }}</p>
-          <p
-            v-if="activity.summary"
-            ref="summary"
-            class="pc-knowledge-result-summary"
-            :class="{ 'is-expanded': summaryExpanded }"
-          >
-            {{ activity.summary }}
-          </p>
-          <button
-            v-if="summaryOverflow"
-            type="button"
-            class="pc-knowledge-link pc-knowledge-summary-toggle"
-            @click="summaryExpanded = !summaryExpanded"
-          >
-            {{ summaryExpanded ? "收起" : "展开" }}
-          </button>
         </div>
       </li>
     </ol>
@@ -113,9 +97,6 @@ const processIcons = {
 export default {
   props: {
     activity: { type: Object, required: true },
-  },
-  data() {
-    return { summaryExpanded: false, summaryOverflow: false };
   },
   computed: {
     returnedSummary() {
@@ -147,31 +128,6 @@ export default {
     finished() {
       return ["success", "partial", "empty"].includes(
         this.activity.resultStatus,
-      );
-    },
-  },
-  mounted() {
-    if (typeof ResizeObserver !== "undefined") {
-      this.summaryObserver = new ResizeObserver(this.measureSummary);
-      this.summaryObserver.observe(this.$el);
-    }
-    this.measureSummary();
-  },
-  beforeDestroy() {
-    this.summaryObserver?.disconnect();
-  },
-  watch: {
-    "activity.summary"() {
-      this.summaryExpanded = false;
-      this.$nextTick(this.measureSummary);
-    },
-  },
-  methods: {
-    measureSummary() {
-      if (this.summaryExpanded) return;
-      const summary = this.$refs.summary;
-      this.summaryOverflow = Boolean(
-        summary && summary.scrollHeight > summary.clientHeight + 1,
       );
     },
   },

@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import Vue from "vue";
 import Chat from "./pages/Chat.vue";
 import { createFileReader, READER_DEFAULT_WIDTH } from "./file-reader";
 import {
@@ -258,4 +259,70 @@ describe("打开文件与收起展开也遵守布局边界", () => {
     expect(context.taskPanelWidth).toBe(160);
     expect(context.workspacePanelWidth).toBe(160);
   });
+});
+
+describe("关闭预览后释放的空间全部交给对话区", () => {
+  it.each([
+    ["关闭整个预览区", false, true, false],
+    ["关闭最后一个文件标签", false, true, true],
+    ["任务列表已收起", true, true, false],
+    ["工作空间已隐藏", false, false, true],
+  ])(
+    "%s后重新计算宽度，不在面板右侧留空",
+    async (_, collapsed, workspaceOpen, closeTabs) => {
+      const vm = new Vue({
+        data: () => ({
+          reader: createFileReader(),
+          taskListCollapsed: collapsed,
+          workspaceOpen,
+          taskPanelWidth: 200,
+          workspacePanelWidth: 200,
+          panelContainerWidth: 1400,
+          conversationMaxWidth: Infinity,
+          taskMaxWidth: 480,
+          workspaceMaxWidth: 480,
+          readerMaxWidth: 440,
+        }),
+        methods: {
+          closeReader: Chat.methods.closeReader,
+          closeReaderFile: Chat.methods.closeReaderFile,
+          updateReaderBounds: Chat.methods.updateReaderBounds,
+          revealReaderWorkspaceFile: vi.fn(),
+        },
+        watch: Object.fromEntries(
+          Object.entries(Chat.watch).filter(
+            ([name]) => name === "reader.tabs.length",
+          ),
+        ),
+      });
+      try {
+        vm.$refs.chatBody = { clientWidth: 1400 };
+        vm.reader.tabs = [{ key: "first" }, { key: "last" }];
+        vm.reader.activeKey = "first";
+        vm.updateReaderBounds();
+        await vm.$nextTick();
+        await vm.$nextTick();
+        const before = vm.conversationMaxWidth;
+        if (closeTabs) {
+          vm.closeReaderFile("first");
+          await vm.$nextTick();
+          await vm.$nextTick();
+          expect(vm.conversationMaxWidth).toBe(before);
+          vm.closeReaderFile("last");
+        } else vm.closeReader();
+        await vm.$nextTick();
+        await vm.$nextTick();
+        const remaining =
+          1400 - (collapsed ? 0 : 200) - (workspaceOpen ? 200 : 0);
+        expect(vm.reader.tabs).toHaveLength(0);
+        expect(vm.conversationMaxWidth).toBeGreaterThanOrEqual(remaining);
+        expect(vm.workspaceOpen).toBe(workspaceOpen);
+        expect(vm.taskListCollapsed).toBe(collapsed);
+        expect(vm.workspacePanelWidth).toBe(200);
+        expect(vm.taskPanelWidth).toBe(200);
+      } finally {
+        vm.$destroy();
+      }
+    },
+  );
 });

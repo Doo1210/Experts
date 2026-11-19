@@ -1183,27 +1183,8 @@
 .pc-knowledge-step-result.is-error {
   color: #a76666;
 }
-.pc-knowledge-result-summary {
-  display: -webkit-box;
-  margin: 3px 0 0;
-  overflow: hidden;
-  color: #667085;
-  font-size: 12px;
-  line-height: 1.6;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 4;
-}
-.pc-knowledge-result-summary.is-expanded {
-  display: block;
-}
 .pc-knowledge-summary-entry .pc-knowledge-step-icon {
   color: #6b8776;
-}
-.pc-knowledge-summary-toggle {
-  margin-top: 3px;
-  font-size: 11px;
 }
 .pc-knowledge-notice {
   margin: 8px 0 0 24px;
