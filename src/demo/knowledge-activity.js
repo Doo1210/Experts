@@ -101,7 +101,7 @@ export function knowledgeSourceDocument(source) {
   };
 }
 
-export function knowledgeEvidenceSummary(evidence = []) {
+export function knowledgeEvidenceSummary(evidence = [], includeZero = false) {
   const chunks = new Set();
   const pages = new Set();
   const calculations = new Set();
@@ -126,9 +126,9 @@ export function knowledgeEvidenceSummary(evidence = []) {
     }
   }
   return [
-    chunks.size ? `${chunks.size} 个文档片段` : "",
-    pages.size ? `${pages.size} 个 Wiki 页面` : "",
-    calculations.size ? `${calculations.size} 项计算结果` : "",
+    chunks.size || includeZero ? `${chunks.size} 个文档片段` : "",
+    pages.size || includeZero ? `${pages.size} 个 Wiki 页面` : "",
+    calculations.size || includeZero ? `${calculations.size} 项计算结果` : "",
   ]
     .filter(Boolean)
     .join("、");

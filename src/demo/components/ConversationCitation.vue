@@ -3,11 +3,8 @@
     type="button"
     class="pc-knowledge-citation"
     :data-kind="token.kind"
-    aria-haspopup="dialog"
-    data-knowledge-source-trigger
+    aria-controls="pc-file-reader"
     :aria-label="`查看引用 ${token.title}`"
-    @mouseenter="emitCitation('citation-enter', $event)"
-    @mouseleave="$emit('citation-leave')"
     @click="emitCitation('citation', $event)"
   >
     <i

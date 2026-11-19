@@ -68,6 +68,7 @@
         />
         <div class="pc-knowledge-step-content">
           <strong class="pc-knowledge-step-action">完成检索</strong>
+          <p class="pc-knowledge-result-counts">{{ returnedSummary }}</p>
           <p
             v-if="activity.summary"
             ref="summary"
@@ -83,17 +84,6 @@
             @click="summaryExpanded = !summaryExpanded"
           >
             {{ summaryExpanded ? "收起" : "展开" }}
-          </button>
-          <button
-            v-if="evidenceSummary"
-            type="button"
-            class="pc-knowledge-result-counts pc-knowledge-sources-trigger"
-            data-knowledge-source-trigger
-            aria-haspopup="dialog"
-            aria-controls="pc-knowledge-sources"
-            @click="$emit('sources', $event)"
-          >
-            本轮引用知识：{{ evidenceSummary }}
           </button>
         </div>
       </li>
@@ -123,12 +113,14 @@ const processIcons = {
 export default {
   props: {
     activity: { type: Object, required: true },
-    evidence: { type: Array, default: null },
   },
   data() {
     return { summaryExpanded: false, summaryOverflow: false };
   },
   computed: {
+    returnedSummary() {
+      return `共返回 ${knowledgeEvidenceSummary(this.activity.evidence, true)}`;
+    },
     steps() {
       return (this.activity.processSteps || []).map((step) => ({
         ...step,
@@ -156,11 +148,6 @@ export default {
       return ["success", "partial", "empty"].includes(
         this.activity.resultStatus,
       );
-    },
-    evidenceSummary() {
-      return knowledgeEvidenceSummary(
-        this.evidence || this.activity.evidence,
-      ).replace("个文档片段", "个片段");
     },
   },
   mounted() {

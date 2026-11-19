@@ -1,3 +1,9 @@
+import {
+  QUALITY_REPORT_CONTENT,
+  QUALITY_SUMMARY_CONTENT,
+  createBatchReport,
+} from "./file-demo-content";
+
 // Local-only tool lifecycle fixtures. None of these calls execute a real tool.
 export function readFileActivityScene(path, sourceContent = "", limit = 2000) {
   const source = String(sourceContent || "");
@@ -24,7 +30,10 @@ export function executionSceneForFile(scene, path, sourceContent) {
   if (scene.trigger === "演示工具：执行命令") {
     const last = lines.at(-1) || "";
     const date = last.split(",")[0];
-    const stem = path.split("/").at(-1).replace(/\.[^.]+$/, "");
+    const stem = path
+      .split("/")
+      .at(-1)
+      .replace(/\.[^.]+$/, "");
     const needle = /^\d{4}-\d{2}-\d{2}$/.test(date)
       ? date
       : stem && sourceContent.includes(stem)
@@ -42,7 +51,9 @@ export function executionSceneForFile(scene, path, sourceContent) {
       result: {
         output: needle
           ? lines
-              .map((line, index) => (line.includes(needle) ? `${index + 1}:${line}` : ""))
+              .map((line, index) =>
+                line.includes(needle) ? `${index + 1}:${line}` : "",
+              )
               .filter(Boolean)
               .join("\n")
           : `0 ${path}`,
@@ -52,7 +63,8 @@ export function executionSceneForFile(scene, path, sourceContent) {
     };
   }
   if (scene.trigger === "演示工具：运行代码") {
-    const rates = lines.slice(1)
+    const rates = lines
+      .slice(1)
       .map((line) => /(?:^|,)\s*(\d+(?:\.\d+)?)%/.exec(line)?.[1])
       .filter(Boolean)
       .map(Number);
@@ -92,9 +104,12 @@ export function executionSceneForFile(scene, path, sourceContent) {
       "演示工具：等待后台进程",
     ].includes(scene.trigger)
   ) {
-    const label = path.split("/").at(-1)
-      .replace(/[^\p{L}\p{N}._-]/gu, "")
-      .slice(0, 60) || "工作资料";
+    const label =
+      path
+        .split("/")
+        .at(-1)
+        .replace(/[^\p{L}\p{N}._-]/gu, "")
+        .slice(0, 60) || "工作资料";
     const started = `开始核对 ${label}`;
     if (scene.trigger === "演示工具：启动后台命令")
       return {
@@ -106,9 +121,10 @@ export function executionSceneForFile(scene, path, sourceContent) {
       };
     return {
       ...scene,
-      result: scene.trigger === "演示工具：后台进程"
-        ? { ...scene.result, output_preview: started }
-        : { ...scene.result, output: started },
+      result:
+        scene.trigger === "演示工具：后台进程"
+          ? { ...scene.result, output_preview: started }
+          : { ...scene.result, output: started },
     };
   }
   return scene;
@@ -128,11 +144,11 @@ export const TOOL_ACTIVITY_SCENES = [
   {
     trigger: "演示工具：写入文件",
     name: "write_file",
-    args: { path: "报告.md", content: "# 演示报告\n质量数据仅用于原型展示。" },
+    args: { path: "报告.md", content: QUALITY_REPORT_CONTENT },
     result: { verified: true },
     artifact: {
       name: "报告.md",
-      content: "# 演示报告\n质量数据仅用于原型展示。",
+      content: QUALITY_REPORT_CONTENT,
     },
   },
   {
@@ -248,44 +264,79 @@ export const TOOL_ACTIVITY_SCENES = [
   {
     trigger: "演示工具：执行命令",
     name: "terminal",
-    args: { command: "rg -n -F -- '2026-10-09' '分析资料/良率样例.csv'", workdir: "/workspace", timeout: 30 },
+    args: {
+      command: "rg -n -F -- '2026-10-09' '分析资料/良率样例.csv'",
+      workdir: "/workspace",
+      timeout: 30,
+    },
     result: { output: "3:2026-10-09,96.8%", exit_code: 0, error: null },
   },
   {
     trigger: "演示工具：启动后台命令",
     name: "terminal",
-    args: { command: "python -u -c \"import time; print('质量核对已启动', flush=True); time.sleep(8); print('质量核对完成', flush=True)\"", workdir: "/workspace", background: true, notify: true },
-    result: { output: "Background process started", session_id: "proc_4dae56ca81f6", exit_code: 0, error: null },
+    args: {
+      command:
+        "python -u -c \"import time; print('质量核对已启动', flush=True); time.sleep(8); print('质量核对完成', flush=True)\"",
+      workdir: "/workspace",
+      background: true,
+      notify: true,
+    },
+    result: {
+      output: "Background process started",
+      session_id: "proc_4dae56ca81f6",
+      exit_code: 0,
+      error: null,
+    },
   },
   {
     trigger: "演示工具：长详情",
     name: "terminal",
-    args: { command: "python -c \"for i in range(1, 61): print(f'批次 B{i:03d}  抽检=200  良率={97.5 - i % 9 * 0.1:.1f}%')\"", workdir: "/workspace" },
+    args: {
+      command:
+        "python -c \"for i in range(1, 61): print(f'批次 B{i:03d}  抽检=200  良率={97.5 - i % 9 * 0.1:.1f}%')\"",
+      workdir: "/workspace",
+    },
     result: {
       exit_code: 0,
       output: Array.from(
         { length: 60 },
-        (_, index) => `批次 B${String(index + 1).padStart(3, "0")}  抽检=200  良率=${(97.5 - ((index + 1) % 9) * 0.1).toFixed(1)}%`,
+        (_, index) =>
+          `批次 B${String(index + 1).padStart(3, "0")}  抽检=200  良率=${(97.5 - ((index + 1) % 9) * 0.1).toFixed(1)}%`,
       ).join("\n"),
     },
   },
   {
     trigger: "演示工具：运行代码",
     name: "execute_code",
-    args: { code: "rates = [97.2, 96.8]\nprint(f\"样本：{len(rates)} 天，平均良率：{sum(rates) / len(rates):.2f}%\")\nprint(f\"最低良率：{min(rates):.2f}%\")", reset: true },
-    result: { status: "success", output: "样本：2 天，平均良率：97.00%\n最低良率：96.80%", exit_code: 0 },
+    args: {
+      code: 'rates = [97.2, 96.8]\nprint(f"样本：{len(rates)} 天，平均良率：{sum(rates) / len(rates):.2f}%")\nprint(f"最低良率：{min(rates):.2f}%")',
+      reset: true,
+    },
+    result: {
+      status: "success",
+      output: "样本：2 天，平均良率：97.00%\n最低良率：96.80%",
+      exit_code: 0,
+    },
   },
   {
     trigger: "演示工具：后台进程",
     name: "process_manage",
     args: { action: "poll", session_id: "proc_4dae56ca81f6" },
-    result: { status: "running", session_id: "proc_4dae56ca81f6", output_preview: "质量核对已启动" },
+    result: {
+      status: "running",
+      session_id: "proc_4dae56ca81f6",
+      output_preview: "质量核对已启动",
+    },
   },
   {
     trigger: "演示工具：等待后台进程",
     name: "process_manage",
     args: { action: "wait", session_id: "proc_4dae56ca81f6", timeout: 5 },
-    result: { status: "timeout", process_running: true, output: "质量核对已启动" },
+    result: {
+      status: "timeout",
+      process_running: true,
+      output: "质量核对已启动",
+    },
   },
   {
     trigger: "演示工具：操作浏览器",
@@ -464,11 +515,11 @@ export const TOOL_ACTIVITY_SCENES = [
     baseTrigger: "演示工具：写入文件",
     args: {
       path: "演示核对报告.md",
-      content: "# 演示核对报告\n仅供原型展示。",
+      content: QUALITY_REPORT_CONTENT,
     },
     artifact: {
       name: "演示核对报告.md",
-      content: "# 演示核对报告\n仅供原型展示。",
+      content: QUALITY_REPORT_CONTENT,
     },
   },
   {
@@ -478,7 +529,7 @@ export const TOOL_ACTIVITY_SCENES = [
     artifact: null,
     artifacts: Array.from({ length: 12 }, (_, index) => ({
       name: `批次报告-${String(index + 1).padStart(2, "0")}.md`,
-      content: `# 批次报告 ${index + 1}\n本文件仅用于演示多产出文件的浏览。`,
+      content: createBatchReport(index),
     })),
   },
   {
@@ -490,11 +541,11 @@ export const TOOL_ACTIVITY_SCENES = [
     baseTrigger: "演示工具：写入文件",
     args: {
       path: "质量核对摘要.md",
-      content: "# 质量核对摘要\n已核对演示良率样例。",
+      content: QUALITY_SUMMARY_CONTENT,
     },
     artifact: {
       name: "质量核对摘要.md",
-      content: "# 质量核对摘要\n已核对演示良率样例。",
+      content: QUALITY_SUMMARY_CONTENT,
     },
     followupTrigger: "演示工具：修改文件",
   },

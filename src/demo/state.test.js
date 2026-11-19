@@ -23,6 +23,22 @@ beforeEach(async () => {
 });
 
 describe("演示状态", () => {
+  it("文件样例升级只补齐新报告，刷新后不补回已删除文件", () => {
+    const saved = demo.createSeed();
+    const quality = saved.experts.find((expert) => expert.id === "exp_quality");
+    quality.files = quality.files.filter((file) => file.id !== "f_quality_report");
+    quality.files.push({ id: "saved-report", kind: "file", name: "演示核对报告.md", content: "# 演示核对报告\n仅供原型展示。" });
+    saved.demoDataRevision = 29;
+    demo.upgradeExpertFixtures(saved);
+    const report = quality.files.find((file) => file.id === "f_quality_report");
+    expect(report.parentId).toBe("f_quality_docs");
+    expect(report.content).toContain("每日检验统计");
+    expect(quality.files.find((file) => file.id === "saved-report").content).toContain("10,000");
+    quality.files = quality.files.filter((file) => file.id !== "f_quality_report");
+    demo.upgradeExpertFixtures(saved);
+    expect(quality.files.some((file) => file.id === "f_quality_report")).toBe(false);
+  });
+
   it("消息渠道名单按专家与平台隔离，升级保留已有目标", () => {
     const seed = demo.createSeed();
     const quality = seed.experts.find((item) => item.id === "exp_quality");
@@ -418,7 +434,7 @@ describe("演示状态", () => {
     expect(chat.segments[0].messages.some((entry) => entry.id === "wecom-single-running-tool")).toBe(true);
     expect(event).toMatchObject({ displayName: "停机检查", archived: true });
     expect(event.runs.some((run) => run.id === "run_pulsar_live" && run.status === "running")).toBe(true);
-    expect(upgraded.demoDataRevision).toBe(29);
+    expect(upgraded.demoDataRevision).toBe(demo.createSeed().demoDataRevision);
   });
   it("旧单聊样例迁移为无范围结构并保留会话内容", () => {
     const saved = demo.createSeed();
@@ -981,11 +997,17 @@ describe("演示状态", () => {
       expect(generated.every((result) => result.operation === "created")).toBe(
         true,
       );
-      expect(
-        generated.every((result) =>
-          result.snapshotContent.includes("本文件仅用于演示"),
-        ),
-      ).toBe(true);
+      const artifacts = TOOL_ACTIVITY_SCENES.find(
+        (scene) => scene.trigger === "演示产出：多个文件",
+      ).artifacts;
+      expect(generated.map((result) => result.snapshotContent)).toEqual(
+        artifacts.map((artifact) => artifact.content),
+      );
+      const generatedFile = demo.expertById("exp_quality").files.find(
+        (file) => file.id === generated[0].fileId,
+      );
+      generatedFile.content = "后续回合更新了工作空间文件";
+      expect(generated[0].snapshotContent).toBe(artifacts[0].content);
 
       const source = demo
         .expertById("exp_quality")

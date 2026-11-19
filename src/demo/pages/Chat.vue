@@ -1,5 +1,16 @@
 <template>
-  <div v-if="expert" class="pc-chat">
+  <div
+    v-if="expert"
+    class="pc-chat"
+    :style="{
+      '--pc-task-width': taskPanelWidth + 'px',
+      '--pc-workspace-width': workspacePanelWidth + 'px',
+      '--pc-conversation-max-width': Number.isFinite(conversationMaxWidth)
+        ? conversationMaxWidth + 'px'
+        : '100%',
+      minWidth: panelMinimumWidth + 2 + 'px',
+    }"
+  >
     <header class="pc-top">
       <div class="pc-top-left">
         <button class="pc-back" aria-label="返回专家列表" @click="back">
@@ -18,25 +29,6 @@
         </button>
       </div>
       <div class="pc-top-actions">
-        <button
-          class="pc-primary"
-          title="新建任务"
-          aria-label="新建任务"
-          @click="newTask"
-        >
-          <i class="el-icon-plus" /> 新建任务</button
-        ><button
-          type="button"
-          class="pc-outline pc-panel-toggle"
-          :class="{ active: taskListVisible }"
-          :title="taskListVisible ? '收起任务列表' : '展开任务列表'"
-          :aria-label="taskListVisible ? '收起任务列表' : '展开任务列表'"
-          :aria-expanded="taskListVisible ? 'true' : 'false'"
-          aria-controls="pc-task-panel"
-          @click="toggleTaskList"
-        >
-          <i class="el-icon-tickets" /> 任务列表
-        </button>
         <button
           type="button"
           class="pc-outline pc-panel-toggle"
@@ -57,16 +49,205 @@
       }}</span>
     </div>
     <div ref="chatBody" class="pc-body">
+      <div class="pc-task-compact-actions" aria-label="任务操作">
+        <button
+          type="button"
+          class="pc-task-collapse"
+          :title="taskListCollapsed ? '展开任务列表' : '收起任务列表'"
+          :aria-label="taskListCollapsed ? '展开任务列表' : '收起任务列表'"
+          :aria-expanded="!taskListCollapsed"
+          aria-controls="pc-task-panel"
+          @click="toggleTaskList"
+        >
+          <i
+            :class="taskListCollapsed ? 'el-icon-s-unfold' : 'el-icon-s-fold'"
+            aria-hidden="true"
+          />
+        </button>
+        <button
+          v-if="taskListCollapsed"
+          type="button"
+          class="pc-task-create"
+          title="新建任务"
+          aria-label="新建任务"
+          @click="newTask"
+        >
+          <i class="el-icon-plus" aria-hidden="true" />
+        </button>
+      </div>
+      <aside
+        id="pc-task-panel"
+        class="pc-tasks"
+        aria-label="任务列表"
+        :class="{
+          'is-action-reveal-paused': taskActionsPaused,
+          'is-collapsed': taskListCollapsed,
+        }"
+        @mousemove="taskActionsPaused = false"
+        @mouseleave="taskActionsPaused = false"
+      >
+        <PanelResizeHandle
+          side="right"
+          label="调整任务列表宽度"
+          controls="pc-task-panel"
+          :width="taskPanelWidth"
+          :min-width="sidebarMinWidth"
+          :max-width="taskMaxWidth"
+          @resize="resizeSidebar('task', $event)"
+        />
+        <div class="pc-task-header">
+          <button
+            type="button"
+            class="pc-task-create"
+            aria-label="新建任务"
+            @click="newTask"
+          >
+            <i class="el-icon-plus" aria-hidden="true" /> 新建任务
+          </button>
+        </div>
+        <div
+          v-show="!taskListCollapsed"
+          id="pc-task-list"
+          class="pc-task-scroll"
+        >
+          <div class="pc-task-list">
+            <div
+              v-for="item in visibleConversations"
+              :key="item.id"
+              class="pc-task"
+              :class="{
+                active: conversation && item.id === conversation.id,
+                pinned: !!item.pinned,
+              }"
+              @mouseenter="startTaskMarquee(item, $event)"
+              @mouseleave="stopTaskMarquee($event)"
+              @focusin="startTaskMarquee(item, $event)"
+              @focusout="stopTaskMarquee($event)"
+              @click="selectTask(item)"
+            >
+              <span
+                v-if="item.pinned"
+                class="pc-task-pinned-marker"
+                role="img"
+                aria-label="已置顶"
+                title="已置顶"
+              >
+                <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                  <g transform="translate(-1.414 1.414) rotate(45 12 12)">
+                    <path d="M8 2h8l-1 6 3 4v2H6v-2l3-4-1-6Z" />
+                    <path d="M12 14v8" />
+                  </g>
+                </svg>
+              </span>
+              <div class="pc-task-line">
+                <button
+                  class="pc-task-title"
+                  :title="item.title"
+                  @click.stop="selectTask(item)"
+                >
+                  <span
+                    class="pc-task-title-text"
+                    :class="{ marquee: marqueeTaskId === item.id }"
+                    :style="
+                      marqueeTaskId === item.id
+                        ? {
+                            '--pc-task-marquee-distance': `${marqueeDistance}px`,
+                            '--pc-task-marquee-duration': `${marqueeDuration}s`,
+                          }
+                        : null
+                    "
+                    >{{ item.title }}</span
+                  ></button
+                ><span v-if="item.status === 'running'" class="pc-spinner" />
+              </div>
+              <div class="pc-task-actions" role="group" aria-label="任务操作">
+                <button
+                  type="button"
+                  title="编辑名称"
+                  aria-label="编辑名称"
+                  @click.stop="openTaskDialog('rename', item)"
+                >
+                  <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                    <path
+                      d="m15 4 5 5M4 20l5-1L20 8a2.1 2.1 0 0 0-5-5L4 14v6Z"
+                    />
+                  </svg>
+                </button>
+                <button
+                  type="button"
+                  class="pc-task-pin-action"
+                  :title="item.pinned ? '取消置顶' : '置顶'"
+                  :aria-label="item.pinned ? '取消置顶' : '置顶'"
+                  @click.stop="togglePin(item)"
+                >
+                  <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                    <g transform="translate(-1.414 1.414) rotate(45 12 12)">
+                      <path d="M8 2h8l-1 6 3 4v2H6v-2l3-4-1-6Z" />
+                      <path d="M12 14v8" />
+                    </g>
+                  </svg></button
+                ><button
+                  type="button"
+                  title="归档任务"
+                  aria-label="归档任务"
+                  @click.stop="openTaskDialog('archive', item)"
+                >
+                  <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                    <rect x="3" y="3" width="18" height="4" rx="1" />
+                    <path
+                      d="M5 7v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7M10 11h4"
+                    />
+                  </svg></button
+                ><button
+                  type="button"
+                  class="pc-task-delete-action"
+                  title="删除任务"
+                  aria-label="删除任务"
+                  @click.stop="openTaskDialog('delete', item)"
+                >
+                  <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                    <path
+                      d="M3 6h18M9 6V3h6v3M5 6l1 14h12l1-14M10 10v6M14 10v6"
+                    />
+                  </svg>
+                </button>
+              </div>
+              <button
+                type="button"
+                class="pc-task-cwd"
+                :title="'工作目录：' + taskCwdPath(item.cwd)"
+                :aria-label="'工作目录：' + taskCwdPath(item.cwd)"
+                @click.stop="openWorkspace(item)"
+              >
+                <span class="pc-task-cwd-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" focusable="false">
+                    <path
+                      d="M3 9V5a2 2 0 0 1 2-2h4l3 4h7a2 2 0 0 1 2 2M3 9h18l-2 11H3V9Z"
+                    />
+                  </svg>
+                </span>
+                <span class="pc-task-cwd-name">{{
+                  taskCwdName(item.cwd)
+                }}</span>
+              </button>
+            </div>
+            <div v-if="!visibleConversations.length" class="pc-task-empty">
+              暂无任务
+            </div>
+          </div>
+        </div>
+      </aside>
       <section
         v-if="conversation"
         class="pc-main"
         :class="{
           'is-task-list-collapsed': taskListCollapsed,
           'has-workspace': workspaceOpen,
+          'has-reader': reader.tabs.length > 0,
         }"
       >
         <div v-if="conversation.archived" class="pc-archived">
-          此任务已归档，不会出现在右侧任务列表。可在专家管理页「任务」的「归档任务」弹窗中恢复。
+          此任务已归档，不会出现在左侧任务列表。可在专家管理页「任务」的「归档任务」弹窗中恢复。
         </div>
         <div class="pc-messages-wrap">
           <div
@@ -203,7 +384,10 @@
                                   step.title
                                 }}</span>
                                 <span
-                                  v-if="step.argumentSummary && !isRoutineProcessCheck(step)"
+                                  v-if="
+                                    step.argumentSummary &&
+                                    !isRoutineProcessCheck(step)
+                                  "
                                   class="pc-process-step-target"
                                   >{{ step.argumentSummary }}</span
                                 >
@@ -234,13 +418,14 @@
                                 expandedActivityIds.includes(step.id)
                               "
                               class="pc-process-detail"
-                              :class="{ 'is-process-manage': step.name === 'process_manage' }"
+                              :class="{
+                                'is-process-manage':
+                                  step.name === 'process_manage',
+                              }"
                             >
                               <KnowledgeActivityDetail
                                 v-if="step.kind === 'knowledge'"
                                 :activity="step"
-                                :evidence="roundKnowledgeEvidence(message)"
-                                @sources="showKnowledgeSources(message, $event)"
                               />
                               <template v-else-if="step.kind === 'subagent'">
                                 <div v-if="step.argumentSummary">
@@ -279,18 +464,22 @@
                                     step.inputDetail &&
                                     (['terminal', 'execute_code'].includes(
                                       step.name,
-                                    ) || isMcpTool(step))
+                                    ) ||
+                                      isMcpTool(step))
                                   "
                                   class="pc-tool-output-label"
                                 >
-                                  {{ isMcpTool(step) ? '请求参数' : '运行参数' }}
+                                  {{
+                                    isMcpTool(step) ? "请求参数" : "运行参数"
+                                  }}
                                 </div>
                                 <pre
                                   v-if="
                                     step.inputDetail &&
                                     (['terminal', 'execute_code'].includes(
                                       step.name,
-                                    ) || isMcpTool(step))
+                                    ) ||
+                                      isMcpTool(step))
                                   "
                                   class="pc-tool-code"
                                   >{{ step.inputDetail }}</pre>
@@ -369,10 +558,14 @@
                                       v-else-if="section.kind === 'web'"
                                       class="pc-tool-web-detail"
                                     >
-                                      <div class="pc-tool-web-summary">{{ section.summary }}</div>
+                                      <div class="pc-tool-web-summary">
+                                        {{ section.summary }}
+                                      </div>
                                       <ul class="pc-tool-web-list">
                                         <li
-                                          v-for="(item, itemIndex) in section.items"
+                                          v-for="(
+                                            item, itemIndex
+                                          ) in section.items"
                                           :key="itemIndex"
                                         >
                                           <el-popover
@@ -432,11 +625,15 @@
                                           "
                                           type="button"
                                           class="pc-tool-session-link"
-                                          @click="selectTask(sessionSearchTask(item))"
+                                          @click="
+                                            selectTask(sessionSearchTask(item))
+                                          "
                                         >
                                           {{ item.title }}
                                         </button>
-                                        <template v-else>{{ item.title }}</template>
+                                        <template v-else>{{
+                                          item.title
+                                        }}</template>
                                         <span v-if="item.source">{{
                                           item.source
                                         }}</span>
@@ -460,10 +657,18 @@
                                 <ConversationLog
                                   v-else-if="
                                     step.outputDetail &&
-                                    ['terminal', 'execute_code', 'process_manage'].includes(step.name)
+                                    [
+                                      'terminal',
+                                      'execute_code',
+                                      'process_manage',
+                                    ].includes(step.name)
                                   "
                                   :text="step.outputDetail"
-                                  :title="step.name === 'process_manage' ? '进程输出' : '执行结果'"
+                                  :title="
+                                    step.name === 'process_manage'
+                                      ? '进程输出'
+                                      : '执行结果'
+                                  "
                                   @view-all="openOutputDialog"
                                 />
                                 <div v-else-if="step.outputDetail">
@@ -503,7 +708,9 @@
                         "
                         :key="block.id"
                         class="pc-expired-request"
-                        :class="{ 'is-approval': block.request.kind === 'approval' }"
+                        :class="{
+                          'is-approval': block.request.kind === 'approval',
+                        }"
                       >
                         <span class="pc-expired-request-icon" aria-hidden="true"
                           ><i
@@ -516,7 +723,8 @@
                             class="pc-expired-request-question"
                             :title="
                               block.request.kind === 'approval'
-                                ? block.request.actionTitle || block.request.prompt
+                                ? block.request.actionTitle ||
+                                  block.request.prompt
                                 : block.request.prompt
                             "
                           >
@@ -528,7 +736,9 @@
                             }}
                           </div>
                           <div class="pc-expired-request-footer">
-                            <span class="pc-expired-request-status">已超时</span>
+                            <span class="pc-expired-request-status"
+                              >已超时</span
+                            >
                             <span
                               v-if="block.request.lateAnswer"
                               class="pc-expired-request-result"
@@ -577,7 +787,10 @@
                               acceptedAnswerLabel(block.request, question.qid)
                             "
                             class="pc-human-answer"
-                          >{{ acceptedAnswerLabel(block.request, question.qid) }}</strong>
+                            >{{
+                              acceptedAnswerLabel(block.request, question.qid)
+                            }}</strong
+                          >
                         </span>
                         <strong
                           v-if="
@@ -593,7 +806,8 @@
                             !(block.request.questions || []).length
                           "
                           class="pc-human-answer"
-                        >{{ requestResponseLabel(block.request) }}</strong>
+                          >{{ requestResponseLabel(block.request) }}</strong
+                        >
                       </div>
                       <div
                         v-else-if="block.type === 'correction'"
@@ -605,7 +819,9 @@
                             requestPromptById(block.requestId)
                           }}</span
                         >
-                        <strong class="pc-human-answer">{{ block.text }}</strong>
+                        <strong class="pc-human-answer">{{
+                          block.text
+                        }}</strong>
                       </div>
                       <div
                         v-else
@@ -622,8 +838,6 @@
                     :text="message.content"
                     :citations="knowledgeCitations(message)"
                     @citation="openKnowledgeCitation(message, $event)"
-                    @citation-enter="previewKnowledgeCitation(message, $event)"
-                    @citation-leave="scheduleKnowledgePreviewClose"
                   /><span
                     v-if="message.status === 'streaming'"
                     class="typing-cursor"
@@ -648,6 +862,7 @@
                     <el-popover
                       v-for="item in turnResultFiles(message)"
                       :key="item.resultId"
+                      ref="resultDiffPopovers"
                       trigger="hover"
                       placement="top"
                       popper-class="pc-result-diff-popover"
@@ -660,86 +875,89 @@
                         :path="item.path || item.name"
                         title="本轮改动"
                         preview
-                      />
+                      >
+                        <button
+                          slot="header-actions"
+                          type="button"
+                          class="pc-output-view-all"
+                          :aria-label="`查看全部修改 ${item.name}`"
+                          aria-haspopup="dialog"
+                          @click="openRoundDiff(item, $event)"
+                        >
+                          查看全部修改
+                        </button>
+                      </ConversationDiff>
                       <div
                         slot="reference"
                         class="pc-result-file-card"
                         :class="`is-${item.operation}`"
                         role="listitem"
                       >
-                      <span class="pc-result-file-icon" aria-hidden="true"
-                        ><i
-                          :class="
-                            item.operation === 'modified'
-                              ? 'el-icon-edit-outline'
-                              : 'el-icon-document'
-                          "
-                      /></span>
-                      <span class="pc-result-file-copy">
-                        <span class="pc-result-file-heading">
-                          <strong :title="item.name">{{ item.name }}</strong>
-                          <span class="pc-result-file-kind">{{
-                            resultOperationLabel(item.operation)
-                          }}</span>
+                        <span class="pc-result-file-icon" aria-hidden="true"
+                          ><i
+                            :class="
+                              item.operation === 'modified'
+                                ? 'el-icon-edit-outline'
+                                : 'el-icon-document'
+                            "
+                        /></span>
+                        <span class="pc-result-file-copy">
+                          <span class="pc-result-file-heading">
+                            <strong :title="item.name">{{ item.name }}</strong>
+                            <span class="pc-result-file-kind">{{
+                              resultOperationLabel(item.operation)
+                            }}</span>
+                          </span>
+                          <small
+                            class="pc-result-file-path"
+                            @mouseenter="showResultPathTooltip(item, $event)"
+                            @mousemove="moveResultPathTooltip($event)"
+                            @mouseleave="hideResultPathTooltip"
+                            >{{ workspaceResultPath(item) }}</small
+                          >
+                          <small v-if="!item.canDownload">文件已不可用</small>
+                          <small v-else-if="!item.canPreview"
+                            >暂不支持预览</small
+                          >
+                          <small v-else-if="item.versionScope === 'current'"
+                            >当前文件版本</small
+                          >
                         </span>
-                        <small
-                          class="pc-result-file-path"
-                          @mouseenter="showResultPathTooltip(item, $event)"
-                          @mousemove="moveResultPathTooltip($event)"
-                          @mouseleave="hideResultPathTooltip"
-                          >{{ workspaceResultPath(item) }}</small
-                        >
-                        <small v-if="!item.canDownload">文件已不可用</small>
-                        <small v-else-if="!item.canPreview">暂不支持预览</small>
-                        <small v-else-if="item.versionScope === 'current'"
-                          >当前文件版本</small
-                        >
-                      </span>
-                      <span class="pc-result-file-actions">
-                        <button
-                          v-if="item.roundDiff"
-                          type="button"
-                          class="pc-output-view-all"
-                          :aria-label="`查看全部改动 ${item.name}`"
-                          aria-haspopup="dialog"
-                          @click="openRoundDiff(item, $event)"
-                        >
-                          查看全部
-                        </button>
-                        <el-tooltip
-                          content="预览"
-                          placement="top"
-                          effect="light"
-                          :open-delay="0"
-                          :enterable="false"
-                        >
-                          <button
-                            type="button"
-                            :aria-label="`预览 ${item.name}`"
-                            :disabled="!item.canPreview"
-                            @click="previewFile(item)"
+                        <span class="pc-result-file-actions">
+                          <el-tooltip
+                            content="预览"
+                            placement="top"
+                            effect="light"
+                            :open-delay="0"
+                            :enterable="false"
                           >
-                            <i class="el-icon-view" aria-hidden="true" />
-                          </button>
-                        </el-tooltip>
-                        <el-tooltip
-                          content="下载"
-                          placement="top"
-                          effect="light"
-                          :open-delay="0"
-                          :enterable="false"
-                        >
-                          <button
-                            type="button"
-                            :aria-label="`下载 ${item.name}`"
-                            :disabled="!item.canDownload"
-                            @click="downloadFile(item)"
+                            <button
+                              type="button"
+                              :aria-label="`预览 ${item.name}`"
+                              :disabled="!item.canPreview"
+                              @click="previewFile(item)"
+                            >
+                              <i class="el-icon-view" aria-hidden="true" />
+                            </button>
+                          </el-tooltip>
+                          <el-tooltip
+                            content="下载"
+                            placement="top"
+                            effect="light"
+                            :open-delay="0"
+                            :enterable="false"
                           >
-                            <i class="el-icon-download" aria-hidden="true" />
-                          </button>
-                        </el-tooltip>
-                      </span>
-                    </div>
+                            <button
+                              type="button"
+                              :aria-label="`下载 ${item.name}`"
+                              :disabled="!item.canDownload"
+                              @click="downloadFile(item)"
+                            >
+                              <i class="el-icon-download" aria-hidden="true" />
+                            </button>
+                          </el-tooltip>
+                        </span>
+                      </div>
                     </el-popover>
                   </div>
                   <div
@@ -906,7 +1124,9 @@
                       requestPromptById(message.replyToRequestId)
                     }}</span
                   >
-                  <strong class="pc-human-answer">{{ lateClarificationText(message.content) }}</strong>
+                  <strong class="pc-human-answer">{{
+                    lateClarificationText(message.content)
+                  }}</strong>
                 </div>
                 <div v-else-if="message.content" class="pc-user-bubble">
                   {{ message.content }}
@@ -1623,7 +1843,11 @@
                 ><small>{{ filePath(file) }}</small>
               </button>
             </div>
-            <div class="pc-composer-toolbar">
+            <div
+              ref="composerToolbar"
+              class="pc-composer-toolbar"
+              :class="{ 'is-config-compact': composerConfigCompact }"
+            >
               <div class="pc-composer-leading">
                 <el-popover
                   v-if="expert.presetEnabled && expert.presetQuestions.length"
@@ -2038,8 +2262,34 @@
                       slot="reference"
                       type="button"
                       class="pc-config-trigger"
+                      :title="`模型：${model}`"
+                      :aria-label="`选择模型，当前：${model}`"
+                      :aria-expanded="modelPickerVisible"
                     >
-                      模型：{{ model }} <i class="el-icon-caret-bottom" />
+                      <svg
+                        class="pc-config-icon pc-model-brain-icon"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="1.6"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        aria-hidden="true"
+                      >
+                        <path
+                          d="M12 5C12 2.5 8.4 1.8 7.2 4c-2.7-.6-4.8 2-3.9 4.3-2.4 1.6-1.9 5.4.6 6.4-.5 2.8 2.2 4.9 4.6 3.8.8 2.2 3.5 1.4 3.5-1 0 2.4 2.7 3.2 3.5 1 2.4 1.1 5.1-1 4.6-3.8 2.5-1 3-4.8.6-6.4.9-2.3-1.2-4.9-3.9-4.3C15.6 1.8 12 2.5 12 5Z"
+                        />
+                        <path
+                          d="M12 5v12.5M7.2 4C6.8 5.5 7.6 6.9 9.1 7M16.8 4c.4 1.5-.4 2.9-1.9 3M3.3 8.3c1.7-.3 3.2.9 3.2 2.5M20.7 8.3c-1.7-.3-3.2.9-3.2 2.5M3.9 14.7c1.8-.9 3.5 0 3.5 1.6M20.1 14.7c-1.8-.9-3.5 0-3.5 1.6M12 12c-2.4 0-3.5-1.3-3.4-2.8M12 12c2.4 0 3.5-1.3 3.4-2.8"
+                        />
+                      </svg>
+                      <span class="pc-config-label" aria-hidden="true"
+                        >模型：{{ model }}</span
+                      >
+                      <i
+                        class="el-icon-caret-bottom pc-config-caret"
+                        aria-hidden="true"
+                      />
                     </button>
                   </el-popover>
                   <el-popover
@@ -2115,14 +2365,25 @@
                       slot="reference"
                       type="button"
                       class="pc-config-trigger"
-                      :title="`工作目录：${cwdLabel(conversation.cwd, 'workspace')}`"
+                      :title="`工作目录：${taskCwdPath(conversation.cwd)}`"
+                      :aria-label="`选择工作目录，当前：${taskCwdPath(conversation.cwd)}`"
+                      :aria-expanded="cwdPickerVisible"
                       :disabled="
                         !!pendingInteraction ||
                         conversation.status === 'running'
                       "
                     >
-                      工作目录：{{ taskCwdName(conversation.cwd) }}
-                      <i class="el-icon-caret-bottom" />
+                      <i
+                        class="el-icon-folder-opened pc-config-icon"
+                        aria-hidden="true"
+                      />
+                      <span class="pc-config-label" aria-hidden="true"
+                        >工作目录：{{ taskCwdName(conversation.cwd) }}</span
+                      >
+                      <i
+                        class="el-icon-caret-bottom pc-config-caret"
+                        aria-hidden="true"
+                      />
                     </button>
                   </el-popover>
                 </div>
@@ -2164,157 +2425,70 @@
           </div>
         </div>
       </section>
-      <aside
-        id="pc-task-panel"
-        class="pc-tasks"
-        :class="{
-          'is-action-reveal-paused': taskActionsPaused,
-          'mobile-open': taskListOpen,
-          'is-collapsed': taskListCollapsed,
-        }"
-        @mousemove="taskActionsPaused = false"
-        @mouseleave="taskActionsPaused = false"
-      >
-        <div class="pc-panel-head">
-          <span class="pc-panel-icon"><i class="el-icon-tickets" /></span
-          ><strong>任务列表</strong>
-        </div>
-        <div class="pc-task-scroll">
-          <div class="pc-task-list">
-            <div
-              v-for="item in visibleConversations"
-              :key="item.id"
-              class="pc-task"
-              :class="{
-                active: conversation && item.id === conversation.id,
-                pinned: !!item.pinned,
-              }"
-              @mouseenter="startTaskMarquee(item, $event)"
-              @mouseleave="stopTaskMarquee($event)"
-              @focusin="startTaskMarquee(item, $event)"
-              @focusout="stopTaskMarquee($event)"
-              @click="selectTask(item)"
-            >
-              <span
-                v-if="item.pinned"
-                class="pc-task-pinned-marker"
-                role="img"
-                aria-label="已置顶"
-                title="已置顶"
-              >
-                <svg
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="1.8"
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                >
-                  <path d="M9 3h6l-1 5 3 3v2H7v-2l3-3-1-5Z" />
-                  <path d="M12 13v8" />
-                </svg>
-              </span>
-              <div class="pc-task-line">
-                <button
-                  class="pc-task-title"
-                  :title="item.title"
-                  @click.stop="selectTask(item)"
-                >
-                  <span
-                    class="pc-task-title-text"
-                    :class="{ marquee: marqueeTaskId === item.id }"
-                    :style="
-                      marqueeTaskId === item.id
-                        ? {
-                            '--pc-task-marquee-distance': `${marqueeDistance}px`,
-                            '--pc-task-marquee-duration': `${marqueeDuration}s`,
-                          }
-                        : null
-                    "
-                    >{{ item.title }}</span
-                  ></button
-                ><span v-if="item.status === 'running'" class="pc-spinner" />
-                <div class="pc-task-actions">
-                  <button
-                    type="button"
-                    title="编辑名称"
-                    aria-label="编辑名称"
-                    @click.stop="openTaskDialog('rename', item)"
-                  >
-                    <i class="el-icon-edit-outline" />
-                  </button>
-                  <button
-                    class="pc-task-pin-action"
-                    :title="item.pinned ? '取消置顶' : '置顶'"
-                    @click.stop="togglePin(item)"
-                  >
-                    <svg
-                      viewBox="0 0 24 24"
-                      width="15"
-                      height="15"
-                      fill="none"
-                      stroke="currentColor"
-                      stroke-width="1.8"
-                      stroke-linecap="round"
-                      stroke-linejoin="round"
-                    >
-                      <path d="M9 3h6l-1 5 3 3v2H7v-2l3-3-1-5Z" />
-                      <path d="M12 13v8" />
-                    </svg></button
-                  ><button
-                    title="归档任务"
-                    @click.stop="openTaskDialog('archive', item)"
-                  >
-                    <i class="el-icon-receiving" /></button
-                  ><button
-                    title="删除任务"
-                    @click.stop="openTaskDialog('delete', item)"
-                  >
-                    <i class="el-icon-delete" />
-                  </button>
-                </div>
-              </div>
-              <button
-                class="pc-task-cwd"
-                :title="'打开工作目录：' + cwdLabel(item.cwd, 'workspace')"
-                :aria-label="'打开工作目录：' + cwdLabel(item.cwd, 'workspace')"
-                @click.stop="openWorkspace(item)"
-              >
-                <i class="el-icon-folder pc-task-cwd-icon" />
-                <span class="pc-task-cwd-label">工作目录：</span>
-                <span class="pc-task-cwd-name">{{
-                  taskCwdName(item.cwd)
-                }}</span>
-                <i class="el-icon-arrow-right pc-task-cwd-arrow" />
-              </button>
-            </div>
-            <div v-if="!visibleConversations.length" class="pc-task-empty">
-              暂无任务
-            </div>
-          </div>
-        </div>
-      </aside>
+      <FileReader
+        v-if="reader.tabs.length"
+        ref="fileReader"
+        :tabs="reader.tabs"
+        :active-key="reader.activeKey"
+        :width="reader.width"
+        :max-width="readerMaxWidth"
+        @select="selectReaderTab"
+        @close-tab="closeReaderFile"
+        @close="closeReader"
+        @resize="resizeReader"
+        @retry="loadReaderTab"
+      />
       <aside
         v-show="workspaceOpen"
         id="pc-workspace-panel"
         class="pc-workspace"
       >
+        <PanelResizeHandle
+          label="调整工作空间宽度"
+          controls="pc-workspace-panel"
+          :width="workspacePanelWidth"
+          :min-width="sidebarMinWidth"
+          :max-width="workspaceMaxWidth"
+          @resize="resizeSidebar('workspace', $event)"
+        />
         <div class="pc-panel-head">
           <span class="pc-panel-icon"><i class="el-icon-folder-opened" /></span
-          ><strong>工作空间</strong
-          ><button
-            :title="'上传文件到' + workspaceFolderName"
-            @click="$refs.workspaceUpload.click()"
+          ><strong>工作空间</strong>
+          <div
+            class="pc-workspace-actions"
+            role="group"
+            aria-label="工作空间操作"
           >
-            <i class="el-icon-upload2" /></button
-          ><button
-            :title="'在' + workspaceFolderName + '下新建文件夹'"
-            @click="openFolderDialog"
-          >
-            <i class="el-icon-folder-add" />
-          </button>
+            <button
+              type="button"
+              class="pc-workspace-action"
+              aria-label="上传文件"
+              :title="'上传文件到 ' + workspaceFolderName"
+              @click="$refs.workspaceUpload.click()"
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                <path
+                  d="M12 15V4m-4 4 4-4 4 4M5 14v4a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-4"
+                />
+              </svg>
+            </button>
+            <button
+              type="button"
+              class="pc-workspace-action"
+              aria-label="新建文件夹"
+              :title="'在 ' + workspaceFolderName + ' 下新建文件夹'"
+              @click="openFolderDialog"
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                <path
+                  d="M20 20H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h5l2 2h9a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2Z"
+                />
+                <path d="M12 10v6m-3-3h6" />
+              </svg>
+            </button>
+          </div>
         </div>
-        <div class="pc-workspace-tree">
+        <div ref="workspaceTree" class="pc-workspace-tree">
           <div
             class="pc-workspace-root-row"
             :class="{
@@ -2347,8 +2521,14 @@
             v-for="node in workspaceTreeRows"
             :key="node.item.id"
             class="pc-workspace-row"
+            :data-workspace-file-id="
+              node.item.kind === 'file' ? node.item.id : null
+            "
             :class="{
               selected: workspaceFolderId === node.item.id,
+              'is-previewed':
+                activeReaderWorkspaceLocation &&
+                activeReaderWorkspaceLocation.file.id === node.item.id,
               cwd:
                 conversation && conversation.cwd === folderPath(node.item.id),
             }"
@@ -2357,10 +2537,16 @@
             <button
               class="pc-workspace-entry"
               :title="node.item.name"
+              :aria-current="
+                activeReaderWorkspaceLocation &&
+                activeReaderWorkspaceLocation.file.id === node.item.id
+                  ? 'true'
+                  : null
+              "
               @click="
                 node.item.kind === 'folder'
                   ? toggleFolder(node.item)
-                  : previewFile(node.item)
+                  : previewFile(node.item, 'workspace')
               "
             >
               <i
@@ -2433,29 +2619,6 @@
           @change="uploadWorkspaceFiles"
         />
       </aside>
-      <transition name="pc-knowledge-float">
-        <KnowledgeSourcesPanel
-          v-if="knowledgeSourceView"
-          ref="knowledgeSources"
-          :style="{ '--pc-knowledge-input-height': knowledgeInputHeight + 'px' }"
-          :evidence="roundKnowledgeEvidence(knowledgeSourceView.message)"
-          :target-id="knowledgeSourceView.targetId"
-          @close="closeKnowledgeSources"
-          @preview="previewKnowledgeOriginal"
-        />
-      </transition>
-      <KnowledgeCitationPreview
-        v-if="knowledgePreview"
-        :key="knowledgePreview.key"
-        ref="knowledgePreview"
-        :style="knowledgePreviewPosition"
-        :document="knowledgePreview.document"
-        :evidence="knowledgePreview.evidence"
-        @mouseenter.native="cancelKnowledgePreviewClose"
-        @mouseleave.native="scheduleKnowledgePreviewClose"
-        @close="closeKnowledgePreview()"
-        @preview="previewKnowledgeOriginal"
-      />
     </div>
     <el-dialog
       :visible.sync="taskDialogVisible"
@@ -2597,75 +2760,11 @@
           :path="outputDialog.path"
           :title="outputDialog.title"
         />
-        <pre v-else class="pc-tool-code pc-log-output">{{ outputDialog.text }}</pre>
+        <pre v-else class="pc-tool-code pc-log-output">{{
+          outputDialog.text
+        }}</pre>
       </div>
     </el-dialog>
-    <el-dialog
-      :visible.sync="previewVisible"
-      width="720px"
-      :custom-class="`pc-dialog pc-preview-dialog${previewKnowledgeSource ? ' pc-knowledge-original-dialog' : ''}`"
-      append-to-body
-      @closed="clearPreview"
-      ><div slot="title" class="pc-dialog-head">
-        <div class="pc-dialog-icon" :data-kind="previewKnowledgeSource && previewKnowledgeSource.kind">
-          <i
-            :class="
-              previewKnowledgeSource && previewKnowledgeSource.kind === 'wiki'
-                ? 'el-icon-reading'
-                : previewItem && previewItem.operation === 'modified'
-                  ? 'el-icon-edit-outline'
-                  : 'el-icon-document'
-            "
-          />
-        </div>
-        <div v-if="previewKnowledgeSource" class="pc-knowledge-original-heading">
-          <div class="pc-knowledge-original-titles">
-            <strong :title="previewKnowledgeSource.title">{{
-              previewKnowledgeSource.title
-            }}</strong>
-            <small
-              v-if="previewKnowledgeSource.library"
-              :title="previewKnowledgeSource.library"
-            >{{ previewKnowledgeSource.library }}</small>
-          </div>
-          <span class="pc-knowledge-type" :data-kind="previewKnowledgeSource.kind">
-            {{ previewKnowledgeSource.kind === "wiki" ? "Wiki" : "chunk" }}
-          </span>
-        </div>
-        <div v-else>
-          <strong>{{ previewItem && previewItem.name }}</strong>
-          <small v-if="previewItem && previewItem.operation">
-            {{ resultOperationLabel(previewItem.operation) }} ·
-            {{
-              previewItem.versionScope === "round" ? "本轮版本" : "当前文件版本"
-            }}
-          </small>
-          <small v-if="previewItem && previewItem.operation">{{
-            workspaceResultPath(previewItem)
-          }}</small>
-        </div>
-      </div>
-      <div class="pc-preview-body">
-        <img
-          v-if="previewUrl"
-          :src="previewUrl"
-          :alt="previewItem && previewItem.name"
-        />
-        <ConversationMarkdown
-          v-else-if="previewKnowledgeSource && previewKnowledgeSource.kind === 'wiki'"
-          :text="previewText"
-        />
-        <pre v-else>{{ previewText }}</pre>
-      </div>
-      <div slot="footer" class="pc-dialog-footer">
-        <el-button @click="previewVisible = false">关闭</el-button>
-        <el-button
-          v-if="!previewKnowledgeSource"
-          type="primary"
-          @click="downloadFile(previewItem)"
-        >下载文件</el-button>
-      </div></el-dialog
-    >
   </div>
   <el-empty v-else description="专家不存在" />
 </template>
@@ -2700,6 +2799,7 @@ import {
   knowledgeActivityLabel,
   knowledgeCitationDocuments,
 } from "../knowledge-activity";
+import { knowledgeCitationItem } from "../knowledge-reader";
 import {
   emptySessionPresentation,
   todoProgress,
@@ -2708,8 +2808,31 @@ import ConversationMarkdown from "../components/ConversationMarkdown.vue";
 import ConversationDiff from "../components/ConversationDiff.vue";
 import ConversationLog from "../components/ConversationLog.vue";
 import KnowledgeActivityDetail from "../components/KnowledgeActivityDetail.vue";
-import KnowledgeCitationPreview from "../components/KnowledgeCitationPreview.vue";
-import KnowledgeSourcesPanel from "../components/KnowledgeSourcesPanel.vue";
+import FileReader from "../components/FileReader.vue";
+import PanelResizeHandle from "../components/PanelResizeHandle.vue";
+import {
+  minimumPanelCanvasWidth,
+  chatPanelLayout,
+  applyChatPanelLayout,
+  planPanelVisibility,
+  requestPanelVisibility,
+  resizePanelLayout,
+  fitPanelLayout,
+} from "../chat-panel-layout";
+import {
+  TASK_PANEL_WIDTH,
+  WORKSPACE_PANEL_WIDTH,
+  SIDEBAR_MIN_WIDTH,
+  SIDEBAR_MAX_WIDTH,
+  READER_DEFAULT_WIDTH,
+  createFileReader,
+  readerFileKey,
+  readerWorkspaceFileLocation,
+  openReaderTab,
+  activateReaderTab,
+  closeReaderTab,
+  closeFileReader,
+} from "../file-reader";
 function approvalDisplayRequest(request) {
   if (request?.kind !== "approval") return request;
   const legacyTitle = {
@@ -2723,15 +2846,14 @@ function approvalDisplayRequest(request) {
         ? "请确认是否允许执行当前操作。"
         : request.prompt,
     actionTitle: legacyTitle[request.actionTitle] || request.actionTitle,
-    actionDetail:
-      [
-        "此操作需要授权；允许后仅尝试执行，实际结果另行显示。",
-        "该命令需要授权，结果将单独呈现。",
-      ].includes(request.actionDetail)
-        ? ""
-        : request.actionDetail === "读取示例文件，允许后仅尝试执行。"
-          ? "该文件需要读取授权。"
-          : request.actionDetail,
+    actionDetail: [
+      "此操作需要授权；允许后仅尝试执行，实际结果另行显示。",
+      "该命令需要授权，结果将单独呈现。",
+    ].includes(request.actionDetail)
+      ? ""
+      : request.actionDetail === "读取示例文件，允许后仅尝试执行。"
+        ? "该文件需要读取授权。"
+        : request.actionDetail,
     safeCommand:
       request.safeCommand === "echo 演示核对完成"
         ? "echo 核对完成"
@@ -2766,8 +2888,8 @@ export default {
     ConversationDiff,
     ConversationLog,
     KnowledgeActivityDetail,
-    KnowledgeCitationPreview,
-    KnowledgeSourcesPanel,
+    FileReader,
+    PanelResizeHandle,
   },
   data() {
     return {
@@ -2775,15 +2897,17 @@ export default {
       draft: "",
       draftConversation: emptyConversation(),
       taskActionsPaused: false,
+      composerConfigCompact: false,
       workspaceOpen: false,
-      knowledgePreview: null,
-      knowledgePreviewPosition: { visibility: "hidden" },
-      knowledgeSourceView: null,
-      knowledgeInputHeight: 0,
-      taskListOpen: false,
       taskListCollapsed: false,
-      isNarrowViewport:
-        typeof window !== "undefined" && window.innerWidth <= 900,
+      taskPanelWidth: TASK_PANEL_WIDTH,
+      workspacePanelWidth: WORKSPACE_PANEL_WIDTH,
+      sidebarMinWidth: SIDEBAR_MIN_WIDTH,
+      taskMaxWidth: SIDEBAR_MAX_WIDTH,
+      workspaceMaxWidth: SIDEBAR_MAX_WIDTH,
+      conversationMaxWidth: Infinity,
+      panelContainerWidth: 0,
+      readerWidthCustomized: false,
       statusExpanded: {
         goal: false,
         todo: false,
@@ -2846,24 +2970,38 @@ export default {
       taskNameDraft: "",
       folderDialogVisible: false,
       folderNameDraft: "",
-      previewVisible: false,
-      previewItem: null,
-      previewText: "",
-      previewUrl: "",
+      reader: createFileReader(),
+      readerMaxWidth: READER_DEFAULT_WIDTH,
       resultPathTooltip: { text: "", visible: false, left: 0, top: 0 },
     };
   },
   computed: {
-    previewKnowledgeSource() {
-      return this.previewItem?.knowledgeSource || null;
+    panelMinimumWidth() {
+      return minimumPanelCanvasWidth(chatPanelLayout(this));
+    },
+    composerConfigSignature() {
+      return [
+        this.model,
+        this.conversation?.cwd,
+        Boolean(
+          this.expert?.presetEnabled && this.expert?.presetQuestions?.length,
+        ),
+      ].join("|");
+    },
+    activeReaderTab() {
+      return (
+        this.reader.tabs.find((tab) => tab.key === this.reader.activeKey) ||
+        null
+      );
+    },
+    activeReaderWorkspaceLocation() {
+      return readerWorkspaceFileLocation(
+        this.expert?.files || [],
+        this.activeReaderTab?.item,
+      );
     },
     knowledgeReferenceEnabled() {
       return this.expert?.knowledge?.scope !== "none";
-    },
-    taskListVisible() {
-      return this.isNarrowViewport
-        ? this.taskListOpen
-        : !this.taskListCollapsed;
     },
     expert() {
       return expertById(this.$route.params.id);
@@ -3353,7 +3491,6 @@ export default {
   mounted() {
     this.model = this.conversation?.model || "gpt-4o";
     window.addEventListener("resize", this.handleViewportResize);
-    document.addEventListener("click", this.dismissKnowledgePreview, true);
     if (typeof ResizeObserver !== "undefined") {
       this._resourceResizeObserver = new ResizeObserver(
         this.updateResourceOverflow,
@@ -3365,9 +3502,14 @@ export default {
       this._questionRailResizeObserver = new ResizeObserver(
         this.updateQuestionRail,
       );
-      this._knowledgeInputResizeObserver = new ResizeObserver(
-        this.updateKnowledgeInputHeight,
+      this._readerResizeObserver = new ResizeObserver(this.updateReaderBounds);
+      if (this.$refs.chatBody)
+        this._readerResizeObserver.observe(this.$refs.chatBody);
+      this._composerConfigResizeObserver = new ResizeObserver(
+        this.updateComposerConfigLayout,
       );
+      if (this.$refs.composerToolbar)
+        this._composerConfigResizeObserver.observe(this.$refs.composerToolbar);
     }
     this.turnClock = setInterval(() => {
       if (
@@ -3384,7 +3526,9 @@ export default {
         .catch(() => {});
     }
     this.$nextTick(() => {
+      this.updateReaderBounds();
       this.resizeComposer();
+      this.updateComposerConfigLayout();
       this.updateResourceOverflow();
       this.syncSentResourceStrips();
       this.observeQuestionRail();
@@ -3393,18 +3537,33 @@ export default {
   },
   beforeDestroy() {
     window.removeEventListener("resize", this.handleViewportResize);
-    document.removeEventListener("click", this.dismissKnowledgePreview, true);
-    this.cancelKnowledgePreviewClose();
     this._resourceResizeObserver?.disconnect();
     this._sentResourceResizeObserver?.disconnect();
     this._questionRailResizeObserver?.disconnect();
-    this._knowledgeInputResizeObserver?.disconnect();
     clearInterval(this.turnClock);
     if (this.$route.query.conv) stopDemoStream(this.$route.query.conv);
     this.discardPendingUploads();
-    this.clearPreview();
+    this._readerResizeObserver?.disconnect();
+    this._composerConfigResizeObserver?.disconnect();
+    this.closeReader();
   },
   watch: {
+    composerConfigSignature() {
+      this.$nextTick(this.updateComposerConfigLayout);
+    },
+    taskPanelWidth() {
+      this.$nextTick(this.updateReaderBounds);
+    },
+    workspacePanelWidth() {
+      this.$nextTick(this.updateReaderBounds);
+    },
+    workspaceOpen(open) {
+      this.$nextTick(this.updateReaderBounds);
+      if (open) this.$nextTick(this.revealReaderWorkspaceFile);
+    },
+    taskListCollapsed() {
+      this.$nextTick(this.updateReaderBounds);
+    },
     activeInteractionKey(next, prior) {
       if (prior)
         this.$set(this.interactionDrafts, prior, {
@@ -3429,6 +3588,8 @@ export default {
     },
     "$route.query.conv"(next, prior) {
       if (prior && next !== prior) stopDemoStream(prior);
+      if (next !== prior) this.closeReader();
+      this.$nextTick(this.locateWorkspaceForCwd);
       Object.keys(this.statusExpanded).forEach((key) => {
         this.statusExpanded[key] = false;
       });
@@ -3443,8 +3604,6 @@ export default {
       this.expandedActivities = [];
       this.expandedActivityIds = [];
       this.outputDialogVisible = false;
-      this.closeKnowledgePreview(false);
-      this.closeKnowledgeSources(false);
       this.referencePickerVisible = false;
       this.cwdPickerVisible = false;
       this.modelPickerVisible = false;
@@ -3540,6 +3699,44 @@ export default {
           ? "auto"
           : "smooth",
       });
+    },
+    updateComposerConfigLayout() {
+      const toolbar = this.$refs.composerToolbar;
+      if (!toolbar) return;
+      const leading = toolbar.querySelector(".pc-composer-leading");
+      const settings = toolbar.querySelector(".pc-composer-settings");
+      const trailing = toolbar.querySelector(".pc-composer-trailing");
+      const send = toolbar.querySelector(".pc-send");
+      if (!leading || !settings || !trailing || !send) return;
+      const style = window.getComputedStyle(toolbar);
+      const token = (name) =>
+        Number.parseFloat(style.getPropertyValue(name)) || 0;
+      const buttons = [...settings.querySelectorAll(".pc-config-trigger")];
+      const chromeWidth =
+        token("--pc-config-padding") * 2 +
+        token("--pc-config-caret-width") +
+        token("--pc-config-gap");
+      const settingsWidth =
+        buttons.reduce((total, button) => {
+          const label = button.querySelector(".pc-config-label");
+          return (
+            total +
+            Math.min(
+              token("--pc-config-max-width"),
+              (label?.scrollWidth || 0) + chromeWidth,
+            )
+          );
+        }, 0) +
+        Math.max(0, buttons.length - 1) *
+          (Number.parseFloat(window.getComputedStyle(settings).columnGap) || 0);
+      const requiredWidth =
+        leading.getBoundingClientRect().width +
+        settingsWidth +
+        send.getBoundingClientRect().width +
+        (Number.parseFloat(style.columnGap) || 0) +
+        (Number.parseFloat(window.getComputedStyle(trailing).columnGap) || 0);
+      this.composerConfigCompact =
+        Math.ceil(requiredWidth) > toolbar.clientWidth;
     },
     resizeComposer() {
       const composer = this.$refs.composer;
@@ -3727,14 +3924,11 @@ export default {
         .catch(() => {});
     },
     handleViewportResize() {
-      this.closeKnowledgePreview(false);
-      const narrow = window.innerWidth <= 900;
-      if (narrow !== this.isNarrowViewport) this.taskListOpen = false;
-      this.isNarrowViewport = narrow;
+      this.updateReaderBounds();
       this.$nextTick(() => {
+        this.updateComposerConfigLayout();
         this.updateResourceOverflow();
         this.updateQuestionRail();
-        this.updateKnowledgeInputHeight();
       });
     },
     observeQuestionRail() {
@@ -4091,12 +4285,20 @@ export default {
       this.resultPathTooltip.visible = false;
     },
     openRoundDiff(item, event) {
-      this.openOutputDialog({
-        kind: "diff",
-        text: item.roundDiff,
-        path: item.path || item.name,
-        title: "本轮改动",
-      }, event);
+      const popover = this.$refs.resultDiffPopovers.find((instance) =>
+        instance.$refs.popper.contains(event.currentTarget),
+      );
+      this.openOutputDialog(
+        {
+          kind: "diff",
+          text: item.roundDiff,
+          path: item.path || item.name,
+          title: "本轮改动",
+        },
+        event,
+      );
+      this._outputDialogTrigger = popover.referenceElm;
+      popover.doClose();
     },
     openOutputDialog(output, event) {
       this.hideResultPathTooltip();
@@ -4181,7 +4383,8 @@ export default {
     },
     runningActivitiesLabel(running) {
       const visible = running.slice(0, 2).map((activity) => {
-        if (activity.kind === "knowledge") return knowledgeActivityLabel(activity);
+        if (activity.kind === "knowledge")
+          return knowledgeActivityLabel(activity);
         const progressOrStatus =
           activity.kind === "tool" && activity.argumentSummary
             ? ""
@@ -4236,8 +4439,10 @@ export default {
       );
     },
     activitySweeping(activity) {
-      return activity.status === "running" &&
-        !(activity.kind === "knowledge" && activity.stageType === "completed");
+      return (
+        activity.status === "running" &&
+        !(activity.kind === "knowledge" && activity.stageType === "completed")
+      );
     },
     toolActivityValue(activity) {
       return (
@@ -4305,7 +4510,12 @@ export default {
     },
     hasActivityDetail(activity) {
       if (activity.kind === "knowledge")
-        return Boolean(activity.detail || activity.processSteps?.length || activity.resultStatus || activity.evidence?.length);
+        return Boolean(
+          activity.detail ||
+          activity.processSteps?.length ||
+          activity.resultStatus ||
+          activity.evidence?.length,
+        );
       if (activity.kind === "tool") {
         if (this.isRoutineProcessCheck(activity)) {
           if (["running", "requested"].includes(activity.status)) return false;
@@ -4314,7 +4524,9 @@ export default {
           const extra = sections.slice(1);
           if (
             activity.status === "complete" &&
-            ["进程状态：运行中", "本次等待结束，后台进程仍在运行"].includes(result) &&
+            ["进程状态：运行中", "本次等待结束，后台进程仍在运行"].includes(
+              result,
+            ) &&
             extra.length <= 1 &&
             extra.every(
               (section) =>
@@ -4329,15 +4541,8 @@ export default {
       return true;
     },
     roundKnowledgeActivities(message) {
-      return (this.turnFor(message)?.activities || [])
-        .filter((activity) => activity.kind === "knowledge");
-    },
-    roundKnowledgeEvidence(message) {
-      return this.roundKnowledgeActivities(message).flatMap((activity) =>
-        (activity.evidence || []).map((item, index) => ({
-          ...item,
-          key: this.knowledgeEvidenceKey(activity, item, index),
-        })),
+      return (this.turnFor(message)?.activities || []).filter(
+        (activity) => activity.kind === "knowledge",
       );
     },
     knowledgeEvidenceKey(activity, item, index) {
@@ -4357,121 +4562,17 @@ export default {
         .filter((citation) => Number.isInteger(citation.number))
         .sort((a, b) => a.number - b.number);
     },
-    openKnowledgeCitation(message, { numbers, documentId, event }) {
-      const citation = this.knowledgeCitations(message).find((item) =>
-        numbers.includes(item.number) &&
-        item.documents.some((document) => document.id === documentId),
+    openKnowledgeCitation(message, { numbers, documentId }) {
+      const item = knowledgeCitationItem(
+        message.id,
+        this.knowledgeCitations(message),
+        numbers,
+        documentId,
       );
-      if (citation) this.showKnowledgeSources(message, event, citation.key);
-    },
-    showKnowledgeSources(message, event, targetId = "") {
-      this.closeKnowledgePreview(false);
-      this.updateKnowledgeInputHeight();
-      if (this.$refs.inputArea)
-        this._knowledgeInputResizeObserver?.observe(this.$refs.inputArea);
-      if (this.$refs.chatBody)
-        this._knowledgeInputResizeObserver?.observe(this.$refs.chatBody);
-      this.knowledgeSourceTrigger = event?.currentTarget;
-      const view = { message, targetId };
-      this.knowledgeSourceView = view;
-      this.$nextTick(() => {
-        if (this.knowledgeSourceView !== view) return;
-        this.$refs.knowledgeSources?.showSources("all", true);
-      });
-    },
-    updateKnowledgeInputHeight() {
-      const body = this.$refs.chatBody;
-      const composer = this.$refs.composerBox;
-      if (!body || !composer) return;
-      this.knowledgeInputHeight = Math.max(
-        0,
-        body.getBoundingClientRect().bottom - composer.getBoundingClientRect().top,
-      );
-    },
-    closeKnowledgeSources(restoreFocus = true) {
-      this._knowledgeInputResizeObserver?.disconnect();
-      this.knowledgeSourceView = null;
-      const trigger = this.knowledgeSourceTrigger;
-      this.knowledgeSourceTrigger = null;
-      if (restoreFocus)
-        this.$nextTick(() => trigger?.focus({ preventScroll: true }));
-    },
-    previewKnowledgeOriginal(document) {
-      const { original } = document;
-      if (!original) return;
-      this.closeKnowledgePreview(false);
-      this.previewFile({
-        name: original.name,
-        snapshotContent: original.content,
-        knowledgeSource: document,
-      });
-    },
-    previewKnowledgeCitation(message, { numbers, documentId, event }) {
-      if (this.previewVisible) return;
-      this.cancelKnowledgePreviewClose();
-      const trigger = event.currentTarget;
-      if (this.knowledgePreviewTrigger === trigger) return;
-      const citations = this.knowledgeCitations(message).filter((item) =>
-        numbers.includes(item.number) &&
-        item.documents.some((document) => document.id === documentId),
-      );
-      if (!citations.length) return;
-      this.knowledgePreviewTrigger = trigger;
-      const view = {
-        key: JSON.stringify([message.id, documentId, numbers]),
-        document: citations[0].documents.find((item) => item.id === documentId),
-        evidence: citations.map((item) => item.evidence),
-      };
-      this.knowledgePreview = view;
-      this.knowledgePreviewPosition = { visibility: "hidden" };
-      this.$nextTick(() => {
-        if (this.knowledgePreview !== view) return;
-        const panel = this.$refs.knowledgePreview;
-        const body = this.$refs.chatBody.getBoundingClientRect();
-        const anchor = trigger.getBoundingClientRect();
-        const { width, height } = panel.$el.getBoundingClientRect();
-        const left = Math.max(8, Math.min(anchor.left - body.left, body.width - width - 8));
-        const below = anchor.bottom - body.top + 6;
-        const above = anchor.top - body.top - 6;
-        const roomBelow = body.height - below - 8;
-        const roomAbove = above - 8;
-        const placeBelow = height <= roomBelow || roomBelow >= roomAbove;
-        const availableHeight = placeBelow ? roomBelow : roomAbove;
-        this.knowledgePreviewPosition = {
-          left: `${left}px`,
-          ...(placeBelow ? { top: `${below}px` } : { bottom: `${body.height - above}px` }),
-          "--pc-citation-available-height": `${availableHeight}px`,
-          "--pc-citation-lines": panel.visibleLineCount(availableHeight),
-        };
-      });
-    },
-    cancelKnowledgePreviewClose() {
-      clearTimeout(this.knowledgePreviewCloseTimer);
-    },
-    scheduleKnowledgePreviewClose() {
-      this.cancelKnowledgePreviewClose();
-      if (this.knowledgePreview)
-        this.knowledgePreviewCloseTimer = setTimeout(() => this.closeKnowledgePreview(false), 220);
-    },
-    closeKnowledgePreview(restoreFocus = true) {
-      this.cancelKnowledgePreviewClose();
-      this.knowledgePreview = null;
-      const trigger = this.knowledgePreviewTrigger;
-      this.knowledgePreviewTrigger = null;
-      if (restoreFocus)
-        this.$nextTick(() => trigger?.focus({ preventScroll: true }));
+      if (item) return this.previewFile(item);
     },
     onConversationScroll() {
       this.hideResultPathTooltip();
-      this.closeKnowledgePreview(false);
-    },
-    dismissKnowledgePreview(event) {
-      if (this.previewVisible || event.target.closest?.("[data-knowledge-source-trigger]")) return;
-      const inPreview = this.$refs.knowledgePreview?.$el.contains(event.target);
-      const inSources = this.$refs.knowledgeSources?.$el.contains(event.target);
-      if (this.knowledgePreview && !inPreview) this.closeKnowledgePreview(false);
-      if (this.knowledgeSourceView && !inSources && !inPreview)
-        this.closeKnowledgeSources(false);
     },
     childConversationFor(activity) {
       if (activity.kind !== "subagent" || !activity.childSessionId) return null;
@@ -4517,7 +4618,10 @@ export default {
     },
     followConversationIfNearBottom() {
       const scroller = this.$refs.scroller;
-      if (scroller && scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight <= 24)
+      if (
+        scroller &&
+        scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight <= 24
+      )
         this.$nextTick(this.scrollBottom);
     },
     keepTogglePosition(trigger) {
@@ -4532,7 +4636,7 @@ export default {
       this.$nextTick(() => this.$refs.composer?.focus());
     },
     selectTask(item) {
-      this.taskListOpen = false;
+      if (item.id !== this.conversation.id) this.closeReader();
       this.$router
         .push({
           name: "chat",
@@ -4542,9 +4646,7 @@ export default {
         .catch(() => {});
     },
     newTask() {
-      this.taskListOpen = false;
-      this.closeKnowledgePreview(false);
-      this.closeKnowledgeSources(false);
+      this.closeReader();
       this.draftConversation = emptyConversation();
       this.model = this.draftConversation.model;
       this.draft = "";
@@ -4629,6 +4731,14 @@ export default {
           .pop() || "workspace"
       );
     },
+    taskCwdPath(cwd) {
+      return [
+        "workspace",
+        ...String(cwd || "")
+          .split(/[\\/]+/)
+          .filter(Boolean),
+      ].join("/");
+    },
     setCwd(cwd) {
       if (this.isDraftTask) this.draftConversation.cwd = cwd;
       else if (this.conversation)
@@ -4677,8 +4787,7 @@ export default {
     },
     openWorkspace(item) {
       this.selectTask(item);
-      if (this.isNarrowViewport) this.taskListOpen = false;
-      this.workspaceOpen = true;
+      if (!requestPanelVisibility(this, { workspaceVisible: true })) return;
       this.workspaceFolderId =
         this.expert.files.find(
           (folder) =>
@@ -4697,21 +4806,20 @@ export default {
       this.expandedFolderIds = ids;
     },
     toggleWorkspace() {
-      if (this.workspaceOpen) this.workspaceOpen = false;
-      else {
-        if (this.isNarrowViewport) this.taskListOpen = false;
-        this.showWorkspaceForCwd();
-      }
+      if (this.workspaceOpen)
+        requestPanelVisibility(this, { workspaceVisible: false });
+      else this.showWorkspaceForCwd();
     },
     toggleTaskList() {
-      if (this.isNarrowViewport) {
-        this.taskListOpen = !this.taskListOpen;
-        if (this.taskListOpen) this.workspaceOpen = false;
-      } else this.taskListCollapsed = !this.taskListCollapsed;
+      requestPanelVisibility(this, { taskVisible: this.taskListCollapsed });
     },
     showWorkspaceForCwd() {
-      if (this.isNarrowViewport) this.taskListOpen = false;
-      this.workspaceOpen = true;
+      if (!requestPanelVisibility(this, { workspaceVisible: true }))
+        return false;
+      this.locateWorkspaceForCwd();
+      return true;
+    },
+    locateWorkspaceForCwd() {
       const cwd = this.conversation?.cwd;
       const folder = this.expert?.files.find(
         (item) => item.kind === "folder" && this.folderPath(item.id) === cwd,
@@ -4808,7 +4916,9 @@ export default {
       const key = this.processExpansionKey(message);
       if (this.expandedProcess.includes(key)) {
         this.keepTogglePosition(event.currentTarget);
-        this.expandedProcess = this.expandedProcess.filter((value) => value !== key);
+        this.expandedProcess = this.expandedProcess.filter(
+          (value) => value !== key,
+        );
       } else {
         this.expandedProcess = [...this.expandedProcess, key];
       }
@@ -4826,7 +4936,9 @@ export default {
     toggleActivityDetail(id, event) {
       if (this.expandedActivityIds.includes(id)) {
         this.keepTogglePosition(event.currentTarget);
-        this.expandedActivityIds = this.expandedActivityIds.filter((value) => value !== id);
+        this.expandedActivityIds = this.expandedActivityIds.filter(
+          (value) => value !== id,
+        );
       } else {
         this.expandedActivityIds = [...this.expandedActivityIds, id];
       }
@@ -5083,21 +5195,167 @@ export default {
         type: item.name.endsWith(".csv") ? "text/csv" : "text/plain",
       });
     },
-    async previewFile(item) {
+    async previewFile(item, origin = "conversation") {
       if (!item) return;
       if (item.canPreview === false)
         return this.$message.warning("此文件暂不支持预览或已不可用");
-      this.clearPreview();
-      this.previewItem = item;
-      try {
-        const blob = await this.fileBlob(item);
-        if (blob.type.startsWith("image/"))
-          this.previewUrl = URL.createObjectURL(blob);
-        else this.previewText = await blob.text();
-        this.previewVisible = true;
-      } catch {
-        this.$message.error("文件已不可用");
+      const knowledge = item.knowledgeSource;
+      const layout = chatPanelLayout(this);
+      const plan = planPanelVisibility(
+        layout,
+        {
+          readerVisible: true,
+          workspaceVisible:
+            (!knowledge && origin === "workspace") || this.workspaceOpen,
+        },
+        {
+          readerWidth:
+            !layout.readerVisible && !this.readerWidthCustomized
+              ? READER_DEFAULT_WIDTH
+              : this.reader.width,
+        },
+      );
+      if (!plan) {
+        this.$message.info("空间不足，请先收窄或收起其他区域");
+        return;
       }
+      const tab = {
+        key: readerFileKey(item, this.expert.id),
+        item,
+        origin: knowledge ? "knowledge" : origin,
+        status: "loading",
+        format: "text",
+        text: "",
+        url: "",
+        error: "",
+        loadId: 0,
+      };
+      const opened = openReaderTab(this.reader, tab, this);
+      const citationChanged =
+        item.knowledgeCitation &&
+        opened.tab.item.knowledgeCitationKey !== item.knowledgeCitationKey;
+      const refresh =
+        item.knowledgeCitation &&
+        (citationChanged ||
+          opened.tab.item.snapshotContent !== item.snapshotContent ||
+          opened.tab.item.previewFormat !== item.previewFormat);
+      if (item.knowledgeCitation) opened.tab.item = item;
+      applyChatPanelLayout(this, plan);
+      this.revealReaderWorkspaceFile();
+      if (opened.tab === tab || refresh) await this.loadReaderTab(opened.tab);
+      if (citationChanged)
+        this.$nextTick(() =>
+          this.$refs?.fileReader?.resetReadingPosition(opened.tab.key),
+        );
+      this.$nextTick(this.updateReaderBounds);
+      return opened.tab;
+    },
+    async loadReaderTab(tab) {
+      const loadId = ++tab.loadId;
+      tab.status = "loading";
+      tab.error = "";
+      if (tab.url) URL.revokeObjectURL(tab.url);
+      tab.url = "";
+      const stillOpen = () =>
+        this.reader.tabs.includes(tab) && tab.loadId === loadId;
+      try {
+        const blob = await this.fileBlob(tab.item);
+        if (!stillOpen()) return;
+        if (blob.type.startsWith("image/")) {
+          tab.format = "image";
+          tab.url = URL.createObjectURL(blob);
+        } else if (blob.type === "application/pdf") {
+          tab.format = "pdf";
+          tab.url = URL.createObjectURL(blob);
+        } else {
+          if (
+            !/^text\/|^application\/(?:json|xml)/.test(blob.type) &&
+            !/\.(?:md|txt|csv|json|log|xml|ya?ml|js|ts|py|css|html)$/i.test(
+              tab.item.name,
+            )
+          )
+            throw new Error("此格式暂不支持在线预览，请下载文件查看");
+          const text = await blob.text();
+          if (!stillOpen()) return;
+          tab.text = text;
+          tab.format =
+            tab.item.previewFormat ||
+            (/\.md$/i.test(tab.item.name) ||
+            tab.item.knowledgeSource?.kind === "wiki"
+              ? "markdown"
+              : "text");
+        }
+        tab.status = "ready";
+      } catch (error) {
+        if (!stillOpen()) return;
+        tab.status = "error";
+        tab.error =
+          error.message === "此格式暂不支持在线预览，请下载文件查看"
+            ? error.message
+            : "文件已不可用，请重新读取或下载文件";
+      }
+    },
+    selectReaderTab(key) {
+      if (!activateReaderTab(this.reader, key)) return;
+      this.revealReaderWorkspaceFile();
+    },
+    revealReaderWorkspaceFile() {
+      const location = this.activeReaderWorkspaceLocation;
+      if (!this.workspaceOpen || !location) return;
+      const key = this.reader.activeKey;
+      const fileId = location.file.id;
+      this.workspaceFolderId = location.file.parentId || null;
+      this.expandedFolderIds = [
+        ...new Set([...this.expandedFolderIds, ...location.ancestorIds]),
+      ];
+      this.$nextTick(() => {
+        if (
+          !this.workspaceOpen ||
+          this.reader.activeKey !== key ||
+          this.activeReaderWorkspaceLocation?.file.id !== fileId
+        )
+          return;
+        const tree = this.$refs.workspaceTree;
+        const row =
+          tree &&
+          [...tree.querySelectorAll("[data-workspace-file-id]")].find(
+            (element) => element.dataset.workspaceFileId === fileId,
+          );
+        if (!row) return;
+        const bounds = tree.getBoundingClientRect();
+        const target = row.getBoundingClientRect();
+        if (target.top < bounds.top) tree.scrollTop += target.top - bounds.top;
+        else if (target.bottom > bounds.bottom)
+          tree.scrollTop += target.bottom - bounds.bottom;
+      });
+    },
+    closeReaderFile(key) {
+      const activeKey = this.reader.activeKey;
+      const tab = this.reader.tabs.find((entry) => entry.key === key);
+      if (tab?.url) URL.revokeObjectURL(tab.url);
+      closeReaderTab(this.reader, key);
+      const activeChanged = this.reader.activeKey !== activeKey;
+      if (activeChanged) this.revealReaderWorkspaceFile();
+    },
+    closeReader() {
+      for (const tab of this.reader.tabs)
+        if (tab.url) URL.revokeObjectURL(tab.url);
+      closeFileReader(this.reader);
+    },
+    updateReaderBounds() {
+      const body = this.$refs.chatBody;
+      if (!body) return;
+      applyChatPanelLayout(this, fitPanelLayout(chatPanelLayout(this)));
+    },
+    resizeReader(width, customized = true) {
+      const plan = resizePanelLayout(chatPanelLayout(this), "reader", width);
+      if (!plan) return;
+      applyChatPanelLayout(this, plan);
+      if (customized) this.readerWidthCustomized = true;
+    },
+    resizeSidebar(panel, width) {
+      const plan = resizePanelLayout(chatPanelLayout(this), panel, width);
+      if (plan) applyChatPanelLayout(this, plan);
     },
     async downloadFile(item) {
       if (!item) return;
@@ -5108,11 +5366,6 @@ export default {
       } catch {
         this.$message.error("文件已不可用");
       }
-    },
-    clearPreview() {
-      if (this.previewUrl) URL.revokeObjectURL(this.previewUrl);
-      this.previewUrl = "";
-      this.previewText = "";
     },
   },
 };

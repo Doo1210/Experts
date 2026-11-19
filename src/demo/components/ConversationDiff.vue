@@ -9,6 +9,7 @@
         <span class="pc-file-diff-path" :title="section.path || title">{{
           section.path || title
         }}</span>
+        <slot v-if="sectionIndex === 0" name="header-actions" />
         <span
           class="pc-file-diff-counts"
           :aria-label="`新增 ${section.added} 行，删除 ${section.removed} 行`"

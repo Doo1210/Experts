@@ -44,12 +44,17 @@ import {
   readFileActivityScene,
 } from "./tool-activity-scenes";
 
+import {
+  QUALITY_REPORT_CONTENT,
+  upgradeDemoFileSamples,
+} from "./file-demo-content";
+
 export const STORAGE_KEY = "digital-employee-demo-v3";
 const clone = (value) => JSON.parse(JSON.stringify(value));
 const uid = (prefix) =>
   `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`;
 const now = () => new Date().toISOString();
-const DEMO_DATA_REVISION = 29;
+const DEMO_DATA_REVISION = 30;
 const HUMAN_REQUEST_TIMEOUT_DEMO_MS = 10_000;
 const TEXT_DEMO_TRIGGERS = new Set([
   "演示过程",
@@ -521,6 +526,13 @@ export function createSeed() {
             parentId: "f_quality_docs",
             kind: "file",
             content: "日期,良率\n2026-10-08,97.2%\n2026-10-09,96.8%",
+          },
+          {
+            id: "f_quality_report",
+            name: "良率核对报告.md",
+            parentId: "f_quality_docs",
+            kind: "file",
+            content: QUALITY_REPORT_CONTENT,
           },
           {
             id: "f_quality_im",
@@ -1245,6 +1257,19 @@ export function upgradeExpertFixtures(saved) {
         createEventTaskFixtures().filter((event) => event.expertId === "exp_quality"),
       ))
         if (!known.has(item.id)) quality.files.push(item);
+    }
+  }
+  if (previousRevision < 30) {
+    upgradeDemoFileSamples(saved);
+    const quality = saved.experts.find((expert) => expert.id === "exp_quality");
+    if (
+      quality?.files.some((file) => file.id === "f_quality_docs") &&
+      !quality.files.some((file) => file.id === "f_quality_report")
+    ) {
+      const report = seed.experts
+        .find((expert) => expert.id === "exp_quality")
+        .files.find((file) => file.id === "f_quality_report");
+      quality.files.push(clone(report));
     }
   }
   saved.demoDataRevision = DEMO_DATA_REVISION;
