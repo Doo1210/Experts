@@ -56,7 +56,7 @@ describe("文件阅读区与侧栏状态", () => {
     expect(context.readerWidthCustomized).toBe(false);
   });
 
-  it("阅读区默认固定为 440px，不随工作空间宽度变化，手动改过后保留选择", async () => {
+  it("阅读区默认固定为 480px，不随工作空间宽度变化，手动改过后保留选择", async () => {
     const context = {
       expert: { id: "expert", files: [] },
       reader: createFileReader(),
@@ -77,7 +77,7 @@ describe("文件阅读区与侧栏状态", () => {
       snapshotContent: "# 本轮",
     };
     await Chat.methods.previewFile.call(context, item);
-    expect(context.reader.width).toBe(440);
+    expect(context.reader.width).toBe(480);
     closeFileReader(context.reader);
     Chat.methods.resizeReader.call(context, 520);
     expect(context.readerWidthCustomized).toBe(true);
@@ -145,9 +145,9 @@ describe("文件阅读区与侧栏状态", () => {
     },
   );
 
-  it("初始宽度为 440px，拖动宽度受最小值和可用空间约束", () => {
-    expect(createFileReader().width).toBe(440);
-    expect(READER_DEFAULT_WIDTH).toBe(440);
+  it("初始宽度为 480px，拖动宽度受最小值和可用空间约束", () => {
+    expect(createFileReader().width).toBe(480);
+    expect(READER_DEFAULT_WIDTH).toBe(480);
     expect(constrainReaderWidth(100, 700)).toBe(260);
     expect(constrainReaderWidth(1000, 700)).toBe(700);
     expect(constrainReaderWidth(482.6, 700)).toBe(483);

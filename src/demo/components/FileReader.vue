@@ -2,10 +2,12 @@
   <section
     id="pc-file-reader"
     class="pc-file-reader"
+    :class="{ 'pc-reader-standalone': standalone }"
     :style="{ width: width + 'px', flexBasis: width + 'px' }"
     aria-label="文件阅读区"
   >
     <PanelResizeHandle
+      v-if="!standalone"
       class="pc-reader-resize"
       label="调整文件阅读区宽度"
       controls="pc-file-reader"
@@ -54,17 +56,11 @@
               @click="selectTab(tab.key)"
               @keydown="navigateTabs($event, index)"
             >
-              <i
-                :class="
-                  tab.item.knowledgeSource
-                    ? 'el-icon-reading'
-                    : 'el-icon-document'
-                "
-                aria-hidden="true"
-              />
+              <ReaderSourceIcon :kind="tabSourceKind(tab)" />
               <span>{{ tab.item.name }}</span>
             </button>
             <button
+              v-if="!standalone"
               class="pc-reader-tab-close"
               type="button"
               :aria-label="'关闭文件 ' + tab.item.name"
@@ -87,7 +83,7 @@
           </svg>
         </button>
       </div>
-      <div class="pc-reader-panel-actions">
+      <div v-if="!standalone" class="pc-reader-panel-actions">
         <button
           type="button"
           class="pc-reader-close-panel"
@@ -100,6 +96,16 @@
       </div>
     </div>
     <template v-if="activeTab">
+      <ReaderContextBar
+        :context="context"
+        :available-width="width"
+        :ready="activeTab.status === 'ready'"
+        :busy="actionBusy || activeTab.status !== 'ready'"
+        :standalone="standalone"
+        @locate="locateCitation"
+        @open="$emit('open-window', activeTab)"
+        @graph="$emit('view-graph', activeTab)"
+      />
       <div
         id="pc-reader-document"
         :key="activeTab.key"
@@ -110,6 +116,13 @@
         :aria-busy="activeTab.status === 'loading'"
         @scroll="rememberScroll"
       >
+        <div
+          v-if="activeTab.status === 'ready' && activeTab.item.previewNotice"
+          class="pc-reader-notice"
+          role="status"
+        >
+          {{ activeTab.item.previewNotice }}
+        </div>
         <div
           v-if="activeTab.status === 'loading'"
           class="pc-reader-empty"
@@ -152,19 +165,28 @@
 <script>
 import ConversationMarkdown from "./ConversationMarkdown.vue";
 import PanelResizeHandle from "./PanelResizeHandle.vue";
+import ReaderContextBar from "./ReaderContextBar.vue";
+import ReaderSourceIcon from "./ReaderSourceIcon.vue";
 import { READER_MIN_WIDTH } from "../file-reader";
+import { citationTextRanges, readerDocumentContext } from "../reader-context";
 
 export default {
   name: "FileReader",
   components: {
     ConversationMarkdown,
     PanelResizeHandle,
+    ReaderContextBar,
+    ReaderSourceIcon,
   },
   props: {
     tabs: { type: Array, required: true },
+    files: { type: Array, default: () => [] },
     activeKey: { type: String, default: null },
     width: { type: Number, required: true },
     maxWidth: { type: Number, required: true },
+    context: { type: Object, default: () => ({ path: "", actions: [] }) },
+    actionBusy: { type: Boolean, default: false },
+    standalone: { type: Boolean, default: false },
   },
   data() {
     return {
@@ -189,6 +211,14 @@ export default {
     tabSignature() {
       return this.tabs.map((tab) => [tab.key, tab.item.name]).join("|");
     },
+    citationSignature() {
+      return JSON.stringify([
+        this.activeKey,
+        this.activeTab?.status,
+        this.activeTab?.text,
+        this.activeTab?.item.knowledgeCitationKey,
+      ]);
+    },
   },
   mounted() {
     if (typeof ResizeObserver !== "undefined") {
@@ -196,6 +226,7 @@ export default {
       this._tabsResizeObserver.observe(this.$refs.tabs);
     }
     this.$nextTick(this.revealActiveTab);
+    this.$nextTick(() => this.updateCitationHighlights(true));
   },
   watch: {
     activeKey() {
@@ -212,11 +243,76 @@ export default {
     width() {
       this.$nextTick(this.revealActiveTab);
     },
+    citationSignature(value, previous) {
+      const previousKey = previous ? JSON.parse(previous)[0] : null;
+      this.$nextTick(() =>
+        this.updateCitationHighlights(previousKey === this.activeKey),
+      );
+    },
   },
   beforeDestroy() {
     this._tabsResizeObserver?.disconnect();
+    CSS.highlights?.delete("pc-reader-citation");
   },
   methods: {
+    tabSourceKind(tab) {
+      return tab.key === this.activeKey
+        ? this.context.kind
+        : readerDocumentContext(tab.item, this.files).kind;
+    },
+    focusCitation(key) {
+      if (key !== this.activeKey) return;
+      this.updateCitationHighlights(true);
+    },
+    updateCitationHighlights(locate = false) {
+      CSS.highlights?.delete("pc-reader-citation");
+      this._citationRanges = [];
+      const pane = this.$refs.document;
+      if (!pane || this.activeTab?.status !== "ready") return;
+      const nodes = [];
+      const walker = document.createTreeWalker(pane, NodeFilter.SHOW_TEXT);
+      let text = "",
+        node;
+      while ((node = walker.nextNode())) {
+        nodes.push({
+          node,
+          start: text.length,
+          end: text.length + node.length,
+        });
+        text += node.textContent;
+      }
+      for (const match of citationTextRanges(
+        text,
+        this.activeTab.item.citationTexts,
+      )) {
+        const first = nodes.find((entry) => entry.end > match.start);
+        const last = nodes.find((entry) => entry.end >= match.end);
+        if (!first || !last) continue;
+        const range = document.createRange();
+        range.setStart(first.node, match.start - first.start);
+        range.setEnd(last.node, match.end - last.start);
+        this._citationRanges.push(range);
+      }
+      if (CSS.highlights && typeof Highlight !== "undefined")
+        CSS.highlights.set(
+          "pc-reader-citation",
+          new Highlight(...this._citationRanges),
+        );
+      if (locate && this._citationRanges.length) this.locateCitation();
+    },
+    locateCitation() {
+      const range = this._citationRanges?.[0];
+      const pane = this.$refs.document;
+      if (!range || !pane) {
+        this.$message.info("暂未在正文中找到对应引用片段");
+        return;
+      }
+      pane.scrollTop +=
+        range.getBoundingClientRect().top -
+        pane.getBoundingClientRect().top -
+        28;
+      this.scrollPositions[this.activeKey] = pane.scrollTop;
+    },
     resetReadingPosition(key) {
       this.scrollPositions[key] = 0;
       if (this.activeKey === key && this.$refs.document)

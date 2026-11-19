@@ -2429,14 +2429,19 @@
         v-if="reader.tabs.length"
         ref="fileReader"
         :tabs="reader.tabs"
+        :files="expert.files"
         :active-key="reader.activeKey"
         :width="reader.width"
         :max-width="readerMaxWidth"
+        :context="activeReaderContext"
+        :action-busy="readerActionBusy"
         @select="selectReaderTab"
         @close-tab="closeReaderFile"
         @close="closeReader"
         @resize="resizeReader"
         @retry="loadReaderTab"
+        @open-window="openReaderWindow()"
+        @view-graph="openReaderWindow('graph')"
       />
       <aside
         v-show="workspaceOpen"
@@ -2809,6 +2814,8 @@ import ConversationDiff from "../components/ConversationDiff.vue";
 import ConversationLog from "../components/ConversationLog.vue";
 import KnowledgeActivityDetail from "../components/KnowledgeActivityDetail.vue";
 import FileReader from "../components/FileReader.vue";
+import { readerDocumentContext } from "../reader-context";
+import { saveReaderWindow } from "../reader-window";
 import PanelResizeHandle from "../components/PanelResizeHandle.vue";
 import {
   minimumPanelCanvasWidth,
@@ -2971,6 +2978,7 @@ export default {
       folderDialogVisible: false,
       folderNameDraft: "",
       reader: createFileReader(),
+      readerActionBusy: false,
       readerMaxWidth: READER_DEFAULT_WIDTH,
       resultPathTooltip: { text: "", visible: false, left: 0, top: 0 },
     };
@@ -2998,6 +3006,12 @@ export default {
       return readerWorkspaceFileLocation(
         this.expert?.files || [],
         this.activeReaderTab?.item,
+      );
+    },
+    activeReaderContext() {
+      return readerDocumentContext(
+        this.activeReaderTab?.item,
+        this.expert?.files || [],
       );
     },
     knowledgeReferenceEnabled() {
@@ -5247,12 +5261,39 @@ export default {
       applyChatPanelLayout(this, plan);
       this.revealReaderWorkspaceFile();
       if (opened.tab === tab || refresh) await this.loadReaderTab(opened.tab);
-      if (citationChanged)
+      if (item.knowledgeCitation && item.citationTexts?.length)
         this.$nextTick(() =>
-          this.$refs?.fileReader?.resetReadingPosition(opened.tab.key),
+          this.$refs?.fileReader?.focusCitation(opened.tab.key),
         );
       this.$nextTick(this.updateReaderBounds);
       return opened.tab;
+    },
+    async openReaderWindow(mode = "document") {
+      const active = this.activeReaderTab;
+      if (!active || active.status !== "ready" || this.readerActionBusy) return;
+      const tab = { ...active, item: JSON.parse(JSON.stringify(active.item)) };
+      const context = this.activeReaderContext;
+      const popup = window.open("about:blank", "_blank");
+      if (!popup) return this.$message.info("请允许浏览器打开新标签页后重试");
+      popup.opener = null;
+      this.readerActionBusy = true;
+      try {
+        const id = crypto.randomUUID();
+        const blob = ["image", "pdf"].includes(tab.format)
+          ? await this.fileBlob(tab.item)
+          : null;
+        await saveReaderWindow(id, tab, context, blob, mode);
+        const { href } = this.$router.resolve({
+          name: "reader-window",
+          params: { id },
+        });
+        popup.location.replace(href);
+      } catch {
+        popup.close();
+        this.$message.error("文档暂时无法打开，请重试");
+      } finally {
+        this.readerActionBusy = false;
+      }
     },
     async loadReaderTab(tab) {
       const loadId = ++tab.loadId;

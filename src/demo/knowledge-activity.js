@@ -97,6 +97,9 @@ export function knowledgeSourceDocument(source) {
       ? source.title || demoTitle || "Wiki 页面"
       : document?.name || demoTitle || source.title || "引用文档",
     library: library?.name || source.library_name || demoLibrary,
+    directoryPath:
+      source.directory_path || source.locator?.directory_path || [],
+    indexPath: source.index_path || source.locator?.index_path || [],
     original: knowledgeDemoOriginals[id] || knowledgeDemoOriginals[source.id],
   };
 }

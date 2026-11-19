@@ -12,6 +12,11 @@ const router = new VueRouter({
   base: appBase,
   routes: [
     {
+      path: "/reader/:id",
+      name: "reader-window",
+      component: () => import("@/demo/pages/ReaderWindow.vue"),
+    },
+    {
       path: "/",
       name: "experts",
       component: () => import("@/demo/pages/Experts.vue"),

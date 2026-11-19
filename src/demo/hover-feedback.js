@@ -68,7 +68,20 @@ export function installHoverFeedback() {
       "aria-describedby",
       [previousDescription, popup.id].filter(Boolean).join(" "),
     );
-    popup.textContent = title;
+    const heading = element.dataset.tooltipHeading;
+    const description = element.dataset.tooltipDescription;
+    const structured = Boolean(heading && description);
+    popup.classList.toggle("is-document-path", structured);
+    popup.textContent = "";
+    if (structured) {
+      const label = document.createElement("div");
+      label.className = "demo-hover-tooltip-heading";
+      label.textContent = heading;
+      const detail = document.createElement("div");
+      detail.className = "demo-hover-tooltip-description";
+      detail.textContent = description;
+      popup.append(label, detail);
+    } else popup.textContent = title;
     popup.hidden = false;
     popup.style.visibility = "hidden";
     position(element);

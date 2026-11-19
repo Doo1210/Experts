@@ -4,11 +4,13 @@ const sources = {
   manual: {
     id: "zx42-maintenance",
     title: "ZX-42 维护手册",
+    directory_path: ["设备运维", "校准作业"],
     locator: { text_anchor: "校准前检查" },
   },
   procedure: {
     id: "sensor-calibration",
     title: "传感器校准作业规范",
+    directory_path: ["质量标准", "传感器"],
     locator: { text_anchor: "零点与量程复核" },
   },
   wiki: {
@@ -16,6 +18,7 @@ const sources = {
     kind: "wiki",
     title: "校准记录与复核",
     library_name: "生产工艺手册",
+    index_path: ["设备运维", "校准管理"],
     locator: {
       source_type: "wiki",
       wiki_page_id: "zx42-wiki",

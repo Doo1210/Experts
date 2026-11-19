@@ -40,7 +40,7 @@ function context(width = 1200) {
     workspacePanelWidth: 200,
     $refs: {
       chatBody: { clientWidth: width },
-      fileReader: { resetReadingPosition: vi.fn() },
+      fileReader: { focusCitation: vi.fn() },
     },
     $message: { info: vi.fn() },
     $nextTick: vi.fn((callback) => callback?.()),
@@ -67,18 +67,20 @@ function context(width = 1200) {
 }
 
 describe("点击知识引用直接阅读对应内容", () => {
-  it("文档引用只读取点击的片段，不附加其他引用或整个原文", () => {
+  it("文档引用展示全文，单独保留所点击引用的高亮片段", () => {
     const item = knowledgeCitationItem(
       "answer-1",
       citations,
       [1],
       "zx42-maintenance",
     );
-    expect(item.snapshotContent).toBe(evidence[0].hit.text);
-    expect(item.snapshotContent).not.toContain(evidence[1].hit.text);
-    expect(item.previewFormat).toBe("text");
+    expect(item.snapshotContent).toBe(
+      knowledgeDemoOriginals["zx42-maintenance"].content,
+    );
+    expect(item.citationTexts).toEqual([evidence[0].hit.text]);
+    expect(item.previewFormat).toBe("markdown");
   });
-  it("合并引用只包含当前入口关联的文档片段", () => {
+  it("合并引用展示全文，仅高亮当前文档的指定片段", () => {
     const item = knowledgeCitationItem(
       "answer-1",
       citations,
@@ -86,12 +88,12 @@ describe("点击知识引用直接阅读对应内容", () => {
       "zx42-maintenance",
     );
     expect(item.snapshotContent).toBe(
-      evidence
-        .slice(0, 3)
-        .map((e) => e.hit.text)
-        .join("\n\n"),
+      knowledgeDemoOriginals["zx42-maintenance"].content,
     );
-    expect(item.snapshotContent).not.toContain(evidence[3].hit.text);
+    expect(item.citationTexts).toEqual(
+      evidence.slice(0, 3).map((e) => e.hit.text),
+    );
+    expect(item.citationTexts).not.toContain(evidence[3].hit.text);
   });
   it("Wiki 引用读取完整正文，包括表格及末尾内容", () => {
     const item = knowledgeCitationItem("answer-1", citations, [6], "zx42-wiki");
@@ -155,6 +157,24 @@ describe("点击知识引用直接阅读对应内容", () => {
       knowledgeCitationItem("answer-1", citations, [99], "zx42-maintenance"),
     ).toBeNull();
   });
+  it("缺少文档全文时明确提示，并保留已有引用片段", () => {
+    const item = knowledgeCitationItem(
+      "answer",
+      [
+        {
+          number: 1,
+          key: "partial",
+          evidence: { access: "available", hit: { text: "已有片段" } },
+          documents: [{ id: "partial", title: "部分资料.txt", kind: "rag" }],
+        },
+      ],
+      [1],
+      "partial",
+    );
+    expect(item.snapshotContent).toBe("已有片段");
+    expect(item.previewNotice).toBe("暂未取得完整文档，当前仅展示引用片段");
+    expect(item.citationTexts).toEqual(["已有片段"]);
+  });
   it("同一文档的不同片段及不同回合共用文档身份，保留引用身份", () => {
     const first = knowledgeCitationItem(
       "answer-1",
@@ -194,10 +214,10 @@ describe("点击知识引用直接阅读对应内容", () => {
     });
     expect(vm.reader.tabs).toHaveLength(1);
     expect(vm.activeReaderTab).toMatchObject({
-      format: "text",
+      format: "markdown",
       status: "ready",
       origin: "knowledge",
-      text: evidence[0].hit.text,
+      text: knowledgeDemoOriginals["zx42-maintenance"].content,
     });
     expect(vm.workspaceOpen).toBe(true);
     vm.workspaceOpen = false;
@@ -207,7 +227,7 @@ describe("点击知识引用直接阅读对应内容", () => {
     expect(vm.taskListCollapsed).toBe(true);
     expect(vm.reader.tabs).toEqual([]);
   });
-  it("同一文档不同片段复用标签，并切换正文及阅读位置", async () => {
+  it("同一文档不同片段复用全文标签，点击引用均定位高亮", async () => {
     const { vm, message } = context();
     const click = (numbers) =>
       vm.openKnowledgeCitation(message, {
@@ -222,14 +242,19 @@ describe("点击知识引用直接阅读对应内容", () => {
     await click([2]);
     expect(vm.reader.tabs).toHaveLength(1);
     expect(vm.activeReaderTab).toBe(first);
-    expect(vm.activeReaderTab.text).toBe(evidence[1].hit.text);
-    expect(vm.$refs.fileReader.resetReadingPosition).toHaveBeenCalledTimes(1);
-    expect(vm.$refs.fileReader.resetReadingPosition).toHaveBeenCalledWith(
-      first.key,
+    expect(vm.activeReaderTab.text).toBe(
+      knowledgeDemoOriginals["zx42-maintenance"].content,
     );
+    expect(vm.activeReaderTab.item.citationTexts).toEqual([
+      evidence[1].hit.text,
+    ]);
+    expect(vm.$refs.fileReader.focusCitation).toHaveBeenCalledTimes(3);
+    expect(vm.$refs.fileReader.focusCitation).toHaveBeenCalledWith(first.key);
     await click([1]);
     expect(vm.reader.tabs).toHaveLength(1);
-    expect(vm.activeReaderTab.text).toBe(evidence[0].hit.text);
+    expect(vm.activeReaderTab.item.citationTexts).toEqual([
+      evidence[0].hit.text,
+    ]);
   });
   it("知识引用和普通文件共用标签区，Wiki 仍使用 Markdown 渲染", async () => {
     const { vm, message } = context();
@@ -257,7 +282,10 @@ describe("点击知识引用直接阅读对应内容", () => {
     turn.activities[0].evidence[0].hit.text = "更新后的片段";
     await click();
     expect(vm.reader.tabs).toHaveLength(1);
-    expect(vm.activeReaderTab.text).toBe("更新后的片段");
+    expect(vm.activeReaderTab.item.citationTexts).toEqual(["更新后的片段"]);
+    expect(vm.activeReaderTab.text).toBe(
+      knowledgeDemoOriginals["zx42-maintenance"].content,
+    );
   });
   it("切换其他文档后再点击原文档片段，激活原标签并更新内容", async () => {
     const { vm, message } = context();
@@ -276,13 +304,13 @@ describe("点击知识引用直接阅读对应内容", () => {
     });
     expect(vm.reader.tabs).toHaveLength(2);
     expect(vm.activeReaderTab).toBe(first);
-    expect(vm.activeReaderTab.text).toBe(evidence[2].hit.text);
-    expect(vm.$refs.fileReader.resetReadingPosition).toHaveBeenCalledWith(
-      first.key,
-    );
+    expect(vm.activeReaderTab.item.citationTexts).toEqual([
+      evidence[2].hit.text,
+    ]);
+    expect(vm.$refs.fileReader.focusCitation).toHaveBeenCalledWith(first.key);
   });
 
-  it("不同回合引用同一文档复用标签，展示所点击回合的片段", async () => {
+  it("不同回合引用同一文档复用标签，高亮所点击回合的片段", async () => {
     const { vm, message, turn } = context();
     await vm.openKnowledgeCitation(message, {
       numbers: [1],
@@ -298,7 +326,7 @@ describe("点击知识引用直接阅读对应内容", () => {
     });
     expect(vm.reader.tabs).toHaveLength(1);
     expect(vm.activeReaderTab).toBe(first);
-    expect(vm.activeReaderTab.text).toBe("第二轮引用片段");
+    expect(vm.activeReaderTab.item.citationTexts).toEqual(["第二轮引用片段"]);
   });
 
   it("同名不同文档和缺少文档身份的引用不会被误合并", () => {
@@ -348,7 +376,12 @@ describe("点击知识引用直接阅读对应内容", () => {
     );
     await first;
     expect(vm.reader.tabs).toHaveLength(1);
-    expect(vm.activeReaderTab.text).toBe(evidence[1].hit.text);
+    expect(vm.activeReaderTab.text).toBe(
+      knowledgeDemoOriginals["zx42-maintenance"].content,
+    );
+    expect(vm.activeReaderTab.item.citationTexts).toEqual([
+      evidence[1].hit.text,
+    ]);
   });
 
   it("空间不足时不新增标签，也不改变原侧栏状态", async () => {

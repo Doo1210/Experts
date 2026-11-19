@@ -3,7 +3,7 @@ export const WORKSPACE_PANEL_WIDTH = 200;
 export const SIDEBAR_MIN_WIDTH = 160;
 export const SIDEBAR_MAX_WIDTH = 480;
 export const READER_MIN_WIDTH = 260;
-export const READER_DEFAULT_WIDTH = 440;
+export const READER_DEFAULT_WIDTH = 480;
 
 export function createFileReader() {
   return {

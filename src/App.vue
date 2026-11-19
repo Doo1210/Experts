@@ -1,5 +1,8 @@
 <template>
-  <div class="demo-app" :class="{ embedded }">
+  <div
+    class="demo-app"
+    :class="{ embedded, 'is-reader-window': $route.name === 'reader-window' }"
+  >
     <aside class="platform-sidebar" aria-label="主导航">
       <nav class="sidebar-nav">
         <router-link class="nav-item active" to="/">
