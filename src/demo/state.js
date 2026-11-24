@@ -1,4 +1,6 @@
 import Vue from "vue";
+import { installAcceptanceFixtures } from "./acceptance-fixtures";
+const acceptanceSamplesEnabled = import.meta.env.MODE !== "test";
 import {
   demoChannelDeliveries,
   demoChannelTargets,
@@ -144,8 +146,7 @@ function modificationSceneForExpert(scene, expert) {
   const files = expert?.files || [];
   if (
     files.some(
-      (file) =>
-        file.id === scene.modifies.fileId && file.kind === "file",
+      (file) => file.id === scene.modifies.fileId && file.kind === "file",
     )
   )
     return next;
@@ -221,7 +222,9 @@ function demoUnifiedDiff(before, after, path) {
     ...newLines
       .slice(prefix, newLines.length - suffix)
       .map((line) => `+${line}`),
-    ...oldLines.slice(oldLines.length - suffix, oldEnd).map((line) => ` ${line}`),
+    ...oldLines
+      .slice(oldLines.length - suffix, oldEnd)
+      .map((line) => ` ${line}`),
   ].join("\n");
 }
 
@@ -548,7 +551,9 @@ export function createSeed() {
             kind: "folder",
           },
           ...createEventWorkspaceItems(
-            createEventTaskFixtures().filter((event) => event.expertId === "exp_quality"),
+            createEventTaskFixtures().filter(
+              (event) => event.expertId === "exp_quality",
+            ),
           ),
         ],
       },
@@ -625,7 +630,9 @@ export function createSeed() {
             kind: "folder",
           },
           ...createEventWorkspaceItems(
-            createEventTaskFixtures().filter((event) => event.expertId === "exp_ops"),
+            createEventTaskFixtures().filter(
+              (event) => event.expertId === "exp_ops",
+            ),
           ),
         ],
       },
@@ -768,6 +775,7 @@ export function createSeed() {
         channel.deliveries = demoChannelDeliveries(expert.id, channel.id);
     }
   }
+  if (acceptanceSamplesEnabled) installAcceptanceFixtures(seed);
   return seed;
 }
 
@@ -1191,13 +1199,22 @@ export function upgradeExpertFixtures(saved) {
       }
       if (existing.id === "evt_daily" && existing.name === "每日质量巡检")
         existing.name = fixture.name;
-      for (const key of ["sourceSummary", "sourceName", "cwd", "instruction", "branch", "delivery"])
+      for (const key of [
+        "sourceSummary",
+        "sourceName",
+        "cwd",
+        "instruction",
+        "branch",
+        "delivery",
+      ])
         if (!existing[key]) existing[key] = fixture[key];
       existing.runs = Array.isArray(existing.runs) ? existing.runs : [];
       const known = new Set(existing.runs.map((run) => run.id));
       for (const run of fixture.runs)
         if (!known.has(run.id)) existing.runs.push(clone(run));
-      existing.runs.sort((a, b) => String(b.at || "").localeCompare(String(a.at || "")));
+      existing.runs.sort((a, b) =>
+        String(b.at || "").localeCompare(String(a.at || "")),
+      );
     }
     for (const expert of saved.experts) {
       const events = fixtures.filter((event) => event.expertId === expert.id);
@@ -1227,34 +1244,49 @@ export function upgradeExpertFixtures(saved) {
       if (!savedChat || !fixture) continue;
       if (savedChat.runState === "ready" || savedChat.runState === "running")
         savedChat.runState = "running";
-      const segment = savedChat.chatType === "single"
-        ? savedChat.segments?.[0]
-        : savedChat.scopes?.[0]?.segments?.[0];
-      const sample = fixture.chatType === "single"
-        ? fixture.segments?.[0]
-        : fixture.scopes?.[0]?.segments?.[0];
+      const segment =
+        savedChat.chatType === "single"
+          ? savedChat.segments?.[0]
+          : savedChat.scopes?.[0]?.segments?.[0];
+      const sample =
+        fixture.chatType === "single"
+          ? fixture.segments?.[0]
+          : fixture.scopes?.[0]?.segments?.[0];
       if (!segment || !sample) continue;
       const known = new Set((segment.messages || []).map((entry) => entry.id));
-      let dbId = Math.max(0, ...(segment.messages || []).map((entry) =>
-        Number.isFinite(entry.dbId) ? entry.dbId : 0,
-      ));
-      for (const entry of sample.messages.filter((item) => item.id.includes("-running-")))
-        if (!known.has(entry.id)) segment.messages.push({ ...clone(entry), dbId: ++dbId });
+      let dbId = Math.max(
+        0,
+        ...(segment.messages || []).map((entry) =>
+          Number.isFinite(entry.dbId) ? entry.dbId : 0,
+        ),
+      );
+      for (const entry of sample.messages.filter((item) =>
+        item.id.includes("-running-"),
+      ))
+        if (!known.has(entry.id))
+          segment.messages.push({ ...clone(entry), dbId: ++dbId });
     }
     for (const fixture of createEventTaskFixtures()) {
-      if (!["evt_pulsar_quality", "evt_kafka_sensor"].includes(fixture.id)) continue;
-      const event = (saved.eventRuns || []).find((item) => item.id === fixture.id);
+      if (!["evt_pulsar_quality", "evt_kafka_sensor"].includes(fixture.id))
+        continue;
+      const event = (saved.eventRuns || []).find(
+        (item) => item.id === fixture.id,
+      );
       if (!event) continue;
       const known = new Set((event.runs || []).map((run) => run.id));
       for (const run of fixture.runs)
         if (!known.has(run.id)) event.runs.unshift(clone(run));
-      event.runs.sort((a, b) => String(b.at || "").localeCompare(String(a.at || "")));
+      event.runs.sort((a, b) =>
+        String(b.at || "").localeCompare(String(a.at || "")),
+      );
     }
     const quality = saved.experts.find((expert) => expert.id === "exp_quality");
     if (quality) {
       const known = new Set((quality.files || []).map((file) => file.id));
       for (const item of createEventWorkspaceItems(
-        createEventTaskFixtures().filter((event) => event.expertId === "exp_quality"),
+        createEventTaskFixtures().filter(
+          (event) => event.expertId === "exp_quality",
+        ),
       ))
         if (!known.has(item.id)) quality.files.push(item);
     }
@@ -1292,12 +1324,14 @@ function readSeed() {
           !parsed.projectFixtureVersion ||
           Number(parsed.demoDataRevision || 1) < DEMO_DATA_REVISION;
         const enriched = upgradeExpertFixtures(enrichProjectFixtures(parsed));
+        const acceptanceChanged =
+          acceptanceSamplesEnabled && installAcceptanceFixtures(enriched);
         let turnsChanged = false;
         enriched.conversations.forEach((conversation) => {
           if (normalizeConversationTurns(conversation)) turnsChanged = true;
           if (normalizeSessionPresentation(conversation)) turnsChanged = true;
         });
-        if (needsFixtureUpgrade || turnsChanged)
+        if (needsFixtureUpgrade || turnsChanged || acceptanceChanged)
           localStorage.setItem(STORAGE_KEY, JSON.stringify(enriched));
         return enriched;
       }
@@ -1815,9 +1849,7 @@ export function sendDemoMessage(
   const expert = expertById(conversation.expertId);
   const memoryToolUnavailable =
     matchedToolScene?.name === "memory" && !expert?.memoryEnabled;
-  const demoFile = expert?.files.find(
-    (item) => item.kind === "file",
-  );
+  const demoFile = expert?.files.find((item) => item.kind === "file");
   const materializeToolScene = (scene) => {
     if (!scene) return null;
     const source = scene.baseTrigger
@@ -1842,7 +1874,9 @@ export function sendDemoMessage(
         result: {
           success: true,
           skills,
-          categories: [...new Set(skills.map((item) => item.category).filter(Boolean))],
+          categories: [
+            ...new Set(skills.map((item) => item.category).filter(Boolean)),
+          ],
           count: skills.length,
         },
       };
@@ -1889,9 +1923,10 @@ export function sendDemoMessage(
     ? null
     : materializeToolScene(matchedToolScene);
   const processDemo = !toolScene && text.trim() === "演示过程";
-  const referenceKnowledge = !isDemoTrigger || processDemo
-    ? knowledgeSceneForReferences(sourceRefs)
-    : null;
+  const referenceKnowledge =
+    !isDemoTrigger || processDemo
+      ? knowledgeSceneForReferences(sourceRefs)
+      : null;
   const knowledgeScene = canUseKnowledge
     ? processDemo
       ? processKnowledgeDemo(referenceKnowledge)
@@ -1920,16 +1955,19 @@ export function sendDemoMessage(
     "演示工具：外部 MCP",
   ];
   const crowdedRepeatTriggers = crowdedToolTriggers.filter(
-    (trigger) => !["演示工具：写入文件", "演示工具：修改文件"].includes(trigger),
+    (trigger) =>
+      !["演示工具：写入文件", "演示工具：修改文件"].includes(trigger),
   );
-  const crowdedFiles = expert?.files.filter((item) => item.kind === "file") || [];
+  const crowdedFiles =
+    expert?.files.filter((item) => item.kind === "file") || [];
   const crowdedTools = crowdedToolsDemo
     ? Array.from({ length: crowdedToolCount }, (_, index) => {
         const trigger =
           index < crowdedToolTriggers.length
             ? crowdedToolTriggers[index]
             : crowdedRepeatTriggers[
-                (index - crowdedToolTriggers.length) % crowdedRepeatTriggers.length
+                (index - crowdedToolTriggers.length) %
+                  crowdedRepeatTriggers.length
               ];
         const base = materializeToolScene(findToolActivityScene(trigger));
         const number = index + 1;
@@ -1956,38 +1994,38 @@ export function sendDemoMessage(
             toolId: uid("tool"),
             args: {
               ...base.args,
-              pattern:
-                base.args.target === "content"
-                  ? pattern
-                  : sample.name,
+              pattern: base.args.target === "content" ? pattern : sample.name,
             },
             result:
               base.args.target === "content"
                 ? {
-                    matches: [{ path: samplePath, line: 1, content: firstLine }],
+                    matches: [
+                      { path: samplePath, line: 1, content: firstLine },
+                    ],
                     total_count: 1,
                   }
                 : { files: [samplePath], total_count: 1 },
             progress: [],
           };
         }
-        if (base.name === "web_search") return {
-          ...base,
-          toolId: uid("tool"),
-          args: { ...base.args, query: `质量标准 ${number}` },
-          result: {
-            ...base.result,
-            data: {
-              web: [
-                {
-                  ...base.result.data.web[0],
-                  title: `质量标准 ${number}`,
-                  url: `https://example.com/standard/${number}`,
-                },
-              ],
+        if (base.name === "web_search")
+          return {
+            ...base,
+            toolId: uid("tool"),
+            args: { ...base.args, query: `质量标准 ${number}` },
+            result: {
+              ...base.result,
+              data: {
+                web: [
+                  {
+                    ...base.result.data.web[0],
+                    title: `质量标准 ${number}`,
+                    url: `https://example.com/standard/${number}`,
+                  },
+                ],
+              },
             },
-          },
-        };
+          };
         return { ...base, toolId: uid("tool") };
       })
     : [];
@@ -2235,48 +2273,48 @@ export function sendDemoMessage(
   const defaultAnswer = memoryToolUnavailable
     ? "当前专家未启用记忆，本次没有调用记忆工具。"
     : runtimeErrorDemo
-    ? "已开始整理这次分析，当前已确认任务范围。完整结论尚未生成。"
-    : processDemo
-      ? "已整理分析结论；本轮文件操作结果请在产出区核对。"
-      : crowdedToolsDemo
-        ? "已完成多项资料核对，可按阶段查看处理过程及本轮产出。"
-    : requestKind === "clarify"
-      ? text.includes("多题")
-        ? "为了继续处理，请补充时间范围和目标产线。"
-        : text.includes("单选澄清")
-          ? "请选择希望分析的时间范围。"
-          : text.includes("多选澄清")
-            ? "请选择需要核对的产线。"
-            : "为了继续处理，请先说明希望分析的时间范围和目标产线。"
-      : requestKind === "approval"
-        ? "请确认是否允许执行当前操作。"
-        : requestKind === "mcp_setup"
-          ? "演示 MCP 服务配置请求：请确认是否允许尝试设置示例服务。"
-          : requestKind === "secret" || requestKind === "sudo"
-            ? "这是凭据操作的安全展示演示，请勿输入真实密码或密钥。"
-            : subagentFailureDemo
-              ? "子代理未完成本项资料核对，现有信息不足以确认该部分结论；建议补齐资料后重试。"
-              : parallelSubagents
-                ? "已演示两个子代理分别核对夜班数据与设备日志；请依据真实资料复核两项结果。"
-                : activityKind === "reasoning"
-                  ? "已整理输入范围与数据口径的演示思路，建议核对关键数据后再推进。"
-                  : toolScene
-                    ? toolScene.followup
-                      ? "已在同一回合演示写入新文件和修改已有文件；可展开活动组查看两次调用，并在下方查看对应产出。"
-                      : toolScene.name === "process_manage" &&
-                          toolScene.args?.action === "poll"
-                        ? "本次后台进程查询已结束。"
-                        : toolScene.name === "process_manage" &&
-                            toolScene.args?.action === "wait"
-                          ? "本次等待已结束。"
-                      : "这是一次本地工具活动演示，未执行真实工具。可展开活动组查看这次调用的参数、进度与结果。"
-                    : text.includes("Markdown 展示")
-                        ? "## 质量分析摘要\n\n| 日期 | 良率 |\n| --- | --- |\n| 10 月 8 日 | 97.2% |\n| 10 月 9 日 | 96.8% |\n\n" +
-                          `![质量分析专家](${import.meta.env.BASE_URL}avatars/quality-man.svg)\n\n` +
-                          "建议先核对 **检验口径**，再查看示例命令：\n\n```text\ncompare-quality --from 2026-10-08 --to 2026-10-09\n```\n\n演示说明见 [公开示例](https://example.com/quality/report)。"
-                        : showDiff
-                          ? "这是一次浏览器本地文件修改演示，未调用真实工具。可在上方活动详情中查看差异内容。"
-                          : `我已收到你的任务：“${originalText}”。\n\n${withTools ? genericToolSummary : "这是一条无需工具的演示回复。"}\n\n建议核对关键数据，再根据结果推进下一步。`;
+      ? "已开始整理这次分析，当前已确认任务范围。完整结论尚未生成。"
+      : processDemo
+        ? "已整理分析结论；本轮文件操作结果请在产出区核对。"
+        : crowdedToolsDemo
+          ? "已完成多项资料核对，可按阶段查看处理过程及本轮产出。"
+          : requestKind === "clarify"
+            ? text.includes("多题")
+              ? "为了继续处理，请补充时间范围和目标产线。"
+              : text.includes("单选澄清")
+                ? "请选择希望分析的时间范围。"
+                : text.includes("多选澄清")
+                  ? "请选择需要核对的产线。"
+                  : "为了继续处理，请先说明希望分析的时间范围和目标产线。"
+            : requestKind === "approval"
+              ? "请确认是否允许执行当前操作。"
+              : requestKind === "mcp_setup"
+                ? "演示 MCP 服务配置请求：请确认是否允许尝试设置示例服务。"
+                : requestKind === "secret" || requestKind === "sudo"
+                  ? "这是凭据操作的安全展示演示，请勿输入真实密码或密钥。"
+                  : subagentFailureDemo
+                    ? "子代理未完成本项资料核对，现有信息不足以确认该部分结论；建议补齐资料后重试。"
+                    : parallelSubagents
+                      ? "已演示两个子代理分别核对夜班数据与设备日志；请依据真实资料复核两项结果。"
+                      : activityKind === "reasoning"
+                        ? "已整理输入范围与数据口径的演示思路，建议核对关键数据后再推进。"
+                        : toolScene
+                          ? toolScene.followup
+                            ? "已在同一回合演示写入新文件和修改已有文件；可展开活动组查看两次调用，并在下方查看对应产出。"
+                            : toolScene.name === "process_manage" &&
+                                toolScene.args?.action === "poll"
+                              ? "本次后台进程查询已结束。"
+                              : toolScene.name === "process_manage" &&
+                                  toolScene.args?.action === "wait"
+                                ? "本次等待已结束。"
+                                : "这是一次本地工具活动演示，未执行真实工具。可展开活动组查看这次调用的参数、进度与结果。"
+                          : text.includes("Markdown 展示")
+                            ? "## 质量分析摘要\n\n| 日期 | 良率 |\n| --- | --- |\n| 10 月 8 日 | 97.2% |\n| 10 月 9 日 | 96.8% |\n\n" +
+                              `![质量分析专家](${import.meta.env.BASE_URL}avatars/quality-man.svg)\n\n` +
+                              "建议先核对 **检验口径**，再查看示例命令：\n\n```text\ncompare-quality --from 2026-10-08 --to 2026-10-09\n```\n\n演示说明见 [公开示例](https://example.com/quality/report)。"
+                            : showDiff
+                              ? "这是一次浏览器本地文件修改演示，未调用真实工具。可在上方活动详情中查看差异内容。"
+                              : `我已收到你的任务：“${originalText}”。\n\n${withTools ? genericToolSummary : "这是一条无需工具的演示回复。"}\n\n建议核对关键数据，再根据结果推进下一步。`;
   const answer =
     knowledgeScene?.answer ||
     (knowledgeDemo && !canUseKnowledge
@@ -2314,7 +2352,9 @@ export function sendDemoMessage(
     knowledgeScene && originalText === "演示工具：检索知识";
   const knowledgeResultDelay = processDemo
     ? 10000
-    : slowKnowledgeDemo ? 17920 : 2240;
+    : slowKnowledgeDemo
+      ? 17920
+      : 2240;
   const knowledgeStageTimes = processDemo
     ? {
         understanding: 1000,
@@ -2341,16 +2381,19 @@ export function sendDemoMessage(
       : originalText;
     const definitions = knowledgeProcessForRun(run, lookupQuery);
     const processEnd = run.terminal ? 1540 : knowledgeStageTimes.summarizing;
-    const interval = (processEnd - knowledgeStageTimes.searching) / (definitions.length - 1);
+    const interval =
+      (processEnd - knowledgeStageTimes.searching) / (definitions.length - 1);
     const process = definitions.map((step, stepIndex) => ({
       ...step,
       id: `step_${stepIndex + 1}`,
-      startsAt: stepIndex === 0
-        ? knowledgeStageTimes.understanding
-        : knowledgeStageTimes.searching + (stepIndex - 1) * interval,
-      endsAt: stepIndex === 0
-        ? knowledgeStageTimes.searching
-        : knowledgeStageTimes.searching + stepIndex * interval,
+      startsAt:
+        stepIndex === 0
+          ? knowledgeStageTimes.understanding
+          : knowledgeStageTimes.searching + (stepIndex - 1) * interval,
+      endsAt:
+        stepIndex === 0
+          ? knowledgeStageTimes.searching
+          : knowledgeStageTimes.searching + stepIndex * interval,
     }));
     return {
       ...run,
@@ -2364,7 +2407,10 @@ export function sendDemoMessage(
       startsAt: index * 2800,
       stages: [
         [0, "accepted"],
-        ...process.map((step) => [step.startsAt, knowledgeProcessStages[step.tool]]),
+        ...process.map((step) => [
+          step.startsAt,
+          knowledgeProcessStages[step.tool],
+        ]),
         ...(run.terminal
           ? [[1540, run.terminal]]
           : [
@@ -2393,14 +2439,18 @@ export function sendDemoMessage(
     if (!run.evidence?.length) return;
     const items = clone(run.evidence).map((item) => ({
       ...item,
-      final_citation_number: shownKnowledgeCitations.has(item.final_citation_number)
+      final_citation_number: shownKnowledgeCitations.has(
+        item.final_citation_number,
+      )
         ? item.final_citation_number
         : null,
     }));
     emit("knowledge.evidence", {
       data: {
         ...run.data,
-        answer_message_id: items.some((item) => item.final_citation_number !== null)
+        answer_message_id: items.some(
+          (item) => item.final_citation_number !== null,
+        )
           ? assistant.id
           : null,
         items,
@@ -2538,36 +2588,40 @@ export function sendDemoMessage(
       });
     }
   };
-  const genericToolScene = toolScene || crowdedToolsDemo
-    ? null
-    : showProgress
-      ? materializeToolScene(findToolActivityScene("演示工具：读取网页"))
-      : showToolDetail
-        ? materializeToolScene(findToolActivityScene("演示工具：执行命令"))
-      : showDiff
-          ? materializeToolScene(findToolActivityScene("演示工具：修改文件"))
-          : demoFile
-            ? materializeToolScene(findToolActivityScene("演示工具：读取文件"))
-            : null;
-  const parallelSearchScene = isParallel && demoFile
-    ? (() => {
-        const base = materializeToolScene(
-          findToolActivityScene("演示工具：搜索文件"),
-        );
-        if (demoFile.id === "f_quality_csv") return base;
-        const path = demoFilePath(demoFile, expert.files);
-        return {
-          ...base,
-          args: {
-            ...base.args,
-            pattern: `*.${demoFile.name.split(".").at(-1)}`,
-            path: path.split("/").slice(0, -1).join("/") || "workspace",
-          },
-          progress: [],
-          result: { files: [path], total_count: 1 },
-        };
-      })()
-    : null;
+  const genericToolScene =
+    toolScene || crowdedToolsDemo
+      ? null
+      : showProgress
+        ? materializeToolScene(findToolActivityScene("演示工具：读取网页"))
+        : showToolDetail
+          ? materializeToolScene(findToolActivityScene("演示工具：执行命令"))
+          : showDiff
+            ? materializeToolScene(findToolActivityScene("演示工具：修改文件"))
+            : demoFile
+              ? materializeToolScene(
+                  findToolActivityScene("演示工具：读取文件"),
+                )
+              : null;
+  const parallelSearchScene =
+    isParallel && demoFile
+      ? (() => {
+          const base = materializeToolScene(
+            findToolActivityScene("演示工具：搜索文件"),
+          );
+          if (demoFile.id === "f_quality_csv") return base;
+          const path = demoFilePath(demoFile, expert.files);
+          return {
+            ...base,
+            args: {
+              ...base.args,
+              pattern: `*.${demoFile.name.split(".").at(-1)}`,
+              path: path.split("/").slice(0, -1).join("/") || "workspace",
+            },
+            progress: [],
+            result: { files: [path], total_count: 1 },
+          };
+        })()
+      : null;
   const emitGenericToolComplete = (toolId, scene) => {
     if (scene?.modifies) {
       completeToolScene(scene, toolId);
@@ -2603,7 +2657,9 @@ export function sendDemoMessage(
           {
             toolId: uid("tool"),
             scene: demoFile
-              ? materializeToolScene(findToolActivityScene("演示工具：执行命令"))
+              ? materializeToolScene(
+                  findToolActivityScene("演示工具：执行命令"),
+                )
               : {
                   name: "terminal",
                   args: { command: "pwd", workdir: "/workspace" },
@@ -2613,11 +2669,17 @@ export function sendDemoMessage(
           {
             toolId: uid("tool"),
             scene: demoFile
-              ? materializeToolScene(findToolActivityScene("演示工具：运行代码"))
+              ? materializeToolScene(
+                  findToolActivityScene("演示工具：运行代码"),
+                )
               : {
                   name: "execute_code",
                   args: { code: "print('资料不足')" },
-                  result: { status: "success", output: "资料不足", exit_code: 0 },
+                  result: {
+                    status: "success",
+                    output: "资料不足",
+                    exit_code: 0,
+                  },
                 },
           },
           {
@@ -2642,8 +2704,8 @@ export function sendDemoMessage(
   const completeStartedCrowdedTools = () => {
     for (const tool of crowdedTools)
       if (
-        turn.activities.find((activity) => activity.id === tool.toolId)?.status ===
-        "running"
+        turn.activities.find((activity) => activity.id === tool.toolId)
+          ?.status === "running"
       )
         completeToolScene(tool, tool.toolId);
   };
@@ -2723,7 +2785,10 @@ export function sendDemoMessage(
   persist();
   const tickMs = scriptedScene ? 140 : 70;
   const minimumTicks = scriptedScene
-    ? Math.ceil((recoveryDemo || crowdedToolsDemo ? 9000 : processDemo ? 58000 : 6000) / tickMs)
+    ? Math.ceil(
+        (recoveryDemo || crowdedToolsDemo ? 9000 : processDemo ? 58000 : 6000) /
+          tickMs,
+      )
     : 0;
   const answerChunkSize = scriptedScene
     ? processDemo
@@ -2780,7 +2845,9 @@ export function sendDemoMessage(
     }
     if (sequencedTools.length)
       sequencedTools.slice(3).forEach((tool, index) => {
-        if (ticks === Math.ceil(((index + 1) * sequencedToolIntervalMs) / tickMs))
+        if (
+          ticks === Math.ceil(((index + 1) * sequencedToolIntervalMs) / tickMs)
+        )
           emit("tool.start", {
             toolId: tool.toolId,
             name: tool.name,
@@ -2809,8 +2876,7 @@ export function sendDemoMessage(
           completeStartedCrowdedTools();
           emitInterim(interimTexts[index]);
         }
-      if (ticks === Math.ceil(5500 / tickMs))
-        completeStartedCrowdedTools();
+      if (ticks === Math.ceil(5500 / tickMs)) completeStartedCrowdedTools();
     }
     if (processDemo) {
       if (ticks === Math.ceil(10000 / tickMs)) {
@@ -2993,7 +3059,11 @@ export function sendDemoMessage(
       }
       if (newCitations.size)
         for (const run of knowledgeRuns)
-          if (run.evidence?.some((item) => newCitations.has(item.final_citation_number)))
+          if (
+            run.evidence?.some((item) =>
+              newCitations.has(item.final_citation_number),
+            )
+          )
             emitKnowledgeEvidence(run);
     }
     const advanced = nextOffset > offset;
@@ -3458,8 +3528,17 @@ export function triggerEvent(id) {
     input: event.instruction || "事件触发：请分析本次事件数据。",
     reply: "",
     process: [
-      { id: uid("step"), role: "notice", content: "已接收事件数据，开始核对。" },
-      { id: uid("step"), role: "tool", title: "核对事件数据", content: "已读取本地样例记录。" },
+      {
+        id: uid("step"),
+        role: "notice",
+        content: "已接收事件数据，开始核对。",
+      },
+      {
+        id: uid("step"),
+        role: "tool",
+        title: "核对事件数据",
+        content: "已读取本地样例记录。",
+      },
     ],
     outputs: [],
     summary: "正在生成演示结果",

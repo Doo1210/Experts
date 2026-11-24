@@ -51,6 +51,7 @@
         :max-width="4000"
         :context="snapshot.context"
         standalone
+        @retry="restorePreview"
       />
     </template>
   </div>
@@ -59,11 +60,12 @@
 <script>
 import FileReader from "../components/FileReader.vue";
 import { readReaderWindow } from "../reader-window";
+import { demoPreviewFor } from "../file-preview";
 
 export default {
   name: "ReaderWindow",
   components: { FileReader },
-  data: () => ({ snapshot: null, error: "" }),
+  data: () => ({ snapshot: null, error: "", loadId: 0 }),
   computed: {
     graphNodes() {
       return this.snapshot.context.path.split("/");
@@ -74,10 +76,8 @@ export default {
       const snapshot = await readReaderWindow(this.$route.params.id);
       if (!snapshot)
         throw new Error("文档预览已过期或不可用，请从原入口重新打开");
-      snapshot.tab.url = snapshot.tab.blob
-        ? URL.createObjectURL(snapshot.tab.blob)
-        : "";
       this.snapshot = snapshot;
+      await this.restorePreview();
       document.title =
         snapshot.tab.item.name +
         (snapshot.mode === "graph" ? " · 知识图谱" : " · 文件预览");
@@ -86,7 +86,39 @@ export default {
     }
   },
   beforeDestroy() {
-    if (this.snapshot?.tab.url) URL.revokeObjectURL(this.snapshot.tab.url);
+    this.loadId++;
+    if (this.snapshot?.tab.url?.startsWith("blob:"))
+      URL.revokeObjectURL(this.snapshot.tab.url);
+  },
+  methods: {
+    async restorePreview() {
+      const tab = this.snapshot.tab;
+      const loadId = ++this.loadId;
+      tab.status = "loading";
+      this.$set(tab, "error", "");
+      if (tab.url?.startsWith("blob:")) URL.revokeObjectURL(tab.url);
+      try {
+        let url = "";
+        // Older local snapshots can reopen with the current static demo renderer.
+        if (
+          !["demo", "image", "pdf", "markdown", "text"].includes(tab.format)
+        ) {
+          const demo = demoPreviewFor(tab.item);
+          if (!demo) throw new Error("请从文件入口重新打开预览");
+          tab.format = "demo";
+          this.$set(tab, "demo", demo);
+        }
+        if (tab.blob && ["image", "pdf"].includes(tab.format))
+          url = URL.createObjectURL(tab.blob);
+        if (loadId !== this.loadId) return;
+        this.$set(tab, "url", url);
+        tab.status = "ready";
+      } catch (error) {
+        if (loadId !== this.loadId) return;
+        tab.error = error.message || "文档暂时无法打开，请重试";
+        tab.status = "error";
+      }
+    },
   },
 };
 </script>

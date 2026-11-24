@@ -3510,6 +3510,10 @@
   overscroll-behavior: contain;
   font-size: 14px;
 }
+.pc-reader-document.is-demo-preview {
+  padding: 0;
+  overflow: hidden;
+}
 .pc-reader-context {
   display: flex;
   flex: 0 0 36px;

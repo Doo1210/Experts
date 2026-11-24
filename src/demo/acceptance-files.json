@@ -1,0 +1,222 @@
+[
+  {
+    "name": "cache-a.txt",
+    "size": 15
+  },
+  {
+    "name": "cache-b.txt",
+    "size": 15
+  },
+  {
+    "name": "password.pdf",
+    "size": 2367
+  },
+  {
+    "name": "sample.3ds",
+    "size": 1423
+  },
+  {
+    "name": "sample.bim",
+    "size": 86848
+  },
+  {
+    "name": "sample.bmp",
+    "size": 691254
+  },
+  {
+    "name": "sample.brep",
+    "size": 53812
+  },
+  {
+    "name": "sample.cf2",
+    "size": 34218
+  },
+  {
+    "name": "sample.css",
+    "size": 24
+  },
+  {
+    "name": "sample.csv",
+    "size": 26
+  },
+  {
+    "name": "sample.dae",
+    "size": 4631
+  },
+  {
+    "name": "sample.doc",
+    "size": 18432
+  },
+  {
+    "name": "sample.docx",
+    "size": 36682
+  },
+  {
+    "name": "sample.dwf",
+    "size": 15042
+  },
+  {
+    "name": "sample.emf",
+    "size": 1768
+  },
+  {
+    "name": "sample.fbx",
+    "size": 1982368
+  },
+  {
+    "name": "sample.fcstd",
+    "size": 231243
+  },
+  {
+    "name": "sample.fods",
+    "size": 42031
+  },
+  {
+    "name": "sample.fodt",
+    "size": 117160
+  },
+  {
+    "name": "sample.gif",
+    "size": 3940
+  },
+  {
+    "name": "sample.glb",
+    "size": 640
+  },
+  {
+    "name": "sample.gltf",
+    "size": 674
+  },
+  {
+    "name": "sample.heic",
+    "size": 718114
+  },
+  {
+    "name": "sample.ifc",
+    "size": 4065749
+  },
+  {
+    "name": "sample.iges",
+    "size": 616410
+  },
+  {
+    "name": "sample.java",
+    "size": 97
+  },
+  {
+    "name": "sample.jpg",
+    "size": 9210
+  },
+  {
+    "name": "sample.js",
+    "size": 42
+  },
+  {
+    "name": "sample.md",
+    "size": 78
+  },
+  {
+    "name": "sample.obj",
+    "size": 43
+  },
+  {
+    "name": "sample.odp",
+    "size": 23338
+  },
+  {
+    "name": "sample.ods",
+    "size": 9727
+  },
+  {
+    "name": "sample.odt",
+    "size": 14523
+  },
+  {
+    "name": "sample.ott",
+    "size": 14538
+  },
+  {
+    "name": "sample.pdf",
+    "size": 2340
+  },
+  {
+    "name": "sample.php",
+    "size": 28
+  },
+  {
+    "name": "sample.plt",
+    "size": 134601
+  },
+  {
+    "name": "sample.png",
+    "size": 5466
+  },
+  {
+    "name": "sample.ppt",
+    "size": 648192
+  },
+  {
+    "name": "sample.pptx",
+    "size": 28261
+  },
+  {
+    "name": "sample.py",
+    "size": 29
+  },
+  {
+    "name": "sample.step",
+    "size": 136663
+  },
+  {
+    "name": "sample.stl",
+    "size": 119
+  },
+  {
+    "name": "sample.svg",
+    "size": 222
+  },
+  {
+    "name": "sample.tga",
+    "size": 691244
+  },
+  {
+    "name": "sample.tif",
+    "size": 1382688
+  },
+  {
+    "name": "sample.tiff",
+    "size": 1382688
+  },
+  {
+    "name": "sample.tsv",
+    "size": 26
+  },
+  {
+    "name": "sample.txt",
+    "size": 42
+  },
+  {
+    "name": "sample.webp",
+    "size": 2470
+  },
+  {
+    "name": "sample.wmf",
+    "size": 3256
+  },
+  {
+    "name": "sample.xls",
+    "size": 5632
+  },
+  {
+    "name": "sample.xlsx",
+    "size": 4866
+  },
+  {
+    "name": "sample.xml",
+    "size": 64
+  },
+  {
+    "name": "验收报告.txt",
+    "size": 9848
+  }
+]

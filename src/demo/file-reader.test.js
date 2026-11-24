@@ -455,6 +455,48 @@ describe("预览标签与工作空间目录联动", () => {
 });
 
 describe("阅读内容的异步加载", () => {
+  it("Office 在现有标签使用静态模拟内容，不请求预览服务", async () => {
+    const tab = makeTab("office");
+    tab.item.name = "质量报告.docx";
+    const request = vi.fn();
+    vi.stubGlobal("fetch", request);
+    try {
+      await Chat.methods.loadReaderTab.call(
+        {
+          reader: { tabs: [tab] },
+          fileBlob: async () => new Blob(["Office bytes"]),
+        },
+        tab,
+      );
+      expect(tab).toMatchObject({
+        status: "ready",
+        format: "demo",
+        url: "",
+        demo: { kind: "document" },
+      });
+      expect(request).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+  it("读取期间关闭标签，不恢复已关闭的文件", async () => {
+    const tab = makeTab("office");
+    tab.item.name = "质量报告.docx";
+    let finish;
+    const context = {
+      reader: { tabs: [tab] },
+      fileBlob: () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    };
+    const loading = Chat.methods.loadReaderTab.call(context, tab);
+    context.reader.tabs = [];
+    finish(new Blob(["bytes"]));
+    await loading;
+    expect(tab.url).toBe("");
+    expect(context.reader.tabs).toEqual([]);
+  });
   it("读取完成顺序与点击顺序不同时，不覆盖当前标签或其他文件的内容", async () => {
     const first = makeTab("first");
     const second = makeTab("second");
@@ -514,8 +556,9 @@ describe("阅读内容的异步加载", () => {
       },
       tab,
     );
-    expect(tab.status).toBe("error");
-    expect(tab.error).toContain("下载文件");
+    expect(tab.status).toBe("ready");
+    expect(tab.format).toBe("demo");
+    expect(tab.demo.kind).toBe("document");
     expect(tab.text).toBe("");
   });
 

@@ -22,20 +22,14 @@
 </template>
 
 <script>
+import { readerSourceLabel } from "../reader-context";
+
 export default {
   name: "ReaderSourceIcon",
   props: { kind: { type: String, default: "temporary" } },
   computed: {
     label() {
-      return (
-        {
-          workspace: "工作空间文档",
-          knowledge: "知识库文档",
-          wiki: "知识库wiki",
-          temporary: "临时文件",
-          unavailable: "来源不可用",
-        }[this.kind] || "文件"
-      );
+      return readerSourceLabel(this.kind);
     },
   },
 };

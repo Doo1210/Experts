@@ -1,6 +1,6 @@
 # 数字员工纯演示前端
 
-这是可独立运行的 Vue 2 演示工程，放在 `D:\CodingWorkSpace\IndustryAgentPlatform\专家`。页面基于现有 des-ui 的 Vue 2、Element UI、Vue Router 和 Vite 架构重建，并融合“数字员工”原型与 1023 PRD 中的页面规则。应用只使用浏览器中的演示数据，不连接 DES 或宿主业务 API。
+这是可独立运行的 Vue 2 演示工程，放在 `D:\CodingWorkSpace\IndustryAgentPlatform\专家`。页面基于现有 des-ui 的 Vue 2、Element UI、Vue Router 和 Vite 架构重建，并融合“数字员工”原型与 1023 PRD 中的页面规则。业务数据和任务执行使用浏览器中的演示数据，不连接 DES 或宿主业务 API；文件预览使用随项目部署的模拟内容与浏览器本地文件，不依赖本机预览服务。
 
 ## 启动
 
@@ -14,9 +14,30 @@ npm run dev
 
 打开 `http://127.0.0.1:5173/experts/`。使用 `http://127.0.0.1:5173/experts/?embed=1` 可检查宿主 iframe 布局。生产构建用 `npm run build`，本地预览用 `npm run preview`；Dockerfile 将静态页面部署在 `/experts/`。本工程不会修改宿主的 iframe 地址或线上部署。
 
+## 文件预览演示
+
+从 2026-11-24 起，本原型已移除本地 kkFileView 的上传同步、请求代理、兼容插件和解码依赖。开发、普通静态构建和 GitHub Pages 使用同一套纯前端预览，不需要任何文件转换服务。
+
+- 质量分析专家的「文件预览示例」目录提供多格式样例，Pages 构建同样可见。已有浏览器的旧验收目录会迁移名称，保留文件身份和用户编辑，不补回已删除的样例。
+- 专家对话页在原有阅读区预览；专家管理页点击文件名或「预览」新开网页。对话页保留文件标签、来源路径和新开网页入口；独立页不显示这些外层栏。
+- Office／PDF 使用模拟分页文档，表格使用模拟只读网格及工作表，演示文稿可切换幻灯片，CAD／三维格式使用模拟工程示意图，HEIC／TIFF 等格式使用模拟图片。查看器明确标注「模拟预览」，不会把这些内容冒充为上传文件的真实转换结果。
+- 文本、代码、Markdown、知识库文档和 Wiki 保留本地原文／快照；常见图片直接显示浏览器本地文件。图片和工程示意图支持缩放、拖拽、旋转与复位；模拟文档支持翻页与缩放。无打印、HTML 跳转、编辑或文件管理工具。
+- 上传文件仅存入浏览器 IndexedDB，不向服务器同步。原始下载仍来自上传文件或随项目部署的静态样例。未知二进制格式提示下载，不显示乱码。
+- 独立网页将预览快照保存在同源 IndexedDB，关闭原阅读区后仍可阅读和刷新；24 小时后过期。该链接供当前浏览器使用，不是跨浏览器共享链接。
+
 ## GitHub Pages 演示部署
 
-推送到 `Doo1210/Experts` 的 `main` 后，GitHub Actions 会用 Node 22.10.0 执行检查、测试和 Pages 构建，再发布到 `https://doo1210.github.io/Experts/`。Pages 构建启用 `/Experts/` 资源路径和 hash 路由，以便直接打开及刷新专家、对话和项目深链；普通构建继续使用宿主要求的 `/experts/` history 路由。GitHub Pages 仅展示演示数据，不接入业务 API，也不改变宿主 iframe 来源。
+运行以下命令生成 Pages 静态产物：
+
+```sh
+npm ci
+npm run verify
+npm run build:pages
+```
+
+`build:pages` 使用 `.env.pages`，将资源基路径设置为 `/Experts/`，启用 hash 路由，产物位于 `dist/`。将 `dist/` 作为 GitHub Pages 的发布产物，可在 `https://doo1210.github.io/Experts/` 下访问。对话和独立阅读页都使用 hash 地址，刷新不依赖服务端路由回退。如 GitHub 仓库名不是 `Experts`，请同步调整 `vite.config.js` 中的 Pages 基路径。
+
+普通 `npm run build` 继续使用宿主要求的 `/experts/` history 路由。两种构建均无本地服务代理，也不接入业务 API。构建命令只生成静态文件，不会自动发布仓库或修改宿主 iframe 来源。
 
 如果宿主源码在本机，可用以下命令同时核对其锁文件：
 
@@ -28,7 +49,7 @@ npm run check:versions -- --host-lock D:\CodingWorkSpace\wanwu\wanwu-web\web\pnp
 
 - 专家、模板、渠道与事件由 `src/demo/state.js` 初始化；`src/demo/project-fixtures.js` 补充 4 个项目、32 项看板任务、8 条目标记录及各项目的动态和工作空间样例。所有业务操作都在浏览器本地执行。
 - 已有浏览器演示数据首次加载新版时会增量加入这些固定样例，不替换手动创建的项目；之后不会反复补回已删除的样例。需要从头查看完整固定场景时，可使用“重置演示数据”。
-- JSON 状态保存在版本化的 `localStorage` 键 `digital-employee-demo-v3`；上传文件正文保存在 IndexedDB。左侧导航底部的“重置演示数据”会清除两者。
+- JSON 状态保存在版本化的 `localStorage` 键 `digital-employee-demo-v3`；上传文件正文保存在 IndexedDB，不同步到服务器。左侧导航底部的“重置演示数据”清除浏览器状态与 IndexedDB。
 - 对话流、工具过程、澄清、审批和自主任务执行是本地计时器模拟；切换或离开对话会停止该对话的模拟流。
 - 页面明确标注“演示数据”。模拟发送、渠道连接和 MCP 测通不产生真实外部操作。
 - 宿主可能仍在 iframe URL 上传入 token、用户和组织参数；本应用不读取它们，并立即从地址栏移除这些参数。
@@ -55,9 +76,11 @@ npm run check:versions -- --host-lock D:\CodingWorkSpace\wanwu\wanwu-web\web\pnp
 - `src/demo/state.js`：唯一的本地业务状态和演示事件。
 - `src/demo/project-fixtures.js`：多项目固定样例与旧演示数据的增量补齐。
 - `src/demo/file-db.js`：本地上传文件正文。
+- `src/demo/file-preview.js`：静态样例读取与浏览器预览类型选择。
+- `src/demo/components/DemoFilePreview.vue`：两种阅读入口共用的纯前端模拟查看器。
 - `src/router/index.js`：`/experts/` history 路由及原型 hash 链接兼容。
 - `scripts/check-versions.mjs`：与宿主实际锁定版本的核对。
 
-本工程后续确认的产品与交互需求统一维护在 [docs/experts_prd.md](docs/experts_prd.md)；实现或验收新需求时，同步更新对应章节和修改记录。该文档未覆盖的规则再按“1023 PRD → MVP PRD → 原型现状”核对。覆盖与检查记录见 `docs/prototype-coverage.md` 和 `docs/verification.md`。
+本工程后续确认的产品与交互需求统一维护在 [docs/experts_prd.md](docs/experts_prd.md)；实现或验收新需求时，同步更新对应章节和修改记录。该文档未覆盖的规则再按“1023 PRD → MVP PRD → 原型现状”核对。覆盖记录见 `docs/prototype-coverage.md`。
 
 现有对话页的呈现规则、逐节验收与上游待定项，见 [docs/conversation_prd.md](docs/conversation_prd.md)。上游尚未定稿的规则保持待确认状态。

@@ -16,7 +16,7 @@
       :width="width"
       @resize="$emit('resize', $event)"
     />
-    <div class="pc-reader-toolbar">
+    <div v-if="!standalone" class="pc-reader-toolbar">
       <div class="pc-reader-tabs-wrap">
         <button
           v-show="tabsCanScrollLeft"
@@ -52,7 +52,9 @@
               :aria-selected="tab.key === activeKey"
               aria-controls="pc-reader-document"
               :tabindex="tab.key === activeKey ? 0 : -1"
-              :title="tab.item.name"
+              :title="tabSourceLabel(tab) + '\n' + tab.item.name"
+              :data-tooltip-heading="tabSourceLabel(tab)"
+              :data-tooltip-description="tab.item.name"
               @click="selectTab(tab.key)"
               @keydown="navigateTabs($event, index)"
             >
@@ -64,6 +66,7 @@
               class="pc-reader-tab-close"
               type="button"
               :aria-label="'关闭文件 ' + tab.item.name"
+              :title="'关闭文件 ' + tab.item.name"
               @click="$emit('close-tab', tab.key)"
             >
               <i class="el-icon-close" aria-hidden="true" />
@@ -97,6 +100,7 @@
     </div>
     <template v-if="activeTab">
       <ReaderContextBar
+        v-if="!standalone"
         :context="context"
         :available-width="width"
         :ready="activeTab.status === 'ready'"
@@ -108,14 +112,31 @@
       />
       <div
         id="pc-reader-document"
-        :key="activeTab.key"
         ref="document"
         class="pc-reader-document"
-        role="tabpanel"
-        :aria-labelledby="'pc-reader-tab-' + activeIndex"
+        :class="{
+          'is-demo-preview':
+            ['demo', 'image'].includes(activeTab.format) &&
+            activeTab.status === 'ready',
+        }"
+        :role="standalone ? 'region' : 'tabpanel'"
+        :aria-label="standalone ? activeTab.item.name : null"
+        :aria-labelledby="standalone ? null : 'pc-reader-tab-' + activeIndex"
         :aria-busy="activeTab.status === 'loading'"
         @scroll="rememberScroll"
       >
+        <DemoFilePreview
+          v-for="tab in demoPreviewTabs"
+          v-show="tab.key === activeKey"
+          :key="tab.key + ':' + tab.loadId"
+          :preview="tab.demo || undefined"
+          :image-url="tab.format === 'image' ? tab.url : ''"
+          :name="tab.item.name"
+          @retry="$emit('retry', tab)"
+        />
+        <div v-if="isEmbeddedArchive" class="pc-reader-empty">
+          压缩包请在新标签页中浏览内容。
+        </div>
         <div
           v-if="activeTab.status === 'ready' && activeTab.item.previewNotice"
           class="pc-reader-notice"
@@ -140,11 +161,6 @@
             重新读取
           </button>
         </div>
-        <img
-          v-else-if="activeTab.format === 'image'"
-          :src="activeTab.url"
-          :alt="activeTab.item.name"
-        />
         <iframe
           v-else-if="activeTab.format === 'pdf'"
           :src="activeTab.url"
@@ -154,9 +170,10 @@
           v-else-if="activeTab.format === 'markdown'"
           :text="activeTab.text"
         />
-        <pre v-else :class="{ 'is-code': isCodeFile }">{{
-          activeTab.text
-        }}</pre>
+        <pre
+          v-else-if="!['demo', 'image'].includes(activeTab.format)"
+          :class="{ 'is-code': isCodeFile }"
+          >{{ activeTab.text }}</pre>
       </div>
     </template>
   </section>
@@ -164,16 +181,22 @@
 
 <script>
 import ConversationMarkdown from "./ConversationMarkdown.vue";
+import DemoFilePreview from "./DemoFilePreview.vue";
 import PanelResizeHandle from "./PanelResizeHandle.vue";
 import ReaderContextBar from "./ReaderContextBar.vue";
 import ReaderSourceIcon from "./ReaderSourceIcon.vue";
 import { READER_MIN_WIDTH } from "../file-reader";
-import { citationTextRanges, readerDocumentContext } from "../reader-context";
+import {
+  citationTextRanges,
+  readerDocumentContext,
+  readerSourceLabel,
+} from "../reader-context";
 
 export default {
   name: "FileReader",
   components: {
     ConversationMarkdown,
+    DemoFilePreview,
     PanelResizeHandle,
     ReaderContextBar,
     ReaderSourceIcon,
@@ -203,6 +226,21 @@ export default {
     activeTab() {
       return this.tabs[this.activeIndex] || null;
     },
+    demoPreviewTabs() {
+      return this.tabs.filter(
+        (tab) =>
+          ["demo", "image"].includes(tab.format) &&
+          tab.status === "ready" &&
+          (this.standalone || tab.demo?.kind !== "archive"),
+      );
+    },
+    isEmbeddedArchive() {
+      return (
+        !this.standalone &&
+        this.activeTab?.status === "ready" &&
+        this.activeTab.demo?.kind === "archive"
+      );
+    },
     isCodeFile() {
       return /\.(?:[cm]?[jt]sx?|py|css|html?|json|xml|ya?ml)$/i.test(
         this.activeTab?.item.name || "",
@@ -221,7 +259,7 @@ export default {
     },
   },
   mounted() {
-    if (typeof ResizeObserver !== "undefined") {
+    if (this.$refs.tabs && typeof ResizeObserver !== "undefined") {
       this._tabsResizeObserver = new ResizeObserver(this.updateTabsOverflow);
       this._tabsResizeObserver.observe(this.$refs.tabs);
     }
@@ -255,6 +293,9 @@ export default {
     CSS.highlights?.delete("pc-reader-citation");
   },
   methods: {
+    tabSourceLabel(tab) {
+      return readerSourceLabel(this.tabSourceKind(tab));
+    },
     tabSourceKind(tab) {
       return tab.key === this.activeKey
         ? this.context.kind
@@ -268,7 +309,12 @@ export default {
       CSS.highlights?.delete("pc-reader-citation");
       this._citationRanges = [];
       const pane = this.$refs.document;
-      if (!pane || this.activeTab?.status !== "ready") return;
+      if (
+        !pane ||
+        this.activeTab?.status !== "ready" ||
+        ["demo", "image"].includes(this.activeTab.format)
+      )
+        return;
       const nodes = [];
       const walker = document.createTreeWalker(pane, NodeFilter.SHOW_TEXT);
       let text = "",

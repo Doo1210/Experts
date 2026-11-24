@@ -1,0 +1,1 @@
+const quality = 970; console.log(quality);

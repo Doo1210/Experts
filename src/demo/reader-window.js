@@ -20,6 +20,7 @@ export async function saveReaderWindow(
       status: "ready",
       format: tab.format,
       text: tab.text,
+      demo: tab.demo ? JSON.parse(JSON.stringify(tab.demo)) : null,
       blob,
     },
   });

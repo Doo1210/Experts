@@ -2468,10 +2468,22 @@
               type="button"
               class="pc-workspace-action"
               aria-label="上传文件"
+              :disabled="workspaceUploading"
+              :aria-busy="workspaceUploading"
               :title="'上传文件到 ' + workspaceFolderName"
               @click="$refs.workspaceUpload.click()"
             >
-              <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+              <i
+                v-if="workspaceUploading"
+                class="el-icon-loading"
+                aria-hidden="true"
+              />
+              <svg
+                v-else
+                viewBox="0 0 24 24"
+                aria-hidden="true"
+                focusable="false"
+              >
                 <path
                   d="M12 15V4m-4 4 4-4 4 4M5 14v4a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-4"
                 />
@@ -2793,6 +2805,11 @@ import {
 } from "../state";
 import { KNOWLEDGE_CATALOG, KNOWLEDGE_DOCUMENTS } from "../knowledge-demo";
 import { saveFile, readFile, deleteFile } from "../file-db";
+import {
+  FilePreviewError,
+  readPreviewSource,
+  resolveFilePreview,
+} from "../file-preview";
 import { avatarSrcFor } from "../avatar";
 import {
   conversationProcessBlocks,
@@ -2939,6 +2956,7 @@ export default {
       ],
       pendingFiles: [],
       uploadingFiles: false,
+      workspaceUploading: false,
       uploadGeneration: 0,
       pendingReferences: [],
       resourceCanScrollLeft: false,
@@ -5135,19 +5153,22 @@ export default {
         (item) => item.id !== file.id,
       );
     },
-    async storeFile(file, parentId) {
-      const entry = addWorkspaceItem(this.expert.id, {
+    async storeFile(file, parentId, expertId = this.expert.id) {
+      const entry = addWorkspaceItem(expertId, {
         name: file.name,
         parentId,
         kind: "file",
       });
       try {
         await saveFile(entry.id, file);
+        this.$set(entry, "size", file.size);
+        this.$set(entry, "updatedAt", new Date().toISOString());
+        persist();
       } catch (error) {
-        removeWorkspaceItems(this.expert.id, [entry.id]);
+        removeWorkspaceItems(expertId, [entry.id]);
         throw error;
       }
-      return entry;
+      return { entry };
     },
     async attachFile(event) {
       const files = [...(event.target.files || [])];
@@ -5189,23 +5210,32 @@ export default {
     async uploadWorkspaceFiles(event) {
       const files = [...event.target.files];
       event.target.value = "";
+      if (!files.length || this.workspaceUploading) return;
+      const expertId = this.expert.id;
+      const parentId = this.workspaceFolderId;
+      this.workspaceUploading = true;
       let added = 0;
-      for (const file of files) {
-        try {
-          await this.storeFile(file, this.workspaceFolderId);
-          added++;
-        } catch {
-          this.$message.error(`无法保存 ${file.name}`);
+      try {
+        for (const file of files) {
+          try {
+            await this.storeFile(file, parentId, expertId);
+            added++;
+          } catch {
+            this.$message.error(`无法保存 ${file.name}`);
+          }
         }
+      } finally {
+        this.workspaceUploading = false;
       }
-      if (added) this.$message.success("文件已保存到浏览器演示数据");
+      if (added)
+        this.$message.success(`已保存 ${added} 个文件到浏览器演示数据`);
     },
     async fileBlob(item) {
       if (typeof item.snapshotContent === "string")
         return new Blob([item.snapshotContent], {
           type: item.name.endsWith(".csv") ? "text/csv" : "text/plain",
         });
-      const stored = await readFile(item.id);
+      const stored = await readPreviewSource(item);
       if (stored) return stored;
       if (item.kind === "local_upload" || item.content == null)
         throw new Error("文件已不可用");
@@ -5247,6 +5277,7 @@ export default {
         url: "",
         error: "",
         loadId: 0,
+        demo: null,
       };
       const opened = openReaderTab(this.reader, tab, this);
       const citationChanged =
@@ -5299,43 +5330,27 @@ export default {
       const loadId = ++tab.loadId;
       tab.status = "loading";
       tab.error = "";
-      if (tab.url) URL.revokeObjectURL(tab.url);
+      if (tab.url?.startsWith("blob:")) URL.revokeObjectURL(tab.url);
       tab.url = "";
       const stillOpen = () =>
         this.reader.tabs.includes(tab) && tab.loadId === loadId;
       try {
         const blob = await this.fileBlob(tab.item);
         if (!stillOpen()) return;
-        if (blob.type.startsWith("image/")) {
-          tab.format = "image";
-          tab.url = URL.createObjectURL(blob);
-        } else if (blob.type === "application/pdf") {
-          tab.format = "pdf";
-          tab.url = URL.createObjectURL(blob);
-        } else {
-          if (
-            !/^text\/|^application\/(?:json|xml)/.test(blob.type) &&
-            !/\.(?:md|txt|csv|json|log|xml|ya?ml|js|ts|py|css|html)$/i.test(
-              tab.item.name,
-            )
-          )
-            throw new Error("此格式暂不支持在线预览，请下载文件查看");
-          const text = await blob.text();
-          if (!stillOpen()) return;
-          tab.text = text;
-          tab.format =
-            tab.item.previewFormat ||
-            (/\.md$/i.test(tab.item.name) ||
-            tab.item.knowledgeSource?.kind === "wiki"
-              ? "markdown"
-              : "text");
+        const preview = await resolveFilePreview(tab.item, blob);
+        if (!stillOpen()) {
+          if (preview.url?.startsWith("blob:"))
+            URL.revokeObjectURL(preview.url);
+          return;
         }
+        Object.assign(tab, preview);
         tab.status = "ready";
       } catch (error) {
         if (!stillOpen()) return;
         tab.status = "error";
         tab.error =
-          error.message === "此格式暂不支持在线预览，请下载文件查看"
+          error instanceof FilePreviewError ||
+          error.message === "此格式暂不支持预览，请从工作空间下载文件查看"
             ? error.message
             : "文件已不可用，请重新读取或下载文件";
       }
@@ -5377,14 +5392,14 @@ export default {
     closeReaderFile(key) {
       const activeKey = this.reader.activeKey;
       const tab = this.reader.tabs.find((entry) => entry.key === key);
-      if (tab?.url) URL.revokeObjectURL(tab.url);
+      if (tab?.url?.startsWith("blob:")) URL.revokeObjectURL(tab.url);
       closeReaderTab(this.reader, key);
       const activeChanged = this.reader.activeKey !== activeKey;
       if (activeChanged) this.revealReaderWorkspaceFile();
     },
     closeReader() {
       for (const tab of this.reader.tabs)
-        if (tab.url) URL.revokeObjectURL(tab.url);
+        if (tab.url?.startsWith("blob:")) URL.revokeObjectURL(tab.url);
       closeFileReader(this.reader);
     },
     updateReaderBounds() {

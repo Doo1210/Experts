@@ -37,7 +37,11 @@
           @click="deleteSelected"
           >删除 ({{ selected.length }})</el-button
         ><el-button size="mini" @click="newFolder">新建文件夹</el-button
-        ><el-button type="primary" size="mini" @click="$refs.upload.click()"
+        ><el-button
+          type="primary"
+          size="mini"
+          :loading="uploading"
+          @click="$refs.upload.click()"
           >上传文件</el-button
         >
       </div>
@@ -153,40 +157,16 @@
         ></span
       >
     </el-dialog>
-    <el-dialog
-      :title="previewTitle"
-      :visible.sync="previewVisible"
-      width="580px"
-      custom-class="manage-dialog manage-preview-dialog"
-      ><div slot="title" class="workspace-dialog-title">
-        <span class="workspace-dialog-icon"><i class="el-icon-document" /></span
-        ><span
-          ><strong>{{ previewTitle }}</strong
-          ><small>{{
-            previewItem
-              ? `${fileType(previewItem)} · ${displayTime(previewItem)} · 只读预览`
-              : "只读预览"
-          }}</small></span
-        >
-      </div>
-      <div class="workspace-preview-body">
-        <img v-if="previewUrl" :src="previewUrl" class="image-preview" />
-        <pre v-else class="text-preview">{{ previewText }}</pre>
-      </div>
-      <span slot="footer"
-        ><el-button @click="previewVisible = false">关闭</el-button
-        ><el-button type="primary" @click="download(previewItem)"
-          ><i class="el-icon-download" /> 下载</el-button
-        ></span
-      ></el-dialog
-    >
   </div>
 </template>
 
 <script>
 import JSZip from "jszip";
 import { addWorkspaceItem, removeWorkspaceItems, persist } from "../state";
-import { saveFile, readFile, deleteFile } from "../file-db";
+import { saveFile, deleteFile } from "../file-db";
+import { readPreviewSource, resolveFilePreview } from "../file-preview";
+import { saveReaderWindow } from "../reader-window";
+import { readerDocumentContext } from "../reader-context";
 
 function saveBlob(blob, name) {
   const url = URL.createObjectURL(blob);
@@ -208,11 +188,7 @@ export default {
     return {
       folderId: null,
       selected: [],
-      previewVisible: false,
-      previewItem: null,
-      previewTitle: "",
-      previewText: "",
-      previewUrl: "",
+      uploading: false,
       workspaceDialogVisible: false,
       workspaceDialogMode: "new",
       workspaceDialogItem: null,
@@ -257,9 +233,6 @@ export default {
     someSelected() {
       return this.items.some((item) => this.selected.includes(item.id));
     },
-  },
-  beforeDestroy() {
-    if (this.previewUrl) URL.revokeObjectURL(this.previewUrl);
   },
   mounted() {
     this.navigateToPath(this.openPath);
@@ -377,47 +350,82 @@ export default {
     },
     async uploadFiles(event) {
       const files = [...event.target.files];
-      for (const file of files) {
-        if (this.items.some((item) => item.name === file.name)) {
-          this.$message.warning(`${file.name} 已存在`);
-          continue;
-        }
-        const entry = addWorkspaceItem(this.expert.id, {
-          name: file.name,
-          parentId: this.folderId,
-          kind: "file",
-        });
-        try {
-          await saveFile(entry.id, file);
-          this.$set(entry, "size", file.size);
-          this.$set(entry, "updatedAt", new Date().toISOString());
-          persist();
-        } catch (error) {
-          removeWorkspaceItems(this.expert.id, [entry.id]);
-          this.$message.error(`无法保存 ${file.name}`);
-        }
-      }
       event.target.value = "";
-      if (files.length) this.$message.success("上传已保存到浏览器演示数据");
+      if (!files.length || this.uploading) return;
+      const expert = this.expert;
+      const parentId = this.folderId;
+      this.uploading = true;
+      let added = 0;
+      try {
+        for (const file of files) {
+          if (
+            expert.files.some(
+              (item) => item.parentId === parentId && item.name === file.name,
+            )
+          ) {
+            this.$message.warning(`${file.name} 已存在`);
+            continue;
+          }
+          const entry = addWorkspaceItem(expert.id, {
+            name: file.name,
+            parentId,
+            kind: "file",
+          });
+          try {
+            await saveFile(entry.id, file);
+            this.$set(entry, "size", file.size);
+            this.$set(entry, "updatedAt", new Date().toISOString());
+            persist();
+            added++;
+          } catch (error) {
+            removeWorkspaceItems(expert.id, [entry.id]);
+            this.$message.error(`无法保存 ${file.name}`);
+            continue;
+          }
+        }
+      } finally {
+        this.uploading = false;
+      }
+      if (added)
+        this.$message.success(`已保存 ${added} 个文件到浏览器演示数据`);
     },
     async getBlob(item) {
-      return (
-        (await readFile(item.id)) ||
-        new Blob([item.content || ""], {
-          type: item.name.endsWith(".csv") ? "text/csv" : "text/plain",
-        })
-      );
+      const stored = await readPreviewSource(item);
+      if (stored) return stored;
+      if (item.content == null) throw new Error("文件已不可用，请重新上传");
+      return new Blob([item.content], {
+        type: item.name.endsWith(".csv") ? "text/csv" : "text/plain",
+      });
     },
     async preview(item) {
-      if (this.previewUrl) URL.revokeObjectURL(this.previewUrl);
-      this.previewUrl = "";
-      this.previewTitle = item.name;
-      this.previewItem = item;
-      const blob = await this.getBlob(item);
-      if (blob.type.startsWith("image/"))
-        this.previewUrl = URL.createObjectURL(blob);
-      else this.previewText = await blob.text();
-      this.previewVisible = true;
+      const popup = window.open("about:blank", "_blank");
+      if (!popup) return this.$message.info("请允许浏览器打开新标签页后重试");
+      popup.opener = null;
+      const expert = this.expert;
+      const tab = { key: item.id, item: { ...item }, format: "text", text: "" };
+      const context = readerDocumentContext(item, expert.files);
+      try {
+        const blob = await this.getBlob(item);
+        Object.assign(tab, await resolveFilePreview(item, blob));
+        if (popup.closed) return;
+        const id = crypto.randomUUID();
+        await saveReaderWindow(
+          id,
+          tab,
+          context,
+          ["image", "pdf"].includes(tab.format) ? blob : null,
+        );
+        const { href } = this.$router.resolve({
+          name: "reader-window",
+          params: { id },
+        });
+        if (!popup.closed) popup.location.replace(href);
+      } catch (error) {
+        popup.close();
+        this.$message.error(error.message || "文档暂时无法打开，请重试");
+      } finally {
+        if (tab.url?.startsWith("blob:")) URL.revokeObjectURL(tab.url);
+      }
     },
     async download(item) {
       saveBlob(await this.getBlob(item), item.name);

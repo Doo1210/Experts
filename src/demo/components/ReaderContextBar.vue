@@ -61,7 +61,7 @@
 </template>
 
 <script>
-import { compactReaderPath } from "../reader-context";
+import { compactReaderPath, readerSourceLabel } from "../reader-context";
 import ReaderSourceIcon from "./ReaderSourceIcon.vue";
 
 export default {
@@ -84,13 +84,9 @@ export default {
   }),
   computed: {
     pathSourceLabel() {
-      return (
-        {
-          workspace: "工作空间文件",
-          knowledge: "知识库文档",
-          wiki: "知识库 Wiki",
-        }[this.context.kind] || ""
-      );
+      return ["workspace", "knowledge", "wiki"].includes(this.context.kind)
+        ? readerSourceLabel(this.context.kind)
+        : "";
     },
     pathTitle() {
       return this.pathSourceLabel

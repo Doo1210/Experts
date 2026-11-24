@@ -11,6 +11,26 @@ vi.mock("./file-db", () => ({
 beforeEach(() => vi.clearAllMocks());
 
 describe("独立网页保留打开时的文档版本", () => {
+  it("模拟网页保存独立内容描述，原页面修改不影响刷新后的预览", async () => {
+    const demo = { kind: "document", title: "报告.docx", extension: "docx" };
+    await saveReaderWindow(
+      "office",
+      {
+        key: "office",
+        item: { name: "报告.docx" },
+        format: "demo",
+        text: "",
+        demo,
+      },
+      { path: "workspace/报告.docx" },
+      null,
+    );
+    const saved = saveFile.mock.calls[0][1];
+    demo.title = "另一个版本.docx";
+    expect(saved.tab.demo.title).toBe("报告.docx");
+    expect(saved.tab.blob).toBeNull();
+    expect(saved.tab).not.toHaveProperty("preview");
+  });
   it("隔离路径、引用及正文快照，原标签切换或关闭不改变已打开网页", async () => {
     const tab = {
       key: "document",

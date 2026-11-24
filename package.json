@@ -3,8 +3,12 @@
   "private": true,
   "version": "1.0.0",
   "type": "module",
-  "engines": { "node": "22.10.0" },
-  "volta": { "node": "22.10.0" },
+  "engines": {
+    "node": "22.10.0"
+  },
+  "volta": {
+    "node": "22.10.0"
+  },
   "scripts": {
     "dev": "vite --host 127.0.0.1",
     "build": "vite build",
@@ -14,7 +18,8 @@
     "format:check": "prettier --check src scripts vite.config.js vitest.config.js",
     "check:versions": "node scripts/check-versions.mjs",
     "check:offline": "node scripts/check-offline.mjs",
-    "verify": "npm run check:versions && npm run check:offline && npm test && npm run build"
+    "verify": "npm run check:versions && npm run check:offline && npm test && npm run build",
+    "build:pages": "vite build --mode pages"
   },
   "dependencies": {
     "element-ui": "2.15.14",
@@ -23,8 +28,8 @@
     "vue-router": "3.6.5"
   },
   "devDependencies": {
-    "sass": "1.97.3",
     "prettier": "3.9.6",
+    "sass": "1.97.3",
     "vite": "5.4.21",
     "vite-plugin-vue2": "2.0.3",
     "vitest": "2.1.9",

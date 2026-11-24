@@ -25,12 +25,26 @@ function visit(relative) {
   if (!/\.(?:js|vue|scss)$/.test(relative) || relative.endsWith(".test.js"))
     return;
   const source = fs.readFileSync(absolute, "utf8");
-  for (const [pattern, label] of forbidden)
+  for (const [pattern, label] of forbidden) {
+    // Only project-bundled sample downloads may use fetch. The source module
+    // must not contain a service origin, proxy path, upload or API endpoint.
+    if (relative === "src/demo/file-preview.js" && label === "fetch 请求") {
+      if (
+        /https?:|127\.0\.0\.1|localhost|fileUpload|onlinePreview|VITE_KK|method\s*:/.test(
+          source,
+        ) ||
+        !source.includes("acceptance-fixtures/")
+      )
+        failures.push(`${relative}: 示例读取包含外部服务或非静态请求`);
+      continue;
+    }
     if (pattern.test(source)) failures.push(`${relative}: ${label}`);
+  }
 }
 
 roots.forEach(visit);
 if (failures.length) {
   console.error(failures.join("\n"));
   process.exitCode = 1;
-} else console.log("运行入口未引用真实请求、DES API 或 SSE。");
+} else
+  console.log("仅允许读取随项目部署的静态样例；无预览服务、业务 API 或 SSE。");

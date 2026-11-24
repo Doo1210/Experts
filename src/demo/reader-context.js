@@ -5,6 +5,18 @@ const parts = (path) =>
     Boolean,
   );
 
+export function readerSourceLabel(kind) {
+  return (
+    {
+      workspace: "工作空间文件",
+      knowledge: "知识库文档",
+      wiki: "知识库 Wiki",
+      temporary: "临时文件",
+      unavailable: "来源不可用",
+    }[kind] || "文件"
+  );
+}
+
 export function readerDocumentContext(item, files = []) {
   if (!item) return { path: "", kind: "temporary", actions: [] };
   const source = item.knowledgeSource;
