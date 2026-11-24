@@ -1,5 +1,6 @@
 @use "./chat.scss";
 @use "./project-detail.scss";
+@use "./external-api.scss";
 
 :root {
   --primary: #4080ff;
@@ -3365,7 +3366,8 @@ button {
   color: #3479f6;
   box-shadow: 0 2px 7px rgba(31, 56, 102, 0.09);
 }
-.expert-manage-page .task-overview > .task-action-bar {
+.expert-manage-page .task-overview > .task-action-bar,
+.expert-manage-page .expert-api-runs > .task-action-bar {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -5061,7 +5063,8 @@ button {
   min-height: 0;
   overflow: hidden;
 }
-.expert-mcp-page .mcp-action-bar {
+.expert-mcp-page .mcp-action-bar,
+.expert-external-api .expert-api-list-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -5073,11 +5076,13 @@ button {
   border-radius: 10px;
   background: #fff;
 }
-.expert-mcp-page .mcp-action-bar > strong {
+.expert-mcp-page .mcp-action-bar > strong,
+.expert-external-api .expert-api-list-head h3 {
   color: #28384e;
   font-size: 13px;
 }
-.expert-mcp-page .mcp-action-bar > div {
+.expert-mcp-page .mcp-action-bar > div,
+.expert-external-api .expert-api-list-head > div {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -5085,7 +5090,8 @@ button {
 .expert-mcp-page .mcp-action-bar .el-input {
   width: 190px;
 }
-.expert-mcp-page .mcp-action-bar .el-button {
+.expert-mcp-page .mcp-action-bar .el-button,
+.expert-external-api .expert-api-list-head .el-button {
   margin-left: 0;
   padding: 8px 11px;
   font-size: 12px;

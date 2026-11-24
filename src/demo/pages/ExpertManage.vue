@@ -188,6 +188,12 @@
         <expert-tool-tab v-else-if="tab === 'tool'" :expert="expert" />
         <expert-mcp-tab v-else-if="tab === 'mcp'" :expert="expert" />
         <expert-channel-tab v-else-if="tab === 'im'" :expert="expert" />
+        <expert-external-api-tab
+          v-else-if="tab === 'api'"
+          :key="expert.id"
+          :expert="expert"
+          @view-runs="openApiRuns"
+        />
       </section>
       <el-dialog
         title="配置预置问题"
@@ -302,6 +308,7 @@ import ExpertToolTab from "../components/ExpertToolTab.vue";
 import ExpertMcpTab from "../components/ExpertMcpTab.vue";
 import ExpertKnowledgeTab from "../components/ExpertKnowledgeTab.vue";
 import ExpertChannelTab from "../components/ExpertChannelTab.vue";
+import ExpertExternalApiTab from "../components/ExpertExternalApiTab.vue";
 const DEMO_EXPERT_MEMORY = `# 专家长期记忆
 
 ## 用户偏好
@@ -337,6 +344,7 @@ export default {
     ExpertMcpTab,
     ExpertKnowledgeTab,
     ExpertChannelTab,
+    ExpertExternalApiTab,
   },
   data() {
     return {
@@ -351,6 +359,7 @@ export default {
         { key: "tool", label: "工具", icon: "el-icon-setting" },
         { key: "mcp", label: "MCP", icon: "el-icon-connection" },
         { key: "im", label: "消息渠道", icon: "el-icon-message" },
+        { key: "api", label: "对外 API" },
       ],
       personaParts: [
         {
@@ -526,6 +535,19 @@ export default {
           query: { ...this.$route.query, tab },
         })
         .catch(() => {});
+    },
+    openApiRuns({ keyId, range } = {}) {
+      const query = { ...this.$route.query, tab: "task", section: "api" };
+      delete query.apiKey;
+      delete query.apiFrom;
+      delete query.apiTo;
+      if (keyId) query.apiKey = keyId;
+      if (range) [query.apiFrom, query.apiTo] = range;
+      this.$router.push({
+        name: "expert",
+        params: { id: this.expert.id },
+        query,
+      });
     },
     openTaskWorkspace(target) {
       this.workspaceOpenPath =

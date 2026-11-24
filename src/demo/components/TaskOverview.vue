@@ -3,22 +3,27 @@
     <div class="section-heading">
       <div>
         <h2>任务</h2>
-        <p>查看平台对话，消息渠道对话以及事件中心自主任务的记录</p>
+        <p>查看平台对话、消息渠道对话、自主任务和 API 调用记录</p>
       </div>
     </div>
     <div class="segmented">
       <button
         :class="{ active: section === 'conversation' }"
-        @click="section = 'conversation'"
+        @click="setSection('conversation')"
       >
         平台对话</button
-      ><button :class="{ active: section === 'im' }" @click="section = 'im'">
+      ><button :class="{ active: section === 'im' }" @click="setSection('im')">
         消息渠道对话</button
       ><button
         :class="{ active: section === 'event' }"
-        @click="section = 'event'"
+        @click="setSection('event')"
       >
-        自主任务（事件中心）
+        自主任务（事件中心）</button
+      ><button
+        :class="{ active: section === 'api' }"
+        @click="setSection('api')"
+      >
+        API 调用
       </button>
     </div>
     <template v-if="section === 'conversation'">
@@ -303,7 +308,7 @@
         </button>
       </el-dialog>
     </template>
-    <template v-else
+    <template v-else-if="section === 'event'"
       ><div class="toolbar task-action-bar">
         <strong class="task-action-summary"
           >{{ activeEvents.length }} 个自主任务 ·
@@ -415,6 +420,11 @@
         :expert="expert"
         @workspace="$emit('workspace', $event)"
     /></template>
+    <external-api-runs
+      v-else-if="section === 'api'"
+      :key="expert.id"
+      :expert="expert"
+    />
     <el-dialog
       title="编辑名称"
       :visible.sync="cardRenameVisible"
@@ -500,15 +510,15 @@ import {
 } from "../im-chat-model";
 import ImChatDetail from "./ImChatDetail.vue";
 import EventTaskDetail from "./EventTaskDetail.vue";
+import ExternalApiRuns from "./ExternalApiRuns.vue";
 import { EVENT_SOURCE_TYPES, filterEventTasks } from "../event-task-model";
 export default {
   name: "DemoTaskOverview",
-  components: { ImChatDetail, EventTaskDetail },
+  components: { ImChatDetail, EventTaskDetail, ExternalApiRuns },
   props: { expert: { type: Object, required: true } },
   data() {
     return {
       state,
-      section: "conversation",
       keyword: "",
       statusFilter: "",
       archiveVisible: false,
@@ -536,6 +546,12 @@ export default {
     };
   },
   computed: {
+    section() {
+      const section = this.$route.query.section;
+      return ["im", "event", "api"].includes(section)
+        ? section
+        : "conversation";
+    },
     conversations() {
       return conversationsFor(this.expert.id);
     },
@@ -609,6 +625,13 @@ export default {
     },
   },
   methods: {
+    setSection(section) {
+      if (section === this.section) return;
+      const query = { ...this.$route.query };
+      if (section === "conversation") delete query.section;
+      else query.section = section;
+      this.$router.push({ query });
+    },
     chatIdentity,
     chatIdentifier,
     compactImId,

@@ -18,6 +18,10 @@ import {
 import { clearFiles, deleteFile } from "./file-db";
 import { createImDemoChats, createImWorkspaceItems } from "./im-fixtures";
 import {
+  createExternalApiFixtures,
+  createExternalApiFollowUpRuns,
+} from "./external-api-fixtures";
+import {
   createEventTaskFixtures,
   createEventWorkspaceItems,
 } from "./event-task-fixtures";
@@ -56,7 +60,7 @@ const clone = (value) => JSON.parse(JSON.stringify(value));
 const uid = (prefix) =>
   `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`;
 const now = () => new Date().toISOString();
-const DEMO_DATA_REVISION = 30;
+const DEMO_DATA_REVISION = 32;
 const HUMAN_REQUEST_TIMEOUT_DEMO_MS = 10_000;
 const TEXT_DEMO_TRIGGERS = new Set([
   "演示过程",
@@ -719,6 +723,7 @@ export function createSeed() {
       },
     ],
     imChats: createImDemoChats(),
+    ...createExternalApiFixtures(),
     eventRuns: createEventTaskFixtures(),
     projects: [
       {
@@ -782,6 +787,21 @@ export function createSeed() {
 export function upgradeExpertFixtures(saved) {
   const previousRevision = Number(saved.demoDataRevision || 1);
   if (previousRevision >= DEMO_DATA_REVISION) return saved;
+  if (previousRevision < 31) {
+    const expertIds = new Set(saved.experts.map((expert) => expert.id));
+    for (const [name, entries] of Object.entries(createExternalApiFixtures())) {
+      if (!Array.isArray(saved[name])) {
+        saved[name] = entries.filter((item) => expertIds.has(item.expertId));
+      }
+    }
+  }
+  if (previousRevision < 32 && Array.isArray(saved.externalApiRuns)) {
+    const known = new Set(saved.externalApiRuns.map((run) => run.id));
+    const followUps = createExternalApiFollowUpRuns(saved.externalApiRuns);
+    saved.externalApiRuns.push(
+      ...followUps.filter((run) => !known.has(run.id)),
+    );
+  }
   const seed = createSeed();
   const expertIds = new Set(ADDITIONAL_EXPERT_SPECS.map((item) => item.id));
   const templateIds = new Set(
@@ -1374,6 +1394,33 @@ export function eventsFor(expertId) {
   return state.eventRuns.filter((item) => item.expertId === expertId);
 }
 
+export function saveExternalApiKey(expertId, draft, keyId) {
+  const fields = {
+    name: draft.name.trim(),
+    description: draft.description.trim(),
+    expiresOn: draft.expiresOn || "",
+  };
+  if (keyId) {
+    const key = state.externalApiKeys.find(
+      (item) =>
+        item.expertId === expertId && item.id === keyId && !item.deletedAt,
+    );
+    if (!key) return;
+    Object.assign(key, fields);
+  } else {
+    state.externalApiKeys.unshift({
+      ...fields,
+      id: `key_${globalThis.crypto?.randomUUID?.() || uid("demo")}`,
+      expertId,
+      enabled: true,
+      createdAt: now(),
+      createdBy: "平台管理员",
+      deletedAt: null,
+    });
+  }
+  persist();
+}
+
 export function addExpert(form, templateId, copyExpertId = "") {
   const template = state.templates.find((item) => item.id === templateId);
   const source = copyExpertId
@@ -1467,6 +1514,15 @@ export function deleteExpert(id) {
   );
   state.imChats = state.imChats.filter((item) => item.expertId !== id);
   state.eventRuns = state.eventRuns.filter((item) => item.expertId !== id);
+  state.externalApiKeys = state.externalApiKeys.filter(
+    (item) => item.expertId !== id,
+  );
+  state.externalApiConversations = state.externalApiConversations.filter(
+    (item) => item.expertId !== id,
+  );
+  state.externalApiRuns = state.externalApiRuns.filter(
+    (item) => item.expertId !== id,
+  );
   persist();
 }
 export function publishTemplate(expertId) {

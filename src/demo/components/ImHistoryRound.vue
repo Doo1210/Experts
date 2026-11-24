@@ -49,7 +49,7 @@
         <button
           v-if="round.process.length"
           type="button"
-          :aria-expanded="expanded"
+          :aria-expanded="String(expanded)"
           @click="expanded = !expanded"
         >
           {{ statusLabel }}
@@ -63,41 +63,43 @@
           v-if="round.process.length && expanded"
           class="pc-process-steps demo-im-process-steps"
         >
-          <div
-            v-for="item in round.process"
-            :key="item.id"
-            :class="
-              item.role === 'notice'
-                ? 'pc-stage-line'
-                : item.role === 'interim'
-                  ? 'pc-process-interim-wrap'
-                  : 'pc-activity-group'
-            "
-          >
-            <template v-if="item.role === 'notice'">{{
-              item.content
-            }}</template>
-            <div
-              v-else-if="item.role === 'interim'"
-              class="pc-reply pc-process-interim"
+          <slot name="process" :items="round.process"
+            ><div
+              v-for="item in round.process"
+              :key="item.id"
+              :class="
+                item.role === 'notice'
+                  ? 'pc-stage-line'
+                  : item.role === 'interim'
+                    ? 'pc-process-interim-wrap'
+                    : 'pc-activity-group'
+              "
             >
-              <conversation-markdown :text="item.content" />
-            </div>
-            <details v-else class="demo-im-tool-detail">
-              <summary class="pc-activity-title">
-                处理经过：{{ item.title || "工具执行" }}
-                <i class="el-icon-arrow-right" />
-              </summary>
-              <div class="pc-activity-list">
-                <div class="pc-process-activity">
-                  <span class="pc-process-step-mark" aria-hidden="true" />
-                  <span class="pc-process-step-content">{{
-                    item.content
-                  }}</span>
-                </div>
+              <template v-if="item.role === 'notice'">{{
+                item.content
+              }}</template>
+              <div
+                v-else-if="item.role === 'interim'"
+                class="pc-reply pc-process-interim"
+              >
+                <conversation-markdown :text="item.content" />
               </div>
-            </details>
-          </div>
+              <details v-else class="demo-im-tool-detail">
+                <summary class="pc-activity-title">
+                  处理经过：{{ item.title || "工具执行" }}
+                  <i class="el-icon-arrow-right" />
+                </summary>
+                <div class="pc-activity-list">
+                  <div class="pc-process-activity">
+                    <span class="pc-process-step-mark" aria-hidden="true" />
+                    <span class="pc-process-step-content">{{
+                      item.content
+                    }}</span>
+                  </div>
+                </div>
+              </details>
+            </div></slot
+          >
         </div>
       </div>
       <div v-if="round.assistant && round.assistant.content" class="pc-reply">
@@ -161,9 +163,13 @@ export default {
     expertName: { type: String, required: true },
     avatar: { type: String, required: true },
     fileItems: { type: Array, default: () => [] },
+    collapseProcess: { type: Boolean, default: false },
   },
   data() {
-    return { expanded: this.round.assistant?.turnStatus === "running" };
+    return {
+      expanded:
+        !this.collapseProcess && this.round.assistant?.turnStatus === "running",
+    };
   },
   computed: {
     statusLabel() {
@@ -176,6 +182,8 @@ export default {
           interrupted: "已中断",
           failed: "处理失败",
           running: "处理中",
+          queued: "排队中",
+          canceled: "已取消",
         }[status] || "状态未确认"
       );
     },
